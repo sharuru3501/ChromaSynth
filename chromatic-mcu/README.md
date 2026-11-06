@@ -16,6 +16,7 @@ ModRetro の MCU ファームウェア([oss-chromatic-console-mcu](https://githu
 | `src/chlink_proto.[ch]` | 通信プロトコルの中核(符号化、スロットの解釈)。ESP-IDF に依存しない純粋な C。`build.sh` が `main/` にコピーする。ホストでテストできる(`make check-mcu`) |
 | `src/chlink_link.[ch]` | 通信タスクとコンソールコマンド(`link on/off/hello/sync/stat/hold`、`note`、`midi`)。**ROM がキーボード画面にいるときだけ送る**(`link on` を打つまで何も送らない) |
 | `test/` | ホストのテスト(Python 参照実装のベクトルとの照合)。`make -C chromatic-mcu/test check asan` |
+| `flash.sh <イメージ> <sha256 の先頭16桁>` | アプリの枠(`0x10000`)にだけ書く。ガード(sha256、ヘッダ、版 `0.13.8`、プロジェクト名、サイズ)と、書いた後の読み戻し・先頭領域の確認つき。**ユーザーの明示的な確認なしに実行しない** |
 | `build.sh` | v4.6 を取得 → パッチを当てる → ESP-IDF v5.3 でビルド。**書き込みはしない** |
 
 書き込みの安全手順は [../docs/MCU_FLASH_SAFETY.md](../docs/MCU_FLASH_SAFETY.md)。**書く前に必ずバックアップと復元のリハーサルを済ませること。** 本体の版は MCU 0.13.8 / FPGA 18.14 / FW 4.6 専用。
