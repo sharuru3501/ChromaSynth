@@ -13,8 +13,8 @@ What it checks:
   2. BLE <-> USB <-> OFF switching: `ble` shows "started" only in BLE mode, and the free heap goes down by the BLE stack in BLE mode
   3. after repeated BLE start/stop the free heap comes back (no leak)
   4. `m` (wired notes) is accepted in USB mode only
-  5. light sleep: in OFF mode, 25 s after boot, the console no longer answers (the CPU sleeps, the stock behaviour). The ESP32 is then
-     left asleep: press MENU on the Chromatic (or open the port again) to wake it.
+  5. light sleep: in OFF mode, 28 s after boot, the console no longer answers (the CPU sleeps, the stock behaviour). Then press MENU on
+     the Chromatic: the console must answer again, still in OFF (= it slept, it did not crash).
 """
 import argparse
 import glob
@@ -60,10 +60,13 @@ class MockPort:
         self.t0 = time.time()
         self.leak = 0
         self.packets = 0
+        self.woken = False
 
     def command(self, text, wait=0.8):
-        if time.time() - self.t0 > 25 and self.applied == "OFF":
+        if time.time() - self.t0 > 25 and self.applied == "OFF" and not self.woken:
             self.sleeping = True
+        if self.sleeping and time.time() - self.t0 > 32:
+            self.sleeping, self.woken = False, True      # the user pressed MENU
         if self.sleeping:
             return ""
         w = text.split()
@@ -140,45 +143,44 @@ def main():
     check("free heap in OFF mode is readable", base is not None, base)
     check("`ble` says the stack is not started in OFF", "NOT started" in port.command("ble"))
 
-    # BLE <-> USB <-> OFF
-    ble_heaps, off_heaps = [], []
+    def packets():
+        m = re.search(r"packets sent (\d+)", port.command("link stat", wait=1.2))
+        return int(m.group(1)) if m else None
+
+    # wired notes first: OFF still keeps the ESP32 awake during the 20 s after boot (the boot grace), so the console answers
+    p0 = packets()
+    port.command("m 90 3c 64", wait=0.2)
+    port.command("m 80 3c 00", wait=0.2)
+    time.sleep(0.4)
+    check("`m` is ignored in OFF mode (no packets queued or sent)", packets() == p0, p0)
+    mode_cmd(port, "ble")
+    port.command("m 90 3c 64", wait=0.2)
+    port.command("m 80 3c 00", wait=0.2)
+    time.sleep(0.4)
+    check("`m` is ignored in BLE mode (BLE and wired input are never both live)", packets() == p0, p0)
+
+    # BLE <-> USB (never OFF between cycles: after the boot grace OFF lets the ESP32 sleep and the console goes quiet)
+    usb_heaps, ble_heaps = [], []
     for i in range(a.cycles):
         ok = mode_cmd(port, "ble")
-        started = "started (init" in port.command("ble") and "NOT started" not in port.command("ble")
+        started = "NOT started" not in port.command("ble")
         h = heap_of(port)
         ble_heaps.append(h)
         check("cycle %d: BLE mode applied, the stack is started" % (i + 1), ok and started, h)
         ok = mode_cmd(port, "usb")
-        check("cycle %d: USB mode applied, the BLE stack is stopped" % (i + 1), ok and "NOT started" in port.command("ble"))
-        ok = mode_cmd(port, "off")
         h = heap_of(port)
-        off_heaps.append(h)
-        check("cycle %d: OFF mode applied" % (i + 1), ok, h)
-    if base and None not in ble_heaps and None not in off_heaps:
-        used = base - min(ble_heaps)
-        check("the BLE stack takes memory while it runs (expected about 60-110 KB)", 40000 < used < 130000, "%d B" % used)
-        drift = base - off_heaps[-1]
-        check("no leak: after %d BLE start/stop cycles the free heap is back within 4 KB of the start" % a.cycles, abs(drift) <= 4096,
-              "drift %+d B; heap after each OFF: %s" % (-drift, off_heaps))
-        trend = off_heaps[0] - off_heaps[-1]
-        check("... and it does not shrink steadily from cycle to cycle", trend <= 1024, "first - last = %+d B" % trend)
+        usb_heaps.append(h)
+        check("cycle %d: USB mode applied, the BLE stack is stopped" % (i + 1), ok and "NOT started" in port.command("ble"), h)
+    if None not in ble_heaps and None not in usb_heaps and usb_heaps:
+        used = usb_heaps[-1] - min(ble_heaps)
+        check("the BLE stack takes memory while it runs (expected about 30-110 KB)", 30000 < used < 130000, "%d B" % used)
+        steady = usb_heaps[0]
+        drift = steady - usb_heaps[-1]
+        check("no leak: after %d BLE start/stop cycles the free heap is back within 2 KB of the first stop" % a.cycles, abs(drift) <= 2048,
+              "drift %+d B; heap after each stop: %s" % (-drift, usb_heaps))
+        check("... and it does not shrink steadily from cycle to cycle", usb_heaps[0] - usb_heaps[-1] <= 1024, "first - last = %+d B" % (usb_heaps[0] - usb_heaps[-1]))
 
-    # wired notes
-    def packets():
-        m = re.search(r"packets sent (\d+)", port.command("link stat", wait=1.5))
-        return int(m.group(1)) if m else None
-
-    mode_cmd(port, "off")
-    p0 = packets()
-    port.command("m 90 3c 64", wait=0.3)
-    port.command("m 80 3c 00", wait=0.3)
-    time.sleep(0.5)
-    check("`m` is ignored in OFF mode (no packets queued or sent)", packets() == p0, p0)
-    mode_cmd(port, "ble")
-    port.command("m 90 3c 64", wait=0.3)
-    port.command("m 80 3c 00", wait=0.3)
-    time.sleep(0.5)
-    check("`m` is ignored in BLE mode (BLE and wired input are never both live)", packets() == p0, p0)
+    # wired notes in USB mode
     mode_cmd(port, "usb")
     time.sleep(3)
     p1 = packets()
@@ -189,16 +191,32 @@ def main():
     p2 = packets()
     print("INFO  USB mode, ROM on its KEYBOARD screen? packets sent before/after two notes: %s -> %s "
           "(they only increase if the ROM shows the keyboard screen and the link is armed)" % (p1, p2))
-    mode_cmd(port, "off")
 
-    # light sleep
+    # light sleep, and waking from it
+    heap_before = heap_of(port)
+    mode_cmd(port, "off")
     wait = max(0, 28 - (time.time() - t_boot))
-    print("INFO  OFF mode: waiting %.0f s for the 20 s boot grace to pass and the ESP32 to light-sleep..." % wait)
+    print("INFO  OFF mode: waiting %.0f s for the boot grace to pass and the ESP32 to light-sleep..." % wait)
     time.sleep(wait)
     out = port.command("mode", wait=3.0)
-    check("OFF mode: the console no longer answers (the ESP32 is light-sleeping, as in the stock firmware)", out.strip() == "",
-          repr(out.strip()[:40]))
-    print("The ESP32 is now asleep (stock behaviour). Press MENU on the Chromatic, or open the port again, to wake it.")
+    asleep = out.strip() == ""
+    check("OFF mode: the console no longer answers (the ESP32 is light-sleeping, as in the stock firmware)", asleep, repr(out.strip()[:40]))
+    if asleep and not a.mock:
+        print("NOW: press the MENU button on the Chromatic (the OSD menu should open). Waiting up to 60 s for the ESP32 to answer again...")
+    woke = False
+    if asleep:
+        for _ in range(30 if not a.mock else 6):
+            out = port.command("mode", wait=2.0)
+            if a.mock:
+                time.sleep(2)      # the real port waits for the answer; the mock returns at once
+            if "MIDI mode" in out:
+                woke = True
+                break
+        check("MENU woke it: the console answers again, still OFF, so it was asleep and not crashed", woke and "applied OFF" in out, out.strip()[:50])
+        if woke:
+            h = heap_of(port)
+            check("... and the free heap is unchanged by the sleep", h is not None and heap_before is not None and abs(h - heap_before) < 40000,
+                  "%s -> %s (USB mode before, OFF now: BLE already stopped in both)" % (heap_before, h))
     print()
     n_fail = results.count(False)
     print("ALL PASSED" if not n_fail else "%d FAILED" % n_fail)
