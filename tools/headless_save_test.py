@@ -68,9 +68,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("fresh: state untouched by failed load", mem[P] == 60)
 
     # --- edit and save
-    mem[P + 17] = 77
+    mem[P + 65] = 77
     mem[patch + 1] = 9
     mem[sym["wBpm"]] = 133
+    mem[sym["wSeqLen"]] = 48
     combo(pb, "select", "a")
     check("SELECT+A -> SAVED", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     pb.tick(100)
@@ -79,22 +80,23 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
-    check("slot has magic CSYN v1", raw[:5] == b"CSYN\x01", raw[:5])
+    check("slot has magic CSYN v2", raw[:5] == b"CSYN\x02", raw[:5])
 
     # --- reboot: restored automatically
     pb = boot(rom)
     mem = pb.memory
-    check("reboot: pattern restored", mem[P + 17] == 77, mem[P + 17])
+    check("reboot: pattern restored", mem[P + 65] == 77, mem[P + 65])
     check("reboot: patch restored", mem[patch + 1] == 9, mem[patch + 1])
     check("reboot: BPM restored", mem[sym["wBpm"]] == 133, mem[sym["wBpm"]])
-    check("reboot: untouched cells keep defaults", mem[P] == 60 and mem[P + 32] == 48)
+    check("reboot: loop length restored", mem[sym["wSeqLen"]] == 48, mem[sym["wSeqLen"]])
+    check("reboot: untouched cells keep defaults", mem[P] == 60 and mem[P + 128] == 48)
 
     # --- SELECT+B reloads the saved copy over unsaved edits
-    mem[P + 17] = 5
+    mem[P + 65] = 5
     mem[sym["wBpm"]] = 90
     combo(pb, "select", "b")
     check("SELECT+B -> LOADED", mem[sym["wMsg"]] == 2, mem[sym["wMsg"]])
-    check("SELECT+B restored the saved state", mem[P + 17] == 77 and mem[sym["wBpm"]] == 133)
+    check("SELECT+B restored the saved state", mem[P + 65] == 77 and mem[sym["wBpm"]] == 133)
     pb.stop(save=False)
 
     # --- corrupted data: checksum must reject it
@@ -103,8 +105,8 @@ with tempfile.TemporaryDirectory() as tmp:
     ram.write_bytes(bytes(data))
     pb = boot(rom)
     mem = pb.memory
-    check("corrupt save ignored at boot (defaults kept)", mem[P + 17] == 0 and mem[sym["wBpm"]] == 120,
-          (mem[P + 17], mem[sym["wBpm"]]))
+    check("corrupt save ignored at boot (defaults kept)", mem[P + 65] == 0 and mem[sym["wBpm"]] == 120,
+          (mem[P + 65], mem[sym["wBpm"]]))
     combo(pb, "select", "b")
     check("corrupt save: SELECT+B -> NO SAVE DATA", mem[sym["wMsg"]] == 3)
     pb.stop(save=False)
@@ -114,7 +116,7 @@ with tempfile.TemporaryDirectory() as tmp:
     data[4] = 0x7F
     ram.write_bytes(bytes(data))
     pb = boot(rom)
-    check("other save version ignored", pb.memory[P + 17] == 0)
+    check("other save version ignored", pb.memory[P + 65] == 0)
     pb.stop(save=False)
 
 # --- a cart without SRAM: the read-back check must report failure, not "SAVED"

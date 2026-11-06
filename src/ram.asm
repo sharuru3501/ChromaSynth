@@ -9,9 +9,24 @@ wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 SECTION "Patch", WRAM0, ALIGN[5]
 wPatch:         ds NUM_CH * PATCH_SIZE
 
-; Pattern: wPattern[channel * 16 + step]. 64-byte aligned for carry-free indexing.
-SECTION "Pattern", WRAM0, ALIGN[6]
+; Pattern: wPattern[channel * 64 + step]. 256-byte aligned: the low byte of an
+; address is simply channel * 64 + step (no carry handling anywhere).
+SECTION "Pattern", WRAM0, ALIGN[8]
 wPattern:       ds NUM_CH * SEQ_STEPS
+
+; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
+; rendered outside VBlank and copied to VRAM a few rows per frame.
+SECTION "Roll grid", WRAM0
+wGrid:          ds ROLL_ROWS * 20
+
+; 16 render flags, 16 copy flags, 16 column pitches, 16 head flags: 64 bytes, 64-byte
+; aligned so that base + index never carries into the high byte.
+SECTION "Roll flags", WRAM0, ALIGN[6]
+wRowRender:     ds ROLL_ROWS    ; row must be re-rendered into wGrid
+wRowDirty:      ds ROLL_ROWS    ; row must be copied to VRAM
+; Per column of the visible page: sounding pitch (0 = silence), then 1 = note head.
+wColPitch:      ds SEQ_PAGE
+wColHead:       ds SEQ_PAGE
 
 SECTION "Synth state", WRAM0, ALIGN[3]
 wBase:          ds NUM_CH * 2   ; base period of the sounding note (lo, hi)
@@ -43,11 +58,20 @@ wSeqStep:       db          ; next step to play (0..15)
 wSeqCur:        db          ; step that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
-wSeqRow:        db          ; cursor on the sequencer screen
-wSeqCh:         db
-wSeqNote:       db          ; note inserted by A on the sequencer screen
+wSeqLen:        db          ; loop length in steps (16/32/48/64)
 wSelUsed:       db          ; SELECT was used as a modifier while held
-wDirtySeq:      dw          ; sequencer rows needing redraw (bit per row)
+wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
+wRollStep:      db          ; piano-roll cursor: step 0..63
+wRollNote:      db          ; piano-roll cursor: MIDI note
+wRollTop:       db          ; pitch shown on the top grid row
+wRollPage:      db          ; visible page (first step = page * 16)
+wFollow:        db          ; 1 = the view follows the playhead
+wPlayCol:       db          ; column the playhead sprite is drawn at ($FF = hidden)
+wOldNote:       db          ; cursor pitch before the last move
+wRRPitch:       db          ; RenderRow scratch
+wRRBlack:       db
+wRRCur:         db
+wSaveSum:       db          ; SaveAll running checksum
 wMsg:           db          ; message code shown on row 17 (0 = none)
 wMsgTimer:      db
 wVibM:          db          ; scratch for the vibrato tick

@@ -1,18 +1,19 @@
 ; Save/load patches, pattern and BPM to cartridge SRAM (MBC5, 8 KB).
 ;
 ; Slot layout at $A000:
-;   +0  "CSYN"   magic
-;   +4  version  (SAVE_VERSION)
-;   +5  wPatch   (NUM_CH * PATCH_SIZE bytes)
-;   +37 wPattern (NUM_CH * SEQ_STEPS bytes)
-;   +101 wBpm
-;   +102 checksum = (sum of the data bytes) xor $A5
+;   +0   "CSYN"   magic
+;   +4   version  (SAVE_VERSION)
+;   +5   wPatch   (NUM_CH * PATCH_SIZE bytes)
+;   +37  wPattern (NUM_CH * SEQ_STEPS bytes)
+;   +293 wBpm
+;   +294 wSeqLen
+;   +295 checksum = (sum of the data bytes) xor $A5
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 1
-DEF SAVE_DATA_LEN EQU NUM_CH * PATCH_SIZE + NUM_CH * SEQ_STEPS + 1
+DEF SAVE_VERSION  EQU 2
+DEF SAVE_DATA_LEN EQU NUM_CH * PATCH_SIZE + NUM_CH * SEQ_STEPS + 2
 
 SECTION "SRAM", ROM0
 
@@ -30,23 +31,30 @@ SramClose:
     ld [rRAMG], a           ; disabling protects the save from stray writes
     ret
 
-; hl = src, de = dst, b = count, c = running sum. Clobbers a.
+; hl = src, de = dst, bc = count (>0). Copies while adding the bytes to wSaveSum.
 CopySum:
     ld a, [hl+]
     ld [de], a
     inc de
-    add c
-    ld c, a
-    dec b
+    push hl
+    ld hl, wSaveSum
+    add [hl]
+    ld [hl], a
+    pop hl
+    dec bc
+    ld a, b
+    or c
     jr nz, CopySum
     ret
 
-; hl = src, de = dst, b = count. Clobbers a.
+; hl = src, de = dst, bc = count (>0).
 CopyBytes:
     ld a, [hl+]
     ld [de], a
     inc de
-    dec b
+    dec bc
+    ld a, b
+    or c
     jr nz, CopyBytes
     ret
 
@@ -54,21 +62,25 @@ CopyBytes:
 ; -> carry set if the slot does not validate (e.g. the cart has no SRAM).
 SaveAll:
     call SramOpen
+    xor a
+    ld [wSaveSum], a
     ld de, _SRAM
     ld hl, SaveMagic
-    ld b, 5
+    ld bc, 5
     call CopyBytes
-    ld c, 0
     ld hl, wPatch
-    ld b, NUM_CH * PATCH_SIZE
+    ld bc, NUM_CH * PATCH_SIZE
     call CopySum
     ld hl, wPattern
-    ld b, NUM_CH * SEQ_STEPS
+    ld bc, NUM_CH * SEQ_STEPS
     call CopySum
     ld hl, wBpm
-    ld b, 1
+    ld bc, 1
     call CopySum
-    ld a, c
+    ld hl, wSeqLen
+    ld bc, 1
+    call CopySum
+    ld a, [wSaveSum]
     xor $A5
     ld [de], a
     call ValidateSave
@@ -83,13 +95,16 @@ LoadAll:
     call ValidateSave       ; -> hl = start of the data
     jr c, .bad
     ld de, wPatch
-    ld b, NUM_CH * PATCH_SIZE
+    ld bc, NUM_CH * PATCH_SIZE
     call CopyBytes
     ld de, wPattern
-    ld b, NUM_CH * SEQ_STEPS
+    ld bc, NUM_CH * SEQ_STEPS
     call CopyBytes
     ld de, wBpm
-    ld b, 1
+    ld bc, 1
+    call CopyBytes
+    ld de, wSeqLen
+    ld bc, 1
     call CopyBytes
     call SramClose
     and a                   ; clear carry
@@ -114,17 +129,19 @@ ValidateSave:
     dec b
     jr nz, .magic
     push hl
-    ld c, 0
-    ld b, SAVE_DATA_LEN
+    ld de, 0                ; d = running sum (e unused)
+    ld bc, SAVE_DATA_LEN
 .sum:
     ld a, [hl+]
-    add c
-    ld c, a
-    dec b
+    add d
+    ld d, a
+    dec bc
+    ld a, b
+    or c
     jr nz, .sum
     ld a, [hl]              ; stored checksum
     xor $A5
-    cp c
+    cp d
     pop hl
     jr nz, .bad
     and a                   ; clear carry
@@ -152,8 +169,7 @@ DoLoad:
     ld [wDirty], a
     ld a, $FF
     ld [wDirtyEdit], a
-    ld [wDirtySeq], a
-    ld [wDirtySeq + 1], a
+    call RollRefresh        ; piano roll: rebuild columns and redraw every row
     ld a, MSG_LOADED
     ; fall through
 

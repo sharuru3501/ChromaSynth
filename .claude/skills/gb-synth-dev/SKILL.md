@@ -51,6 +51,13 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - 保存は必ず読み戻して検証する(SRAM無しカートは $FF が返る)。
 - PyBoy は `stop(save=True)` で `<rom>.ram` を書く。テストは一時ディレクトリにROMをコピーして使う。
 
+## 描画/VBlank メモ
+- VBlank=LY144-153(約1140サイクル)。1行コピーは展開済みで約120サイクル、16個のOAM書き込みで約160-290サイクル。
+- 超過するとSameBoy/実機では書き込みが捨てられ、更新されなかったタイルが画面に残る(PyBoyでは再現しない)。必ず LY で測る。
+- `jr` の届かない遠い分岐は `jp`。`add LOW(label)` で下位バイトだけ足す索引は、そのラベルが十分大きい境界(ALIGN)にある時だけ桁上げなしで使える。
+- 反転フォント: タイル番号に128を足す(`TILE_INV`)。ピアノロール用タイルは `tools/gen_font.py` の `ROLL_TILES` で絵を定義。
+- スプライト: OAMはVBlank中のみ書ける。起動時にOAMをクリアしないとゴミスプライトが出る(`BuildScreen`)。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

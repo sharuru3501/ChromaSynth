@@ -38,8 +38,12 @@ EntryPoint:
     call MemCopy
     ld a, 120
     ld [wBpm], a
-    ld a, 60
-    ld [wSeqNote], a
+    ld a, 32
+    ld [wSeqLen], a
+    ld a, 60                ; piano-roll cursor starts on C4, window C5..C#4... (top = 72)
+    ld [wRollNote], a
+    ld a, 72
+    ld [wRollTop], a
     call LoadAll            ; restore the last save if there is one (else keep defaults)
 
     ; --- LCD off (only legal during VBlank), build the screen
@@ -53,7 +57,7 @@ EntryPoint:
     ld a, %11100100
     ldh [rBGP], a           ; DMG palette
     call InitPalette        ; CGB palette (the CGB boots with white palette RAM)
-    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01
+    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01 | LCDCF_OBJON
     ldh [rLCDC], a
 
     ; --- APU on, all channels to both speakers, max master volume
@@ -106,6 +110,7 @@ MainLoop:
 .noBoot:
     call ReadJoy
     call HandleJoy
+    call RenderPending      ; piano roll rows are rendered outside VBlank
     jr MainLoop
 
 ; ---------------------------------------------------------------- ISRs
@@ -137,21 +142,37 @@ SerialISR:
     reti
 
 ; ---------------------------------------------------------------- utils
-; BG palette 0 for CGB mode: white, light gray, dark gray, black.
-; Harmless on DMG (the registers are ignored). LCD must be off.
+; CGB palettes (the CGB boots with white palette RAM). Harmless on DMG (the
+; registers are ignored; BGP/OBP0 are set separately). LCD must be off.
+;   BG  0: white, pale blue, mid blue, navy (grid, notes and text)
+;   OBJ 0: transparent, red, red, red (playhead line)
 InitPalette:
+    ld a, %11100100
+    ldh [rOBP0], a
     ld a, $80               ; index 0, auto-increment
     ldh [rBCPS], a
     ld hl, BGPalette
     ld b, 8
-.l: ld a, [hl+]
+.bg:
+    ld a, [hl+]
     ldh [rBCPD], a
     dec b
-    jr nz, .l
+    jr nz, .bg
+    ld a, $80
+    ldh [rOCPS], a
+    ld hl, OBJPalette
+    ld b, 8
+.obj:
+    ld a, [hl+]
+    ldh [rOCPD], a
+    dec b
+    jr nz, .obj
     ret
 
 BGPalette:
-    dw $7FFF, $56B5, $294A, $0000   ; RGB555
+    dw $7FFF, $7B79, $620C, $2062   ; RGB555
+OBJPalette:
+    dw $7FFF, $18DF, $18DF, $18DF
 
 ; hl = dest, bc = length (>0)
 MemClear:

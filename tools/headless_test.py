@@ -27,6 +27,23 @@ for line in (root / "build/chromasynth.sym").read_text().splitlines():
 
 pb = PyBoy(rom, window="null", sound_emulated=False)
 mem = pb.memory
+
+# --- VBlank budget: UpdateUI (VRAM/OAM writes) must finish before VBlank ends,
+# otherwise real hardware drops the late writes and leaves stale tiles on screen.
+vb_entry = []   # (wScreenReq, LY) at UpdateUI entry
+vb_exit = []    # LY when UpdateUI returned (VoiceTick is the next call)
+
+
+def _hook_entry(ctx):
+    vb_entry.append((mem[sym["wScreenReq"]], mem[0xFF44]))
+
+
+def _hook_exit(ctx):
+    vb_exit.append(mem[0xFF44])
+
+
+pb.hook_register(0, sym["UpdateUI"], _hook_entry, None)
+pb.hook_register(0, sym["VoiceTick"], _hook_exit, None)
 fails = 0
 
 
@@ -181,7 +198,7 @@ after = mem[sym["wOut"] + 2] | (mem[sym["wOut"] + 3] << 8)
 check("depth 0 -> no vibrato updates", before == after)
 midi(0x81, 69, 0)
 
-# --- sequencer screen
+# --- piano roll
 def hold(*btns, frames=3):
     for b in btns:
         pb.button_press(b)
@@ -207,86 +224,236 @@ def tap_while(held, btn):
 
 
 P = sym["wPattern"]
+G = sym["wGrid"]
+T_EMP_W, T_NOTE_HEAD, T_NOTE_BODY, T_CUR_EMP, T_CUR_NOTE = 64, 68, 69, 70, 71
+
+
+def cell(ch, step):
+    return mem[P + ch * 64 + step]
+
+
+def grid(row, col):
+    """Tile in the shadow map: grid row 0..15, step column 0..15."""
+    return mem[G + row * 20 + 2 + col]
+
+
+def v(name):
+    return mem[sym[name]]
+
+
+def settle():
+    pb.tick(10)  # rendering and copying are spread over a few frames
+
+
 press("start")
 pb.tick(4)
-check("START -> sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
-shot("09_seq")
-check("default pattern: CH1 step0 = C4, CH3 step0 = C3",
-      mem[P] == 60 and mem[P + 32] == 48 and mem[P + 2] == 0xFF)
-press("down")
-check("DOWN moves cursor row", mem[sym["wSeqRow"]] == 1)
+check("START -> piano roll", v("wScreen") == 2, v("wScreen"))
+settle()
+shot("09_roll")
+check("demo pattern: CH1 C4 / OFF, CH1 page 2 starts with A3, CH3 bass",
+      cell(0, 0) == 60 and cell(0, 2) == 0xFF and cell(0, 16) == 57 and cell(2, 0) == 48)
+check("defaults: loop 32, cursor C4 step 0, window top C5",
+      (v("wSeqLen"), v("wRollNote"), v("wRollStep"), v("wRollTop")) == (32, 60, 0, 72),
+      (v("wSeqLen"), v("wRollNote"), v("wRollStep"), v("wRollTop")))
+# top = 72 -> grid row r shows pitch 72 - r: C4 (60) is row 12, E4 (64) row 8, G4 (67) row 5
+check("grid: cursor on the C4 note head", grid(12, 0) == T_CUR_NOTE, grid(12, 0))
+check("grid: note body follows the head", grid(12, 1) == T_NOTE_BODY, grid(12, 1))
+check("grid: E4 head at step 4", grid(8, 4) == T_NOTE_HEAD, grid(8, 4))
+check("grid: empty white-key cell", grid(12, 2) == T_EMP_W, grid(12, 2))
+check("grid: black-key row is shaded (+1)", grid(11, 2) == T_EMP_W + 1, grid(11, 2))
+check("grid: beat column marked (+2)", grid(10, 4) == T_EMP_W + 2, grid(10, 4))
+
 press("right")
-check("RIGHT moves cursor channel", mem[sym["wSeqCh"]] == 1)
-cell = P + 16 * 1 + 1
-press("b")
-check("B: empty -> OFF", mem[cell] == 0xFF, mem[cell])
-press("b")
-check("B: OFF -> empty", mem[cell] == 0, mem[cell])
+check("RIGHT: cursor step 1", v("wRollStep") == 1)
+settle()
+check("cursor moved onto the note body", grid(12, 1) == T_CUR_NOTE and grid(12, 0) == T_NOTE_HEAD,
+      (grid(12, 0), grid(12, 1)))
+press("up")
+check("UP: cursor pitch 61", v("wRollNote") == 61)
+settle()
+check("cursor on an empty cell", grid(11, 1) == T_CUR_EMP, grid(11, 1))
+press("down")
+press("left")
+check("back at C4 step 0", (v("wRollNote"), v("wRollStep")) == (60, 0))
+
+# B + d-pad jumps and must not delete anything
+hold("b")
+press("right")
+press("right")
+release("b", frames=4)
+check("B+RIGHT jumps 4 steps", v("wRollStep") == 8, v("wRollStep"))
+check("B+d-pad did not delete the note", cell(0, 0) == 60 and cell(0, 4) == 64)
+hold("b")
+press("right")
+press("right")
+release("b", frames=4)
+check("page scroll: step 16 -> page 2", (v("wRollStep"), v("wRollPage")) == (16, 1), (v("wRollStep"), v("wRollPage")))
+settle()
+check("page 2: A3 head at column 0 (row 15), cursor empty at C4",
+      grid(15, 0) == T_NOTE_HEAD and grid(12, 0) == T_CUR_EMP, (grid(15, 0), grid(12, 0)))
+hold("b")
+press("left")
+press("left")
+release("b", frames=4)
+check("page scroll back", (v("wRollStep"), v("wRollPage")) == (8, 0))
+press("left")
+for _ in range(7):
+    press("left")
+check("cursor at step 0", v("wRollStep") == 0)
+hold("b")
+press("up")
+release("b", frames=4)
+check("B+UP: octave up, still in the window", (v("wRollNote"), v("wRollTop")) == (72, 72), (v("wRollNote"), v("wRollTop")))
+hold("b")
+press("up")
+release("b", frames=4)
+check("pitch scroll up: window follows", (v("wRollNote"), v("wRollTop")) == (84, 84), (v("wRollNote"), v("wRollTop")))
+hold("b")
+press("down")
+press("down")
+release("b", frames=4)
+check("pitch scroll down: window follows", (v("wRollNote"), v("wRollTop")) == (60, 75), (v("wRollNote"), v("wRollTop")))
+settle()
+
+# ---- editing on CH2 (empty channel)
+press("select")
+check("SELECT tap -> channel 2 on the roll", v("wSelCh") == 1)
+settle()
 hold("a", frames=4)
-check("A inserts the current note", mem[cell] == 60, mem[cell])
-check("A auditions on the cursor channel", cur(1) == 60, cur(1))
-hold("up")
-release("up")
-check("A+UP: +1 semitone", mem[cell] == 61 and mem[sym["wSeqNote"]] == 61, mem[cell])
-hold("left")
-release("left")
-check("A+LEFT: -1 octave", mem[cell] == 49, mem[cell])
+check("A places a note at the cursor", cell(1, 0) == 60, cell(1, 0))
+check("...with a one-step length (OFF after it)", cell(1, 1) == 0xFF, cell(1, 1))
+check("A auditions on CH2", cur(1) == 60, cur(1))
+press("right")  # ignored while A is held? no: right while A held lengthens
+check("A held + RIGHT lengthens: OFF moved to step 2", cell(1, 1) == 0 and cell(1, 2) == 0xFF, (cell(1, 1), cell(1, 2)))
+press("left")
+check("A held + LEFT shortens: OFF back at step 1", cell(1, 2) == 0 and cell(1, 1) == 0xFF, (cell(1, 1), cell(1, 2)))
 release("a", frames=4)
-check("A release stops the audition", cur(1) == 0, cur(1))
-pb.tick(2)
-shot("10_seq_edit")
+check("A release stops the audition", cur(1) == 0)
+hold("a", frames=4)
+press("up")
+check("A held + UP transposes the note and the cursor", cell(1, 0) == 61 and v("wRollNote") == 61, (cell(1, 0), v("wRollNote")))
+press("down")
+check("A held + DOWN transposes back", cell(1, 0) == 60 and v("wRollNote") == 60)
+release("a", frames=4)
+settle()
+check("grid: the new note is drawn (cursor on its head)", grid(15, 0) == T_CUR_NOTE, grid(15, 0))
 press("b")
-check("B on a note clears it", mem[cell] == 0, mem[cell])
+check("B tap deletes the note and its OFF", cell(1, 0) == 0 and cell(1, 1) == 0, (cell(1, 0), cell(1, 1)))
 
+# collision: a note that grows until it touches the next one
+hold("a", frames=4)
+release("a", frames=4)
+press("right")
+press("right")
+hold("a", frames=4)
+release("a", frames=4)
+check("two notes on CH2 (steps 0 and 2)", cell(1, 0) == 60 and cell(1, 2) == 60 and cell(1, 1) == 0xFF)
+press("left")
+press("left")
+hold("a", frames=4)
+press("right")
+check("growing into the next note removes the OFF (they touch)", cell(1, 1) == 0 and cell(1, 2) == 60, (cell(1, 1), cell(1, 2)))
+press("right")
+check("cannot grow past the next note", cell(1, 2) == 60 and cell(1, 3) == 0xFF, (cell(1, 2), cell(1, 3)))
+release("a", frames=4)
+press("b")
+check("deleting the first note keeps the neighbour", cell(1, 0) == 0 and cell(1, 2) == 60)
+for i in range(64):
+    mem[P + 64 + i] = 0     # clean up CH2
+press("select")             # CH3 (bass): the cursor jumps to its first note
+check("channel switch: cursor on the first bass note", (v("wRollNote"), v("wRollStep"), v("wRollTop")) == (48, 0, 56),
+      (v("wRollNote"), v("wRollStep"), v("wRollTop")))
+settle()
+check("channel switch: bass note drawn in the window", grid(8, 0) == T_CUR_NOTE, grid(8, 0))
+press("select")             # CH4, then back to CH1
+press("select")
+check("SELECT cycles channels back to CH1", v("wSelCh") == 0)
+settle()
+
+# ---- BPM / loop length
 tap_while("select", "up")
-check("SELECT+UP: BPM 121", mem[sym["wBpm"]] == 121, mem[sym["wBpm"]])
+check("SELECT+UP: BPM 121", v("wBpm") == 121, v("wBpm"))
+tap_while("select", "down")
+check("SELECT+DOWN: BPM 120", v("wBpm") == 120, v("wBpm"))
 tap_while("select", "left")
-check("SELECT+LEFT: BPM 111", mem[sym["wBpm"]] == 111, mem[sym["wBpm"]])
-check("SELECT combo did not change screen/channel", mem[sym["wScreen"]] == 2 and mem[sym["wSelCh"]] == 0)
-mem[sym["wBpm"]] = 120
+check("SELECT+LEFT: loop length 16", v("wSeqLen") == 16, v("wSeqLen"))
+tap_while("select", "left")
+check("loop length clamps at 16", v("wSeqLen") == 16)
+tap_while("select", "right")
+tap_while("select", "right")
+check("SELECT+RIGHT x2: loop length 48", v("wSeqLen") == 48, v("wSeqLen"))
+tap_while("select", "left")
+check("loop length 32 again", v("wSeqLen") == 32)
+check("combos did not change screen/channel", v("wScreen") == 2 and v("wSelCh") == 0)
 
-# playback: SELECT held, tap START
+# ---- playback
 tap_while("select", "start")
-check("SELECT+START starts playback", mem[sym["wSeqPlay"]] == 1)
-check("still on the sequencer screen", mem[sym["wScreen"]] == 2)
+check("SELECT+START starts playback", v("wSeqPlay") == 1)
+check("...still on the roll", v("wScreen") == 2)
 steps = 0
-last = mem[sym["wSeqStep"]]
+last = v("wSeqStep")
 bass = set()
+heads = []
 for i in range(120):
     pb.tick(1)
-    s_ = mem[sym["wSeqStep"]]
+    s_ = v("wSeqStep")
     if s_ != last:
         steps += 1
         last = s_
     bass.add(cur(2))
+    if v("wPlayCol") != 0xFF:
+        heads.append((v("wSeqCur") & 15, v("wPlayCol")))
     if i == 30:
-        shot("11_seq_playing")
+        shot("10_roll_playing")
 check("tempo: 16 steps in 2 s at 120 BPM", 15 <= steps <= 17, steps)
-check("bass notes triggered by the pattern", {48, 43} <= bass, sorted(bass))
+check("bass notes triggered by the pattern (steps 8 and 16)", {43, 45} <= bass, sorted(bass))
 check("hi-hat (CH4) triggered", cur(3) in (90, 100), cur(3))
+# the sprite is moved in the VBlank after the step plays, so it may lag by one frame
+exact = sum(1 for a, b in heads if a == b)
+near = all(a == b or (a - 1) % 16 == b for a, b in heads)
+check("playhead sprite follows the played step", len(heads) > 50 and near and exact >= 0.8 * len(heads),
+      (exact, len(heads)))
+oam_x = mem[0xFE01]
+check("playhead sprite is placed in OAM", mem[0xFE00] == 24 and oam_x == 24 + 8 * v("wPlayCol"), (mem[0xFE00], oam_x))
+check("16 playhead sprites stacked on the grid rows", mem[0xFE00 + 15 * 4] == 24 + 15 * 8 and mem[0xFE02] == 72)
 tap_while("select", "start")
-check("SELECT+START stops playback", mem[sym["wSeqPlay"]] == 0)
-check("stop silences all channels", [cur(c) for c in range(4)] == [0, 0, 0, 0], [cur(c) for c in range(4)])
+check("SELECT+START stops playback", v("wSeqPlay") == 0)
+check("stop silences all channels", [cur(c) for c in range(4)] == [0, 0, 0, 0])
+pb.tick(4)
+check("playhead hidden while stopped", v("wPlayCol") == 0xFF and mem[0xFE00] == 0)
 
-# tempo scales: 240 BPM -> twice as many steps
+# 240 BPM: loops over 32 steps, view follows the playhead across pages
 mem[sym["wBpm"]] = 240
+mem[sym["wRollStep"]] = 0
 tap_while("select", "start")
-steps = 0
-last = mem[sym["wSeqStep"]]
-for _ in range(60):
+seen = set()
+pages = set()
+for _ in range(200):
     pb.tick(1)
-    s_ = mem[sym["wSeqStep"]]
-    if s_ != last:
-        steps += 1
-        last = s_
-check("tempo: 16 steps in 1 s at 240 BPM", 15 <= steps <= 17, steps)
+    seen.add(v("wSeqStep"))
+    if v("wSeqCur") >= 16:
+        pages.add(v("wRollPage"))
+check("loop: steps wrap inside 0..31", max(seen) == 31 and 0 in seen, (min(seen), max(seen)))
+check("view followed the playhead onto page 2", 1 in pages, pages)
 tap_while("select", "start")
 
 press("start")
 pb.tick(4)
-check("START -> back to play screen", mem[sym["wScreen"]] == 0, mem[sym["wScreen"]])
+check("START -> back to play screen", v("wScreen") == 0, v("wScreen"))
 pb.tick(20)
 shot("12_play_again")
+
+# Frames that entered after LY 146 (or outside VBlank) are skipped by UpdateUI's own
+# guard and draw nothing; screen switches turn the LCD off/on (LY restarts): ignore both.
+frames = list(zip(vb_entry, vb_exit))
+worked = [(ly_out) for (req, ly_in), ly_out in frames if req == 0 and 144 <= ly_in < 147]
+skipped = sum(1 for (req, ly_in), _ in frames if req == 0 and not (144 <= ly_in < 147))
+late = [ly for ly in worked if ly < 144]
+check("UpdateUI finishes inside VBlank on every frame it draws",
+      len(worked) > 500 and not late and max(worked) <= 151,
+      f"{len(worked)} frames, {len(late)} late, worst exit LY {max(worked)}")
+check("frames skipped for entering VBlank too late are rare", skipped <= 0.02 * len(frames),
+      f"{skipped} of {len(frames)}")
 
 pb.stop(save=False)
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")

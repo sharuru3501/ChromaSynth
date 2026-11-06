@@ -28,8 +28,15 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
   - CH1: duty vol env swt swd sws vibd vibs / CH2: duty vol env - - - vibd vibs / CH3: wave level - - - - vibd vibs / CH4: width vol env - - - - -
   - `wPatch` は32バイト境界に置き、オフセット加算が桁上げしない前提でコードを書いている。
 - ビブラート: 毎フレーム(VoiceTick)、発音中の CH1-3 の period を三角波で ±off。off は (2048-period) に比例させて音程に依存せず一定のセント幅になるよう近似。
-- 画面: Play/Edit の2画面。画面切替は VBlank 直後に LCD を一瞬オフにして BG マップを作り直す。
-- Pattern(実装済み, `wPattern`): 16ステップ × 4ch の1バイトセル。0=空, $FF=ノートオフ, それ以外=MIDIノート。`wPattern[ch*16+step]`(64バイト境界)。
+- 画面: Play / Edit / Roll の3画面。画面切替は VBlank 直後に LCD を一瞬オフにして BG マップを作り直す。
+- ピアノロールの描画(`src/roll.asm`): VBlank は約1140サイクルしかないので2段構え。
+  1. メインループ(VBlank外)で `RenderPending` が最大4行を `wGrid`(シャドウタイルマップ)に描き、コピー要求フラグを立てる。
+  2. VBlank直後に `UpdateSeq` が最大2行(再生ヘッドが動いたフレームは1行)をVRAMへコピーし、再生ヘッドのスプライトを動かす。
+  変更が起きたら `MarkRowRender`/`MarkAllRender` で行にフラグを立てるだけ。画面は数フレームで追いつく。
+  表示ページの各列「鳴っている音程」は `BuildCols` が先に要約(`wColPitch`/`wColHead`)するので、行の描画は表引きだけで済む。
+- `UpdateUI` は入口で LY を見て、VBlank序盤(144〜146)でなければそのフレームの描画を見送る(フラグ駆動なので次フレームに回るだけ)。
+- 再生ヘッド: スプライト16個を縦に並べた赤い線。移動時はX座標だけ書き換える。BG/OBJ パレットは `InitPalette`。
+- Pattern(実装済み, `wPattern`): 最大64ステップ × 4ch の1バイトセル。0=空, $FF=ノートオフ, それ以外=MIDIノート。`wPattern[ch*64+step]`(256バイト境界なのでアドレス下位バイト=ch*64+step)。再生ループ長は `wSeqLen`(16〜64)。
 - シーケンサのタイミング: 毎フレーム 8.8固定小数のアキュムレータに +1.0。BPMごとの「16分音符=何フレーム」を `TempoTable`(`tools/gen_tempo.py` 生成)から引き、超えたら1ステップ進める。GBのフレーム周波数は59.7275Hz。最短でも3.7フレームなので1フレームに複数ステップは来ない。
 - 将来 MIDI clock 同期(M6)をする時は、このアキュムレータの代わりに 24ppqn のクロック数でステップを進める。
 - Song: パターン番号の並び(未実装)

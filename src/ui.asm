@@ -35,6 +35,11 @@ BuildScreen:
     ld hl, _SCRN0
     ld bc, 32 * 32
     call MemClear           ; tile 0 = space
+    ld hl, _OAMRAM          ; no sprites except on the piano roll
+    ld bc, 160
+    call MemClear
+    ld a, $FF
+    ld [wPlayCol], a
     ld a, [wScreen]
     and a
     jr z, .play
@@ -95,8 +100,16 @@ DrawString:
     ld [hl+], a
     jr DrawString
 
-; Called once per frame right after VBlank starts.
+; Called once per frame right after VBlank starts. VRAM/OAM are only writable
+; during VBlank (LY 144-153, ~1140 cycles) and the jobs below need up to ~700,
+; so if we got here late (the previous frame's work ran long) skip this frame:
+; every job is driven by dirty flags, so it simply happens next frame.
 UpdateUI:
+    ldh a, [rLY]
+    cp 144
+    ret c                   ; not in VBlank at all
+    cp 147
+    ret nc                  ; too little VBlank left
     ld a, [wScreenReq]
     and a
     jr z, .noReq
@@ -108,7 +121,7 @@ UpdateUI:
     xor a
     ldh [rLCDC], a
     call BuildScreen
-    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01
+    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01 | LCDCF_OBJON
     ldh [rLCDC], a
     ret
 .noReq:
@@ -438,174 +451,6 @@ NibbleTile:
     add '0' - 32
     ret
 
-; ---------------------------------------------------------------- sequencer screen
-;   row 0      header        row 1-16  one step per row      row 17  status
-;   ">" playhead, step digit, then per channel a 3-char cell with the cursor
-;   shown as [ ] around it.
-BuildSeq:
-    ld hl, _SCRN0
-    ld de, sSeqHeader
-    call DrawString
-    ld hl, _SCRN0 + 17 * 32 + 5
-    ld de, sBpm
-    call DrawString
-    ld b, 0
-.row:
-    push bc
-    call DrawSeqRow
-    pop bc
-    inc b
-    ld a, b
-    cp SEQ_STEPS
-    jr c, .row
-    call DrawSeqStatus
-    xor a
-    ld [wDirty], a
-    ld [wDirtySeq], a
-    ld [wDirtySeq + 1], a
-    ret
-
-UpdateSeq:
-    ld a, [wDirty]
-    bit 4, a
-    jr z, .rows
-    res 4, a
-    ld [wDirty], a
-    jp DrawSeqStatus
-.rows:
-    ld c, 0
-.scan:
-    ld a, c
-    cp SEQ_STEPS
-    ret nc
-    and 7
-    ld e, a
-    ld d, 0
-    ld hl, DirtyBits
-    add hl, de
-    ld b, [hl]              ; bit mask of this row
-    ld hl, wDirtySeq
-    bit 3, c
-    jr z, .lo
-    inc hl
-.lo:
-    ld a, [hl]
-    and b
-    jr nz, .found
-    inc c
-    jr .scan
-.found:
-    ld a, b
-    cpl
-    and [hl]
-    ld [hl], a              ; clear the bit
-    ld b, c
-    ; fall through
-
-; b = step row 0..15
-DrawSeqRow:
-    ld a, b
-    swap a
-    ld l, a
-    ld h, 0
-    add hl, hl              ; row * 32
-    ld de, _SCRN0 + 32
-    add hl, de
-    ld a, [wSeqPlay]        ; col 0: playhead
-    and a
-    jr z, .nohead
-    ld a, [wSeqCur]
-    cp b
-    jr nz, .nohead
-    ld a, '>' - 32
-    jr .head
-.nohead:
-    xor a
-.head:
-    ld [hl+], a
-    ld a, b                 ; col 1: step number
-    call NibbleTile
-    ld [hl+], a
-    ld c, 0
-.cell:
-    ld a, c
-    call SeqGap
-    ld a, c
-    swap a
-    add b
-    add LOW(wPattern)
-    ld e, a
-    ld d, HIGH(wPattern)
-    ld a, [de]
-    and a
-    jr z, .empty
-    cp CELL_OFF
-    jr z, .off
-    push bc
-    call DrawNoteName
-    pop bc
-    jr .next
-.empty:
-    ld a, '.' - 32
-    ld [hl+], a
-    ld [hl+], a
-    ld [hl+], a
-    jr .next
-.off:
-    ld a, 'O' - 32
-    ld [hl+], a
-    ld a, 'F' - 32
-    ld [hl+], a
-    ld [hl+], a
-.next:
-    inc c
-    ld a, c
-    cp NUM_CH
-    jr c, .cell
-    ld a, NUM_CH            ; trailing gap
-    ; fall through
-
-; a = gap index 0..4 (the column left of cell a), b = row, hl = dest.
-; Draws "[" / "]" around the cursor cell, otherwise a space. Clobbers a, e.
-SeqGap:
-    ld e, a
-    ld a, [wSeqRow]
-    cp b
-    jr nz, .none
-    ld a, [wSeqCh]
-    cp e
-    jr z, .open
-    inc a
-    cp e
-    jr z, .close
-.none:
-    xor a
-    jr .put
-.open:
-    ld a, '[' - 32
-    jr .put
-.close:
-    ld a, ']' - 32
-.put:
-    ld [hl+], a
-    ret
-
-DrawSeqStatus:
-    ld hl, _SCRN0 + 17 * 32
-    ld de, sStop
-    ld a, [wSeqPlay]
-    and a
-    jr z, .state
-    ld de, sPlay
-.state:
-    call DrawString
-    ld hl, _SCRN0 + 17 * 32 + 9
-    ld a, [wBpm]
-    call DrawDec3
-    ld a, [wSeqNote]
-    ld hl, _SCRN0 + 17 * 32 + 14
-    jp DrawNoteName
-
 ; a = 0..255, hl = dest -> three tiles, leading zero blanked. Clobbers a, b, c.
 DrawDec3:
     ld b, 0
@@ -655,8 +500,6 @@ sCh:          db "CH", 0
 sEditHelp1:   db "UD:ROW  LR:VALUE", 0
 sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
 sEditHelp3:   db "SEL:CH  START:SCREEN", 0
-sSeqHeader:   db "    P1  P2  WV  NS", 0
-sBpm:         db "BPM", 0
 sMsgSaved:    db "SAVED", 0
 sMsgLoaded:   db "LOADED", 0
 sMsgNoData:   db "NO SAVE DATA", 0

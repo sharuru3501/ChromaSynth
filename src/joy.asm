@@ -1,7 +1,7 @@
 ; Joypad handling.
 ;  All screens: START = next screen (play -> edit -> sequencer),
 ;               SELECT+START = sequencer play/stop,
-;               SELECT tap = next channel (play/edit screens),
+;               SELECT tap = next channel (all screens; the roll shows it),
 ;               SELECT+A = save to SRAM, SELECT+B = load.
 ;  Play/edit:   A = gate on the selected channel.
 ;  Play screen : d-pad = note (+-1 / +-octave).
@@ -63,6 +63,7 @@ HandleJoy:
     jr z, .noCombo
     ld a, 1
     ld [wSelUsed], a
+    ld [wBUsed], a          ; the B release must not delete a note
     jp DoLoad               ; SELECT+B: load
 .noCombo:
     bit PADB_START, d
@@ -96,9 +97,6 @@ HandleJoy:
     ld a, [wSelUsed]
     and a
     jr nz, .noSel
-    ld a, [wScreen]
-    cp SCREEN_SEQ
-    jr z, .noSel
     ld a, [wSelCh]
     inc a
     and NUM_CH - 1
@@ -106,10 +104,13 @@ HandleJoy:
     xor a
     ld [wEditRow], a
     ld a, [wDirty]
-    or %00101111            ; channel markers + edit header
+    or %00101111            ; channel markers + edit header / roll ruler
     ld [wDirty], a
     ld a, $FF
     ld [wDirtyEdit], a
+    ld a, [wScreen]
+    cp SCREEN_SEQ
+    call z, RollChannelChanged ; the roll shows the selected channel
 .noSel:
     ld a, [wScreen]
     and a

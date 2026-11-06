@@ -21,7 +21,7 @@ make clean
 ```
 
 ## ディレクトリ
-- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(シーケンサ), `sram.asm`(保存)。シンボルは `-E` で全export
+- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。シンボルは `-E` で全export
 - `inc/` 共有 include(`hardware.inc` は必要なレジスタだけ定義した自前版)
 - `tools/` コード/データ生成スクリプト
 - `docs/` 設計・ロードマップ
@@ -37,4 +37,5 @@ make clean
 7. 実機/エミュレータで確認できていない動作を「動作確認済み」と書かない。ROADMAP の状態欄に `untested` を付ける。
 8. **CGB パレット**: ヘッダが GBC 対応(`-c`)なので GBC 機/SameBoy では `BGP` が無視され、パレット RAM は白で始まる。画面に何か出すなら `InitPalette`(main.asm)のような CGB パレット設定が必須。PyBoy は独自パレットで描くため、この不具合は PyBoy では再現しない → 画面はSameBoyでも確認する。
 9. 保存データ(`wPatch`/`wPattern`/`wBpm`)のレイアウトや大きさを変えたら `SAVE_VERSION`(sram.asm)を上げる。エミュレータの `.sav`/`.ram` は `build/` 配下にできるので `make clean` で消える。
-10. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。
+10. **VBlankは約1140サイクル**。VRAM/OAMへの書き込みはその間だけ。重い描画はシャドウバッファにVBlank外で作り、VBlankでは少量コピーするだけにする。`tools/headless_test.py` の「UpdateUI finishes inside VBlank」テストが超過を検出する(PyBoyはVRAMアクセス制限を再現しないので、LYをフックして測る)。
+11. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。
