@@ -1,0 +1,228 @@
+diff --git a/main/CMakeLists.txt b/main/CMakeLists.txt
+index 134f63c..936097d 100644
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
+ 
+ idf_component_register(
+     SRCS
+-        "main.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
++        "main.c" "chlink.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
+     INCLUDE_DIRS "."
+     REQUIRES
+         images esp_driver_uart esp_driver_spi esp_driver_gpio nvs_flash fatfs
+diff --git a/main/chlink.c b/main/chlink.c
+new file mode 100644
+index 0000000..e4690f9
+--- /dev/null
++++ b/main/chlink.c
+@@ -0,0 +1,105 @@
++// ChromaSynth test commands (console over the USB serial port, 115200 bps):
++//   chver                 firmware identification
++//   sym <hex>             write the FPGA's MCU_buttons register directly (bits: 0 START, 1 SELECT, 2 B,
++//                         3 A, 4 UP, 5 RIGHT, 6 LEFT, 7 DOWN). "sym 0" releases everything.
++//   gpd [count [ms]]      ask the FPGA for the game palette data and print it (raw bytes as received
++//                         and the same bytes as OBJ palette 1 bytes 10..13 / BG palette 0 bytes 2..5)
++#include "chlink.h"
++
++#include "esp_console.h"
++#include "fpga_tx.h"
++#include "freertos/FreeRTOS.h"
++#include "freertos/semphr.h"
++#include "freertos/task.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static volatile bool s_want = false;
++static uint8_t s_gpd[8];
++static SemaphoreHandle_t s_sem = NULL;
++
++bool ChLink_OnGpd(const uint8_t *Payload, size_t Len)
++{
++    if (!s_want || Len != 8)
++    {
++        return false;
++    }
++    memcpy(s_gpd, Payload, 8);
++    s_want = false;
++    xSemaphoreGive(s_sem);
++    return true;
++}
++
++static int cmd_chver(int argc, char **argv)
++{
++    (void)argc;
++    (void)argv;
++    printf("chlink test firmware v0 (stock v4.6 + sym/gpd, console on USB)\n");
++    return 0;
++}
++
++static int cmd_sym(int argc, char **argv)
++{
++    if (argc != 2)
++    {
++        printf("usage: sym <hex mask>  (0 = release)\n");
++        return -1;
++    }
++    const long mask = strtol(argv[1], NULL, 16);
++    if (mask < 0 || mask > 0xFF)
++    {
++        printf("mask must be 00..FF (buttons only; the menu bits are not allowed here)\n");
++        return -1;
++    }
++    FPGA_Tx_RawPoke((uint16_t)mask);
++    printf("sym %02lX\n", mask);
++    return 0;
++}
++
++static int cmd_gpd(int argc, char **argv)
++{
++    int count = (argc >= 2) ? atoi(argv[1]) : 1;
++    int ms = (argc >= 3) ? atoi(argv[2]) : 100;
++    if (count < 1 || count > 1000 || ms < 5 || ms > 5000)
++    {
++        printf("usage: gpd [count 1..1000 [ms 5..5000]]\n");
++        return -1;
++    }
++    if (s_sem == NULL)
++    {
++        s_sem = xSemaphoreCreateBinary();
++    }
++    for (int i = 0; i < count; i++)
++    {
++        s_want = true;
++        (void)xSemaphoreTake(s_sem, 0);
++        FPGA_Tx_RequestBGPD();
++        if (xSemaphoreTake(s_sem, pdMS_TO_TICKS(500)) == pdTRUE)
++        {
++            printf("gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", s_gpd[0], s_gpd[1], s_gpd[2], s_gpd[3],
++                   s_gpd[4], s_gpd[5], s_gpd[6], s_gpd[7]);
++        }
++        else
++        {
++            s_want = false;
++            printf("gpd timeout\n");
++        }
++        vTaskDelay(pdMS_TO_TICKS(ms));
++    }
++    return 0;
++}
++
++void ChLink_RegisterCommands(void)
++{
++    const esp_console_cmd_t cmds[] = {
++        {.command = "chver", .help = "chlink test firmware version", .func = &cmd_chver},
++        {.command = "sym", .help = "write the FPGA button register: sym <hex>", .func = &cmd_sym},
++        {.command = "gpd", .help = "read the game palette data: gpd [count [ms]]", .func = &cmd_gpd},
++    };
++    for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
++    {
++        (void)esp_console_cmd_register(&cmds[i]);
++    }
++}
+diff --git a/main/chlink.h b/main/chlink.h
+new file mode 100644
+index 0000000..78a2cff
+--- /dev/null
++++ b/main/chlink.h
+@@ -0,0 +1,10 @@
++#pragma once
++// ChromaSynth test commands for the console on the USB serial port. See docs/CHROMATIC_LINK.md.
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++void ChLink_RegisterCommands(void);
++// Called by the FPGA RX task with the 8 bytes of the game palette data reply.
++// Returns true when a test command asked for it (the stock palette handling is then skipped).
++bool ChLink_OnGpd(const uint8_t *Payload, size_t Len);
+diff --git a/main/fpga_rx.c b/main/fpga_rx.c
+index 429026f..5347d99 100644
+--- a/main/fpga_rx.c
++++ b/main/fpga_rx.c
+@@ -20,6 +20,7 @@
+ #include "player_num.h"
+ #include "silent.h"
+ #include "style.h"
++#include "chlink.h"
+ 
+ #include <stdbool.h>
+ #include <stddef.h>
+@@ -429,6 +430,10 @@ static void ProcessMessage(const RxMsg_t *const pMsg)
+         }
+         case kRxCmd_BGPalette:
+         {
++            if (ChLink_OnGpd(pMsg->Payload, pMsg->Len))
++            {
++                break;          // consumed by the chlink test commands: do not touch the palette style
++            }
+             if (pMsg->Len == 8) 
+             {
+                 uint64_t paletteBGRaw = 0;
+diff --git a/main/fpga_tx.c b/main/fpga_tx.c
+index 31fbc20..9002b61 100644
+--- a/main/fpga_tx.c
++++ b/main/fpga_tx.c
+@@ -237,6 +237,21 @@ void FPGA_Tx_PokeButtons(void)
+    (void) xEventGroupSetBits(xEventGroupHandle, kTxFlag_PokeButton);
+ }
+ 
++void FPGA_Tx_RawPoke(uint16_t Mask)
++{
++    uint8_t Buf[14] = {0};
++    const size_t Size = SetupTxBuffer(Buf, kTxCmd_PokeButton, sizeof(Mask), &Mask);
++    (void) uart_write_bytes(UART_NUM_1, Buf, Size);
++}
++
++void FPGA_Tx_RequestBGPD(void)
++{
++    if (xEventGroupHandle != NULL)
++    {
++        (void) xEventGroupSetBits(xEventGroupHandle, kTxFlag_RequestBGPD);
++    }
++}
++
+ void FPGA_Tx_WritePaletteStyle(void)
+ {
+    (void) xEventGroupSetBits(xEventGroupHandle, kTxFlag_SetPaletteStyle);
+diff --git a/main/fpga_tx.h b/main/fpga_tx.h
+index 3ecda62..e63d18f 100644
+--- a/main/fpga_tx.h
++++ b/main/fpga_tx.h
+@@ -13,5 +13,7 @@ void FPGA_Tx_SendAll(void);
+ void FPGA_Tx_WriteBrightness(void);
+ void FPGA_Tx_SendSysCtl(void);
+ void FPGA_Tx_PokeButtons(void);
++void FPGA_Tx_RawPoke(uint16_t Mask);   // chlink: write the FPGA's MCU_buttons register directly
++void FPGA_Tx_RequestBGPD(void);        // chlink: ask the FPGA for the game palette data (gpd)
+ void FPGA_Tx_WritePaletteStyle(void);
+ void FPGA_Tx_WriteColorTemp(void);
+diff --git a/main/main.c b/main/main.c
+index 01fe261..85215b9 100644
+--- a/main/main.c
++++ b/main/main.c
+@@ -4,6 +4,7 @@
+ #include "driver/gpio.h"
+ #include "driver/spi_master.h"
+ #include "driver/uart.h"
++#include "chlink.h"
+ #include "esp_console.h"
+ #include "esp_err.h"
+ #include "esp_log.h"
+@@ -343,11 +344,12 @@ void app_main(void)
+     ReplConfig.prompt = "mcu> ";
+     ReplConfig.max_cmdline_length = 1024;
+ 
+-    ReplHWConfig.rx_gpio_num = GPIO_NUM_35;
+-    ReplHWConfig.tx_gpio_num = GPIO_NUM_36;
++    // chlink: keep the console on the default UART0 pins (GPIO1/3), which the FPGA's USB
++    // serial bridge is connected to, instead of moving it to GPIO 35/36 (stock behaviour).
+ 
+     ESP_ERROR_CHECK(esp_console_new_repl_uart(&ReplHWConfig, &ReplConfig, &pRepl));
+     esp_console_register_help_command();
++    ChLink_RegisterCommands();
+     // All commands must be registered prior to starting the REPL
+     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
+ 
