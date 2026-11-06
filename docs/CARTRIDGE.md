@@ -51,6 +51,12 @@ ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクト�
   - **ページ 1 を再度吸い出して、バックアップと完全に一致**(LSDJ は無傷)。**SRAM も、バックアップと完全に一致**。
 - 起動時は、ページ 2 のバンク 0 のメニュー ROM が最初に動き、そこから ChromaSynth を選ぶ形になるはず(**未確認**)。ページ 2 への切り替えは §1.1(確認済み)。
 
+## 4.6 事故: 実機の試験で ChromaSynth が SRAM に保存し、LSDJ のデータを上書きした(2026-11-06、復旧済み)
+- 原因: ケーブルなしリンクの HELLO 試験で、MCU から仮想ボタンのシンボルを送った。シンボルには START/SELECT/B/A が同時に入るものがあり、FPGA が上下・左右の同時押しを消すため、ROM には **SELECT+A(保存)** だけが届いた。SRAM は LSDJ と共有なので、先頭の約 1KB(`CSYN` 付きの ChromaSynth の保存)が LSDJ のデータを上書きした(79 バイトが違った)。
+- 発見: カードを Chromatic から外して SRAM を読み出し、バックアップ(`sram_20261106-183422_A.sav`)と比べて分かった。上書きされた状態は `sram_after_chromasynth_save_20261106.sav` に残した。
+- 復旧: `ems-flasher --save --restore sram_20261106-183422_A.sav` で書き戻し、読み出し直して**完全一致**(SHA-256 `5d50a549…`)を確認した。ページ 1・2 の ROM には触れていない。
+- 教訓: **実機の試験で、SELECT+A / SELECT+B が出る可能性があるボタンの組み合わせを送らない。** 送った試験の後は SRAM を読み出してバックアップと比べる。
+
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
 - **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
