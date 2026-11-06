@@ -12,6 +12,13 @@ DEF NUM_CH   EQU 4
 ;  CH3: wave level -  -   -   -   vibd vibs
 ;  CH4: width vol env -   -   -   -    -
 DEF PATCH_SIZE EQU 8
+DEF NUM_PATCHES EQU NUM_CH + 1  ; CH1-CH4 plus a MIDI settings block (the 5th "page")
+; MIDI settings block (patch byte offsets within the block). A MIDI channel is
+; 1-16, 0 = off. Several GB channels on the same MIDI channel play polyphonically.
+DEF MIDI_BLOCK EQU NUM_CH * PATCH_SIZE
+DEF PM_BEND EQU 4           ; pitch bend range in semitones
+DEF PM_VELO EQU 5           ; 1 = velocity changes the volume
+DEF PM_MODW EQU 6           ; 1 = CC1 (mod wheel) raises the vibrato depth
 DEF PATCH_VIBD EQU 6
 DEF PATCH_VIBS EQU 7
 

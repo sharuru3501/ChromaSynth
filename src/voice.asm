@@ -115,6 +115,8 @@ VoicePulse1:
     rrca                    ; duty -> bits 7-6
     ldh [rNR11], a
     ld a, [hl+]
+    call ScaleVol           ; patch volume scaled by the note velocity
+    ld [wVoiceVol], a
     swap a                  ; volume -> bits 7-4
     ld b, a
     ld a, [hl+]
@@ -155,6 +157,8 @@ VoicePulse2:
     rrca
     ldh [rNR21], a
     ld a, [hl+]
+    call ScaleVol
+    ld [wVoiceVol + 1], a
     swap a
     ld b, a
     ld a, [hl]
@@ -188,6 +192,24 @@ VoiceWave:
     xor a
     ldh [rNR31], a
     ld a, [wPatch + 2 * PATCH_SIZE + 1]
+    ld b, a                 ; patch level 0/1/2
+    ld a, [wPatch + MIDI_BLOCK + PM_VELO]
+    and a
+    jr z, .level
+    ld a, [wNoteVel]        ; softer notes use a quieter wave level
+    cp 96
+    jr nc, .level
+    inc b
+    cp 48
+    jr nc, .level
+    inc b
+.level:
+    ld a, b
+    cp 3
+    jr c, .levelOk
+    ld a, 2
+.levelOk:
+    ld [wVoiceVol + 2], a
     inc a                   ; level 0/1/2 -> NR32 $20/$40/$60 (100/50/25 %)
     swap a
     add a
@@ -252,6 +274,8 @@ VoiceNoise:
     xor a
     ldh [rNR41], a
     ld a, [wPatch + 3 * PATCH_SIZE + 1]
+    call ScaleVol
+    ld [wVoiceVol + 3], a
     swap a
     ld b, a
     ld a, [wPatch + 3 * PATCH_SIZE + 2]
@@ -294,10 +318,20 @@ TickChannel:                ; c = channel 0..2
     add LOW(wPatch)
     ld l, a
     ld h, HIGH(wPatch)
-    ld a, [hl+]             ; depth
+    ld a, [hl+]             ; patch vibrato depth
+    ld b, a
+    push hl
+    ld hl, wMod             ; the mod wheel (CC1) can raise it
+    call HLplusC
+    ld a, [hl]
+    pop hl
+    cp b
+    jr c, .patchDepth
+    ld b, a
+.patchDepth:
+    ld a, b
     and a
     ret z
-    ld b, a
     ld a, [hl]              ; speed
     ld d, a
     add a
@@ -424,6 +458,36 @@ TickChannel:                ; c = channel 0..2
     ldh [rNR24], a
     ret
 
+; a = patch volume 0..15 -> volume scaled by the note velocity (wNoteVel 0..127)
+; when velocity sensitivity is on: vol * (vel / 8 + 1) / 16, never below 1 for a
+; non-zero volume. Keeps hl, de. Clobbers a, b, c.
+ScaleVol:
+    ld b, a
+    ld a, [wPatch + MIDI_BLOCK + PM_VELO]
+    and a
+    ld a, b
+    ret z                   ; velocity ignored
+    ld a, [wNoteVel]
+    srl a
+    srl a
+    srl a                   ; 0..15
+    inc a                   ; 1..16
+    ld c, a
+    xor a
+.mul:
+    add b
+    dec c
+    jr nz, .mul             ; vol * scale (at most 15 * 16 = 240)
+    swap a
+    and $0F                 ; / 16
+    and a
+    ret nz
+    ld a, b                 ; a quiet note is still audible
+    and a
+    ret z
+    ld a, 1
+    ret
+
 ; hl = a * b (unsigned). Clobbers a, b, d, e.
 Mul8:
     ld hl, 0
@@ -445,6 +509,7 @@ DefaultPatch:
     db 2, 15, 0, 0, 0, 0, 0, 3      ; CH2
     db 0, 0, 0, 0, 0, 0, 0, 3       ; CH3
     db 0, 15, 2, 0, 0, 0, 0, 0      ; CH4
+    db 1, 2, 3, 4, 2, 1, 1, 0       ; MIDI: CH1-4 listen to MIDI ch 1-4, bend 2, velocity on, mod wheel on
 
 DirtyBits:  db %00000001, %00000010, %00000100, %00001000
             db %00010000, %00100000, %01000000, %10000000

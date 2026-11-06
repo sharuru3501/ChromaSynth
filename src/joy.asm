@@ -123,9 +123,19 @@ HandleJoy:
     ld a, [wSelUsed]
     and a
     jr nz, .noSel
+    ld a, [wScreen]         ; the edit screen has a 5th page (MIDI settings)
+    cp SCREEN_EDIT
+    ld a, NUM_CH
+    jr nz, .limit
+    inc a
+.limit:
+    ld b, a
     ld a, [wSelCh]
     inc a
-    and NUM_CH - 1
+    cp b
+    jr c, .chOk
+    xor a
+.chOk:
     ld [wSelCh], a
     xor a
     ld [wEditRow], a

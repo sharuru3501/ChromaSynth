@@ -6,8 +6,8 @@ SECTION "MIDI ring", WRAM0, ALIGN[8]
 wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 
 ; Aligned so that "base + small offset" never carries into the high byte.
-SECTION "Patch", WRAM0, ALIGN[5]
-wPatch:         ds NUM_CH * PATCH_SIZE
+SECTION "Patch", WRAM0, ALIGN[6]
+wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
 ; Pattern: wPattern[channel * 256 + tick]. 256-byte aligned: HIGH(wPattern)+channel
 ; is the high byte and the tick is the low byte (no 16-bit arithmetic anywhere).
@@ -56,6 +56,12 @@ wScreenReq:     db          ; 0 = none, else requested screen + 1
 wEditRow:       db          ; selected parameter row on the edit screen
 wDirty:         db          ; play-screen rows needing redraw (see synth.inc)
 wDirtyEdit:     db          ; edit-screen parameter rows needing redraw
+wNoteVel:       db          ; velocity of the note being started (127 = full; MIDI sets it)
+wMod:           ds NUM_CH   ; mod wheel (CC1) vibrato depth per GB channel (0..7)
+wMidiChNum:     db          ; MIDI channel (1-16) of the message being handled
+wMidiVel:       db
+wMidiRR:        db          ; last GB channel that was stolen for a new note
+wVoiceVol:      ds NUM_CH   ; volume nibble last used per channel (after velocity; debug/test)
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
 wSeqPlay:       db          ; 1 = sequencer running

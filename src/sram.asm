@@ -3,17 +3,17 @@
 ; Slot layout at $A000:
 ;   +0    "CSYN"   magic
 ;   +4    version  (SAVE_VERSION)
-;   +5    wPatch   (NUM_CH * PATCH_SIZE bytes)
-;   +37   wPattern (NUM_CH * SEQ_STRIDE bytes: 4 channels x 256, 192 ticks used)
-;   +1061 wBpm
-;   +1062 wSeqLen  (ticks)
-;   +1063 checksum = (sum of the data bytes) xor $A5
+;   +5    wPatch   (NUM_PATCHES * PATCH_SIZE = 40 bytes: 4 channels + the MIDI settings block)
+;   +45   wPattern (NUM_CH * SEQ_STRIDE bytes: 4 channels x 256, 192 ticks used)
+;   +1069 wBpm
+;   +1070 wSeqLen  (ticks)
+;   +1071 checksum = (sum of the data bytes) xor $A5
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 3
-DEF SAVE_DATA_LEN EQU NUM_CH * PATCH_SIZE + NUM_CH * SEQ_STRIDE + 2
+DEF SAVE_VERSION  EQU 4
+DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + NUM_CH * SEQ_STRIDE + 2
 
 SECTION "SRAM", ROM0
 
@@ -69,7 +69,7 @@ SaveAll:
     ld bc, 5
     call CopyBytes
     ld hl, wPatch
-    ld bc, NUM_CH * PATCH_SIZE
+    ld bc, NUM_PATCHES * PATCH_SIZE
     call CopySum
     ld hl, wPattern
     ld bc, NUM_CH * SEQ_STRIDE
@@ -95,7 +95,7 @@ LoadAll:
     call ValidateSave       ; -> hl = start of the data
     jr c, .bad
     ld de, wPatch
-    ld bc, NUM_CH * PATCH_SIZE
+    ld bc, NUM_PATCHES * PATCH_SIZE
     call CopyBytes
     ld de, wPattern
     ld bc, NUM_CH * SEQ_STRIDE

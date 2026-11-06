@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
-    check("slot has magic CSYN v3", raw[:5] == b"CSYN\x03", raw[:5])
+    check("slot has magic CSYN v4", raw[:5] == b"CSYN\x04", raw[:5])
 
     # --- reboot: restored automatically
     pb = boot(rom)

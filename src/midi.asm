@@ -1,4 +1,14 @@
-; MIDI byte stream parser (note on/off, running status). MIDI ch 1-4 -> CH1-4.
+; MIDI byte stream parser (note on/off, CC, running status) and voice routing.
+;
+; Routing: each GB channel listens to one MIDI channel (patch byte MIDI_BLOCK +
+; channel, 1-16, 0 = off; set on the 5th page of the edit screen). By default CH1-CH4
+; listen to MIDI channels 1-4. Several GB channels set to the SAME MIDI channel
+; play polyphonically: a new note goes to the channel that already plays that note,
+; else to an idle one, else it steals one in round-robin order.
+;
+; Handled messages: note on/off (velocity 0 = off), CC1 (mod wheel -> vibrato
+; depth), CC120/CC123 (all sound/notes off). Realtime messages are ignored for now
+; (clock/start/stop belong to the DAW-sync milestone).
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -61,31 +71,164 @@ MidiByte:
     xor a
     ld [wMidiCount], a      ; keep running status
     ld a, [wMidiStatus]
+    ld c, a
+    and $0F
+    inc a
+    ld [wMidiChNum], a      ; MIDI channel 1-16 of this message
+    ld a, c
     and $F0
     cp $90
     jr z, .noteOn
     cp $80
-    ret nz
-.noteOff:
-    ld a, [wMidiStatus]
-    and $0F
-    cp NUM_CH
-    ret nc
-    ld c, a
-    ld hl, wCurNote
-    call HLplusC
-    ld a, [wMidiData1]
-    cp [hl]
-    ret nz                  ; mono: ignore release of an older note
-    jp NoteOff
+    jr z, MidiNoteOff
+    cp $B0
+    jp z, MidiCC
+    ret                     ; (pitch bend etc.: not handled yet)
 .noteOn:
     ld a, b                 ; velocity
     and a
-    jr z, .noteOff          ; vel 0 == note off
-    ld a, [wMidiStatus]
-    and $0F
-    cp NUM_CH
-    ret nc
-    ld c, a
+    jr z, MidiNoteOff       ; velocity 0 == note off
+    ld [wMidiVel], a
+    ; fall through
+
+; wMidiData1 = note, wMidiChNum = MIDI channel, wMidiVel = velocity.
+MidiNoteOn:
     ld a, [wMidiData1]
-    jp NoteOn
+    ld d, a                 ; d = note
+    ld c, 0                 ; pass 1: a listening channel that already plays this note
+.p1:
+    call IsAssigned
+    and a
+    jr z, .p1next
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    cp d
+    jr z, .play
+.p1next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .p1
+    ld c, 0                 ; pass 2: the first idle listening channel
+.p2:
+    call IsAssigned
+    and a
+    jr z, .p2next
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    and a
+    jr z, .play
+.p2next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .p2
+    ld a, [wMidiRR]         ; pass 3: steal, round-robin, starting after the last victim
+    ld c, a
+    ld e, NUM_CH
+.p3:
+    inc c
+    ld a, c
+    and NUM_CH - 1
+    ld c, a
+    call IsAssigned
+    and a
+    jr nz, .steal
+    dec e
+    jr nz, .p3
+    ret                     ; no GB channel listens to this MIDI channel
+.steal:
+    ld a, c
+    ld [wMidiRR], a
+.play:
+    ld a, [wMidiVel]
+    ld [wNoteVel], a        ; the voice scales its volume by this
+    ld a, d
+    call NoteOn             ; a = note, c = GB channel
+    ld a, 127
+    ld [wNoteVel], a
+    ret
+
+; Release the listening channel(s) that play wMidiData1.
+MidiNoteOff:
+    ld a, [wMidiData1]
+    ld d, a
+    ld c, 0
+.l: call IsAssigned
+    and a
+    jr z, .next
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    cp d
+    jr nz, .next
+    push bc
+    call NoteOff
+    pop bc
+.next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .l
+    ret
+
+; Control change: wMidiData1 = controller, b = value.
+MidiCC:
+    ld a, [wMidiData1]
+    cp 1
+    jr z, .modWheel
+    cp 120
+    jr z, .allOff
+    cp 123
+    ret nz
+.allOff:
+    ld c, 0
+.offLoop:
+    call IsAssigned
+    and a
+    jr z, .offNext
+    push bc
+    call NoteOff
+    pop bc
+.offNext:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .offLoop
+    ret
+.modWheel:
+    ld a, [wPatch + MIDI_BLOCK + PM_MODW]
+    and a
+    ret z                   ; mod wheel disabled in the MIDI settings
+    ld a, b
+    swap a
+    and $0F                 ; value / 16 = 0..7 vibrato depth
+    ld d, a
+    ld c, 0
+.modLoop:
+    call IsAssigned
+    and a
+    jr z, .modNext
+    ld hl, wMod
+    call HLplusC
+    ld [hl], d
+.modNext:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .modLoop
+    ret
+
+; c = GB channel -> a = 1 if it listens to the MIDI channel in wMidiChNum, else 0.
+; Keeps c, d, e. Clobbers hl.
+IsAssigned:
+    ld hl, wPatch + MIDI_BLOCK
+    call HLplusC
+    ld a, [wMidiChNum]
+    cp [hl]
+    ld a, 0
+    ret nz
+    inc a
+    ret

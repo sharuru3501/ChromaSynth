@@ -30,7 +30,7 @@ EntryPoint:
     ld [wJoyNote], a
     ld hl, DefaultPatch
     ld de, wPatch
-    ld bc, NUM_CH * PATCH_SIZE
+    ld bc, NUM_PATCHES * PATCH_SIZE
     call MemCopy
     ld hl, DefaultPattern
     ld de, wPattern
@@ -42,6 +42,8 @@ EntryPoint:
     ld [wSeqLen], a
     ld a, DEFAULT_DIV       ; piano-roll grid: 1/16
     call SetDivision
+    ld a, 127
+    ld [wNoteVel], a       ; full velocity unless a MIDI note says otherwise
     ld a, 60                ; piano-roll cursor starts on C4; window top = C5
     ld [wRollNote], a
     ld a, 72

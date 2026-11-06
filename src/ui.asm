@@ -32,6 +32,15 @@ InitUI:
 
 ; LCD must be off (or we must be in VBlank with a tiny update).
 BuildScreen:
+    ld a, [wScreen]         ; only the edit screen has the 5th (MIDI) page
+    cp SCREEN_EDIT
+    jr z, .chOk
+    ld a, [wSelCh]
+    cp NUM_CH
+    jr c, .chOk
+    xor a
+    ld [wSelCh], a
+.chOk:
     ld hl, _SCRN0
     ld bc, 32 * 32
     call MemClear           ; tile 0 = space
@@ -508,7 +517,7 @@ sMsgFail:     db "SAVE FAILED", 0
 MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail
 sStop:        db "STOP", 0
 sPlay:        db "PLAY", 0
-TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0
+TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0
 NoteNames:    db "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 
 ; Parameter tables: 8 rows per channel, [max, 4-char name, 0]. max $FF = hidden.
@@ -518,7 +527,7 @@ MACRO PARAM
     db \2, 0
 ENDM
 
-ParamTables:  dw PT_Pulse1, PT_Pulse2, PT_Wave, PT_Noise
+ParamTables:  dw PT_Pulse1, PT_Pulse2, PT_Wave, PT_Noise, PT_Midi
 
 PT_Pulse1:
     PARAM 3, "DUTY"
@@ -555,6 +564,18 @@ PT_Noise:
     PARAM $FF, "    "
     PARAM $FF, "    "
     PARAM $FF, "    "
+    PARAM $FF, "    "
+
+; The 5th page of the edit screen: MIDI settings (patch bytes MIDI_BLOCK + row).
+; Rows 0-3: which MIDI channel (1-16, 0 = off) each GB channel listens to.
+PT_Midi:
+    PARAM 16, "CH1 "
+    PARAM 16, "CH2 "
+    PARAM 16, "CH3 "
+    PARAM 16, "CH4 "
+    PARAM $FF, "    "
+    PARAM 1, "VELO"
+    PARAM 1, "MODW"
     PARAM $FF, "    "
 
 INCLUDE "font.inc"
