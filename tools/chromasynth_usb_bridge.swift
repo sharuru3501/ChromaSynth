@@ -3,7 +3,8 @@
 //
 //   swiftc -O tools/chromasynth_usb_bridge.swift -o chromasynth_usb_bridge
 //   ./chromasynth_usb_bridge                      all MIDI inputs (except the IAC buses and the Bluetooth ChromaSynth), first /dev/cu.usbmodem*
-//   ./chromasynth_usb_bridge --input IAC          play from Ableton Live: set a Live track's MIDI To to an IAC bus, and listen to the IAC buses
+//   In Ableton Live: set a track's MIDI To to "ChromaSynth USB" (the helper creates that MIDI output itself; no IAC bus needed).
+//   ./chromasynth_usb_bridge --input IAC          (alternative) listen to the IAC buses, if you route Live through an IAC bus
 //   ./chromasynth_usb_bridge --list               list the MIDI inputs and serial ports, then exit
 //   ./chromasynth_usb_bridge --input MPK          only inputs whose name contains "MPK"
 //   ./chromasynth_usb_bridge --port /dev/cu.usbmodemXXXX
@@ -180,7 +181,7 @@ MIDIClientCreate("chromasynth_usb_bridge" as CFString, nil, nil, &client)
 var port = MIDIPortRef()
 var running: UInt8 = 0
 var sent = 0
-MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
+func handle(_ list: UnsafePointer<MIDIPacketList>) {
     for pkt in list.unsafeSequence() {
         let n = Int(pkt.pointee.length)
         let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
@@ -190,6 +191,12 @@ MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
         }
     }
 }
+MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in handle(list) }
+// A virtual MIDI OUTPUT PORT of its own, "ChromaSynth USB": it shows up in Live's "MIDI To" list like "ChromaSynth Bluetooth", with
+// no IAC bus and no feedback loop (it is a destination only: nothing in it can come back to Live as an input).
+var virtualDest = MIDIEndpointRef()
+MIDIDestinationCreateWithBlock(client, "ChromaSynth USB" as CFString, &virtualDest) { list, _ in handle(list) }
+print("MIDI output \"ChromaSynth USB\" created: choose it as a Live track's MIDI To (no IAC needed)")
 
 var connected = Set<MIDIEndpointRef>()
 func connectSources() {

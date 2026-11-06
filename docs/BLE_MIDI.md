@@ -259,3 +259,4 @@ MIDI キーボード →(USB)→ Mac →(tools/chromasynth_usb_bridge.swift)→ 
 - 中継は、既定で IAC のバスを聴かない作りだった(Live から IAC へ送る使い方に合わない)ので、**`--input` で明示したときは IAC も聴く**ように直した(`./chromasynth_usb_bridge --input IAC`)。ChromaSynth の Bluetooth(BLE の経路)は、常に除く。
 - **Live の注意**: 出力先を IAC にしたトラックの **MIDI From を `No Input`** にする。`All Ins` のままだと、IAC の入力ポート(「トラック」がオン)から、自分の出力を受け取って、ノートがぐるぐる回る恐れがある。コンピュータ MIDI キーボードは、MIDI From に関係なく、録音待機のトラックに入る。
 - 起動の順: 中継を起動 → ESP32 が再起動 → `mode usb`(返事が来るまで繰り返す)→ ROM がキーボード画面なら、自動で武装して鳴る。メニューで USB を選ぶ必要はない。
+- **改良(同日)**: 中継プログラムが、**自分で仮想の MIDI 出力 `ChromaSynth USB` を作る**ようにした。Live の「MIDI To」の一覧に、BLE の `ChromaSynth Bluetooth` と同じように出る。**IAC も `MIDI From = No Input` も要らない**(出力先だけで、入力を作らないので、Live に戻ってくる経路がなく、ノートが回らない)。`--input IAC` は、IAC 経由で使う場合の代替として残した。テスト(`make check-usb-bridge`)は、仮想キーボードの入力と、`ChromaSynth USB` への送信(Live と同じ形)の両方を確認する。

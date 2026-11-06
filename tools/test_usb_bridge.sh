@@ -21,10 +21,12 @@ WANT="mode usb
 m 90 3c 64
 m 80 3c 00
 m 90 40 5a
-m b0 7b 00"
+m b0 7b 00
+m 90 43 50
+m 80 43 00"
 GOT=$(grep -E "^(mode|m ) ?" "$OUT" | grep -v "^mode off")
 if [ "$GOT" = "$WANT" ] && grep -q "listening to: TestKbd" "$OUT"; then
-    echo "PASS end to end: the helper found a keyboard that appeared after it started and turned its notes into the right console lines"
+    echo "PASS end to end: a keyboard that appeared later, and notes sent to the MIDI output ChromaSynth USB that the helper creates (what Live does), became the right console lines"
 else
     echo "FAIL end to end"; echo "--- wanted"; echo "$WANT"; echo "--- got"; cat "$OUT"; exit 1
 fi
