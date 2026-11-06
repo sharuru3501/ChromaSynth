@@ -12,9 +12,72 @@ INCLUDE "synth.inc"
 
 SECTION "Joypad", ROM0
 
+; wJoy bits: 7 down, 6 up, 5 left, 4 right, 3 start, 2 select, 1 B, 0 A (1 = pressed).
+; The Chromatic's ESP32 can press virtual buttons (src/clink.asm). Their data frames have
+; UP+DOWN or LEFT+RIGHT both pressed, which the real d-pad cannot do: such a frame is
+; handed to CLinkRx and wJoy stays 0 so that the UI never sees it.
 ReadJoy:
     ld a, [wJoy]
     ld [wJoyPrev], a
+    call ReadPadRaw
+    ld c, a
+    call ReadPadRaw
+    cp c
+    jr z, .stable
+    call ReadPadRaw         ; a virtual button changed between the two groups: read again
+.stable:
+    ld b, a
+    and $C0
+    cp $C0
+    jr nz, .notUD
+    ld a, b                 ; UP+DOWN: phase A symbol if exactly one of LEFT/RIGHT
+    and $30
+    jr z, .masked
+    cp $30
+    jr z, .masked
+    ld d, 0
+    cp $20
+    jr nz, .phaseA
+    ld d, $10               ; LEFT pressed = data bit 4
+.phaseA:
+    ld c, 0
+    jr .sym
+.notUD:
+    ld a, b
+    and $30
+    cp $30
+    jr nz, .plain
+    ld a, b                 ; LEFT+RIGHT: phase B symbol if exactly one of UP/DOWN
+    and $C0
+    jr z, .masked
+    cp $C0
+    jr z, .masked
+    ld d, 0
+    cp $40
+    jr nz, .phaseB
+    ld d, $10               ; UP pressed = data bit 4
+.phaseB:
+    ld c, 1
+.sym:
+    ld a, b
+    and $0F
+    or d
+    ld [wClSym], a
+    ld a, c
+    ld [wClPh], a
+    ld a, 1
+    ld [wClHave], a
+.masked:
+    xor a
+    ld [wJoy], a
+    ret
+.plain:
+    ld a, b
+    ld [wJoy], a
+    ret
+
+; a = the pad as wJoy bits (1 = pressed). Clobbers d.
+ReadPadRaw:
     ld a, $20               ; select d-pad
     ldh [rP1], a
     ldh a, [rP1]
@@ -23,18 +86,19 @@ ReadJoy:
     ldh a, [rP1]
     and $0F
     swap a
-    ld b, a
+    ld d, a
     ld a, $10               ; select buttons
     ldh [rP1], a
     REPT 6
         ldh a, [rP1]
     ENDR
     and $0F
-    or b
+    or d
     cpl
-    ld [wJoy], a
+    ld d, a
     ld a, $30
     ldh [rP1], a
+    ld a, d
     ret
 
 HandleJoy:

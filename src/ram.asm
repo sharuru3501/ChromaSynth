@@ -117,4 +117,21 @@ wMsg:           db          ; message code shown on row 17 (0 = none)
 wMsgTimer:      db
 wVibM:          db          ; scratch for the vibrato tick
 wVibSign:       db
+; Link to the Chromatic's built-in ESP32 (src/clink.asm, docs/CHROMATIC_LINK.md)
+wClLinked:      db          ; 1 = the ESP32 said HELLO and keeps talking
+wClTimer:       db          ; frames since the last valid packet
+wClIdle:        db          ; frames since the last accepted symbol (a half packet is dropped)
+wClHave:        db          ; ReadJoy found a symbol frame (set by ReadJoy, cleared by CLinkRx)
+wClSym:         db          ; its 5 data bits
+wClPh:          db          ; its phase (0 = A, 1 = B)
+wClNextPh:      db          ; phase of the next new symbol (a repeat of the last one is ignored)
+wClN:           db          ; symbols of the current packet received so far
+wClMode:        db          ; 0 = play packet (3 symbols), 1 = general packet (6 symbols)
+wClBuf:         ds 6
+wClMsg:         ds 3        ; the 3 MIDI bytes of the last general packet
+wClSeq:         db          ; uplink message counter (0..7)
+wClNack:        db          ; 1 = the last packet failed its check
+wClCh:          db          ; GB channel the keyboard note went to
+wClSlot:        ds 4        ; the 4 bytes last written to OBJ palette 1 (also read by the tests)
+wClLen:         db          ; length of the message in the slot (kept until the next message replaces it)
 wClearEnd:      db

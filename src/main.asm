@@ -105,6 +105,7 @@ MainLoop:
     jr z, MainLoop
     xor a
     ld [wVBlank], a
+    call CLinkUp            ; palette RAM is only writable now, so before anything else
     call UpdateUI           ; VRAM is only writable now, so do this first
     call VoiceTick
     call SeqTick
@@ -119,6 +120,7 @@ MainLoop:
     call z, NoteOff
 .noBoot:
     call ReadJoy
+    call CLinkRx
     call HandleJoy
     call RenderPending      ; piano roll rows are rendered outside VBlank
     jr MainLoop
@@ -153,6 +155,10 @@ SerialISR:
     ld a, l
     ld [wRingHead], a
 .reply:
+    ld a, [wClLinked]
+    and a
+    ld b, MIDI_IDLE
+    jr nz, .send            ; the Chromatic link owns the queue (src/clink.asm)
     ld a, [wTxHead]
     ld b, a
     ld a, [wTxTail]

@@ -18,6 +18,7 @@ make gen      # notetable/font/waves/tempo/divs/pattern/bend の include を再�
 python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install pyboy pillow、先に make)
 python3 tools/headless_save_test.py   # SRAM保存のテスト
 python3 tools/headless_midi_test.py   # MIDI入力・DAW同期・シリアルISR・ブリッジ参照実装との往復のテスト
+python3 tools/headless_clink_test.py  # 本体内蔵 ESP32 とのケーブルなしリンク(仮想ボタン+パレット)のテスト
 python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
 make firmware                         # ESP32-S3 ファームウェアのビルド(要 ESP-IDF)
 make check-bridge                     # 上記 + firmware の C 中核テスト(正解トレース照合・ASan・構文検査)。ESP32 不要
@@ -48,4 +49,5 @@ make clean
 13. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
 14. **リンクプロトコルを変えたら** `docs/BRIDGE.md`・`tools/bridge_ref.py`・ROM(`SerialISR`/`midi.asm`)を同時に直し、`headless_midi_test.py` の往復テストで確かめる。`$FD` はアイドル、`$FF` は「GBが待ち受けていない」の印なのでデータに使わない。
 15. **ブリッジの動作を変えたら** `tools/bridge_ref.py` と `firmware/core/bridge_core.c` を同じ算術(整数µs、切り捨て除算)で両方直し、`make -C firmware/test vectors` で正解を作り直して `make check-bridge` で突き合わせる。`main/` を変えたら `make firmware` でビルドして確かめる(ESP-IDF は `~/esp/esp-idf`、v5.5.6。無い環境ではスタブでの型検査 `make -C firmware/test syntax` だけになり、API の実在は証明できない)。ESP32 の実機で動かしていないことは、動かすまで「未確認」と書く。
+17. **ケーブルなしリンクを変えたら** `docs/CHROMATIC_LINK.md`・`tools/chromatic_link_ref.py`・ROM(`src/clink.asm`、`ReadJoy`、`SerialISR`)を同時に直し、`headless_clink_test.py` で確かめる。上り(パレット RAM への書き込み)は VBlank の先頭だけ。マーカー(上下または左右の同時押し)は物理ボタンでは出ない前提なので、`ReadJoy` が `wJoy` を 0 にする規則を崩さない。FPGA が仮想ボタンを通すこと・`gpd` が返ることは**実機で確認するまで「未確認」と書く**。
 16. 不明なハード仕様(Chromaticのリンクポートのピン配置・電圧等)は推測で断定せず、docs の「未確認事項」に記録する。ブリッジを配線する前に実測する(BRIDGE.md §4)。
