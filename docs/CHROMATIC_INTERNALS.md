@@ -1,6 +1,8 @@
 # Chromatic の内部構造(ケーブルなしで MIDI を通す経路の調査)
 
 調査日: 2026-11-06。**情報源は ModRetro の公開リポジトリのソース読解のみ**で、実機では何も確認していない。
+読んだソースの版: FPGA **v18.14**、MCU **v4.6**(アプリ 0.13.8、ESP-IDF 5.3.0)。**ユーザーの個体と同じ版**(MCU v0.13.8 / FPGA v18.14 / FW v4.6、2026-11-06 に報告)。他の版では挙動が違うかもしれない。
+書き込みの安全手順: [MCU_FLASH_SAFETY.md](MCU_FLASH_SAFETY.md)。
 (`ModRetro/chromatic_fpga`、`ModRetro/oss-chromatic-console-mcu`。どちらも GPL-3.0。)
 
 ## 1. 構成
