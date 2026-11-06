@@ -60,9 +60,10 @@ def rows(*r):
     return list(r)
 
 
-EMP_W = ["00000000"] * 7 + ["11111111"]               # white-key row: faint line below
-EMP_B = ["11111111"] * 8                               # black-key row: shaded band
-BEAT = lambda t: ["2" + r[1:] for r in t]              # beat line at the left edge
+CELL_W = ["10000000"] * 7 + ["11111111"]               # white-key row: faint sub-grid line at the left, faint line below
+CELL_B = ["01111111"] * 8                               # black-key row: shaded band, white sub-grid line at the left
+BEAT = lambda t: ["2" + r[1:] for r in t]              # beat line (mid blue) at the left edge
+BAR = lambda t: ["3" + r[1:] for r in t]               # bar line (navy) at the left edge
 NOTE_BODY = ["00000000"] + ["33333333"] * 6 + ["00000000"]
 NOTE_HEAD = ["00000000"] + ["03333333"] * 6 + ["00000000"]
 CUR_EMP = ["33333333"] + ["30000003"] * 6 + ["33333333"]
@@ -70,15 +71,17 @@ CUR_NOTE = ["33333333"] + ["32222223"] * 6 + ["33333333"]
 PLAYHEAD = ["11000000"] * 8                            # sprite: colour 1 = red, at the left edge of the cell (on the beat line)
 
 ROLL_TILES = {  # tile index -> pixels
-    64: EMP_W,
-    65: EMP_B,
-    66: BEAT(EMP_W),
-    67: BEAT(EMP_B),
+    64: CELL_W,
+    65: CELL_B,
+    66: BEAT(CELL_W),
+    67: BEAT(CELL_B),
     68: NOTE_HEAD,
     69: NOTE_BODY,
     70: CUR_EMP,
     71: CUR_NOTE,
     72: PLAYHEAD,
+    73: BAR(CELL_W),
+    74: BAR(CELL_B),
 }
 
 

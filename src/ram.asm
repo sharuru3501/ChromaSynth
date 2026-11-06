@@ -68,12 +68,15 @@ wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)
 wDivTicks:      db          ; ticks per grid cell for that division
+wPageCols:      db          ; grid columns per page for that division (12 or 16)
+wPageSpan:      db          ; ticks per page (a whole number of beats: the bars never move)
 wRollCell:      db          ; piano-roll cursor: grid cell index (tick / wDivTicks)
 wRollTick:      db          ; piano-roll cursor: tick (= cell * wDivTicks)
 wRollNote:      db          ; piano-roll cursor: MIDI note
 wRollTop:       db          ; pitch shown on the top grid row
-wRollPage:      db          ; visible page (first cell = page * 16)
-wPageTick:      db          ; tick of the first visible column (= page * 16 * wDivTicks)
+wRollPage:      db          ; visible page index
+wPageTick:      db          ; tick of the first visible column (= page * wPageSpan)
+wPageCell:      db          ; cell index of the first visible column (= page * wPageCols)
 wFollow:        db          ; 1 = the view follows the playhead
 wPlayX:         db          ; wanted playhead X in OAM coordinates ($FF = hidden)
 wPlayShown:     db          ; playhead X currently in OAM ($FF = hidden)

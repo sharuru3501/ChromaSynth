@@ -9,13 +9,14 @@
 ; reaches the tick length for the current BPM (TempoTable) one tick is played.
 ; A tick always lasts more than one frame, so at most one tick fires per frame.
 ;
-; The roll shows a grid of 16 columns; a "grid division" (DivTicks) says how
-; many ticks one column covers (1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/48).
+; The roll shows up to 16 columns per page; a "grid division" (DivTicks) says how
+; many ticks one column covers (1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/48). A page
+; always covers whole beats (DivSpan) so the bars stay put when the division changes.
 ; The cursor sits on a cell (wRollCell) = tick wRollTick = cell * wDivTicks.
 ;
 ; Piano-roll controls (see SeqInput):
 ;   d-pad            move cursor one cell / semitone (B held: 4 cells / octave)
-;   A+B              next grid division
+;   B+A              next grid division (B first, or both together)
 ;   A                place a one-cell note at the cursor (and audition it)
 ;   A + LEFT/RIGHT   shorten / lengthen the note under the cursor by one cell
 ;   A + UP/DOWN      transpose the note under the cursor
@@ -380,14 +381,8 @@ CellLeft:
     pop bc
     ret
 
-; A+B: next grid division. The cursor keeps its tick, snapped down to the new grid.
-SeqCycleDiv:
-    ld a, [wDiv]
-    inc a
-    cp NUM_DIVS
-    jr c, .ok
-    xor a
-.ok:
+; a = division index -> wDiv, wDivTicks, wPageCols, wPageSpan. Clobbers a, de, hl.
+SetDivision:
     ld [wDiv], a
     ld e, a
     ld d, 0
@@ -395,6 +390,27 @@ SeqCycleDiv:
     add hl, de
     ld a, [hl]
     ld [wDivTicks], a
+    ld hl, DivCols
+    add hl, de
+    ld a, [hl]
+    ld [wPageCols], a
+    ld hl, DivSpan
+    add hl, de
+    ld a, [hl]
+    ld [wPageSpan], a
+    ret
+
+; B+A: next grid division. The cursor keeps its tick (snapped down to the new
+; grid) and the page keeps the same bar: pages start on beat boundaries.
+SeqCycleDiv:
+    ld a, [wDiv]
+    inc a
+    cp NUM_DIVS
+    jr c, .ok
+    xor a
+.ok:
+    call SetDivision
+    ld a, [wDivTicks]
     ld c, a                 ; c = ticks per cell
     ld a, [wRollTick]
     ld b, 0                 ; b = cell = tick / c
@@ -411,9 +427,7 @@ SeqCycleDiv:
     ld [wRollTick], a
     ld a, b
     ld [wRollCell], a
-    swap a
-    and 15
-    call RollSetPage
+    call RollPageFromCell
     jp RollRefreshAll
 
 ; SELECT held: UP/DOWN = BPM +-1, LEFT/RIGHT = loop length -+1 bar.

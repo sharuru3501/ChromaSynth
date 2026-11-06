@@ -41,9 +41,7 @@ EntryPoint:
     ld a, 2 * TICKS_PER_BAR ; the demo is two bars long
     ld [wSeqLen], a
     ld a, DEFAULT_DIV       ; piano-roll grid: 1/16
-    ld [wDiv], a
-    ld a, [DivTicks + DEFAULT_DIV]
-    ld [wDivTicks], a
+    call SetDivision
     ld a, 60                ; piano-roll cursor starts on C4; window top = C5
     ld [wRollNote], a
     ld a, 72

@@ -278,9 +278,13 @@ check("grid: empty white-key cell", grid(12, 2) == T_EMP_W, grid(12, 2))
 check("grid: black-key row is shaded (+1)", grid(11, 2) == T_EMP_W + 1, grid(11, 2))
 check("grid: beat column marked (+2)", grid(10, 4) == T_EMP_W + 2, grid(10, 4))
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
-check("ruler: beat numbers on the beat columns, page number at the right",
-      ruler[2] == 16 and ruler[6] == 17 and ruler[10] == 18 and ruler[14] == 19 and ruler[3] == 0 and ruler[18] == 48 + 128 and ruler[19] == 17 + 128,
+DOT = ord(".") - 32
+check("ruler: bar number over the bar line, dots over the other beats, page tab at the right",
+      ruler[2] == 17 and ruler[6] == DOT and ruler[10] == DOT and ruler[14] == DOT and ruler[3] == 0 and ruler[18] == 48 + 128 and ruler[19] == 17 + 128,
       ruler)
+check("grid: bar line on column 0 (navy), beat lines on columns 4, 8, 12",
+      grid(0, 0) in (73, 74) and all(grid(0, c) in (66, 67) for c in (4, 8, 12)) and all(grid(0, c) in (64, 65) for c in (1, 2, 3, 5)),
+      [grid(0, c) for c in range(16)])
 
 press("right")
 check("RIGHT: cursor cell 1 = tick 3", (v("wRollCell"), v("wRollTick")) == (1, 3), (v("wRollCell"), v("wRollTick")))
@@ -490,6 +494,44 @@ check("view followed the playhead onto page 2", 1 in pages, pages)
 tap_while("select", "start")
 mem[sym["wBpm"]] = 120
 
+# ---- the bars never move when the grid division changes
+for _ in range(5):          # cursor to cell 20 = tick 60 (bar 2, beat 2) at 1/16
+    hold("b")
+    press("right")
+    release("b", frames=4)
+check("cursor at tick 60 (bar 2, beat 2)", (v("wRollCell"), v("wRollTick"), v("wDiv")) == (20, 60, 4),
+      (v("wRollCell"), v("wRollTick"), v("wDiv")))
+DIV_TICKS = [12, 8, 6, 4, 3, 2, 1]
+DIV_COLS = [16, 12, 16, 12, 16, 12, 12]
+bad = []
+for step in range(7):       # visit every division once, ending where we started
+    d_ = v("wDiv")
+    ticks, cols = DIV_TICKS[d_], DIV_COLS[d_]
+    span, ptick = v("wPageSpan"), v("wPageTick")
+    if (v("wDivTicks"), v("wPageCols"), span) != (ticks, cols, ticks * cols):
+        bad.append(("params", d_))
+    if ptick % 12 != 0 or not (ptick <= v("wRollTick") < ptick + span):
+        bad.append(("page", d_, ptick))
+    settle()
+    for c in range(16):
+        flags = mem[sym["wColHead"] + c]
+        t0 = ptick + c * ticks
+        if c >= cols:
+            want = 4
+        else:
+            want = (2 if t0 % 12 == 0 else 0) | (8 if t0 % 48 == 0 else 0)
+        if (flags & ~1) != want:
+            bad.append(("flags", d_, c, flags, want))
+    chord_grid()
+check("every grid division shows whole bars/beats: bar and beat lines sit on the same ticks",
+      not bad and v("wDiv") == 4, bad[:3])
+for _ in range(5):
+    hold("b")
+    press("left")
+    release("b", frames=4)
+check("cursor back at cell 0", (v("wRollCell"), v("wRollTick")) == (0, 0), (v("wRollCell"), v("wRollTick")))
+settle()
+
 # ---- grid division: triplets by placement, not by commands
 press("select")             # CH2 (empty)
 check("on CH2", v("wSelCh") == 1)
@@ -504,8 +546,11 @@ settle()
 status = [mem[sym["wStatusBuf"] + i] for i in range(9, 14)]
 check("status line shows the division label '1/8T'", status[:4] == [ord(c) - 32 for c in "1/8T"], status)
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
-check("ruler: beat lines every 3 columns at 1/8T (12 ticks / 4)",
-      ruler[2] == 16 and ruler[5] == 17 and ruler[8] == 18 and ruler[11] == 19 and ruler[3] == 0 and ruler[4] == 0, ruler)
+check("ruler at 1/8T: bar 1 at column 0, beat dots every 3 columns (12 ticks / 4)",
+      ruler[2] == 17 and ruler[5] == DOT and ruler[8] == DOT and ruler[11] == DOT and ruler[3] == 0 and ruler[4] == 0, ruler)
+check("1/8T page: 12 columns, one bar; the unused columns are blank",
+      (v("wPageCols"), v("wPageSpan")) == (12, 48) and all(grid(0, c) == 0 for c in range(12, 16)),
+      (v("wPageCols"), v("wPageSpan"), [grid(0, c) for c in range(12, 16)]))
 check("grid: beat column tiles follow the new division",
       (grid(0, 3) - T_EMP_W) & 2 == 2 and (grid(0, 6) - T_EMP_W) & 2 == 2 and (grid(0, 1) - T_EMP_W) & 2 == 0 and (grid(0, 2) - T_EMP_W) & 2 == 0,
       (grid(0, 1), grid(0, 3), grid(0, 6)))

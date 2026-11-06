@@ -144,9 +144,7 @@ RollChannelChanged:
     ld [wRollTick], a       ; snapped to the grid
     ld a, b
     ld [wRollCell], a
-    swap a
-    and 15
-    call RollSetPage
+    call RollPageFromCell
     ld a, d
     add 8                   ; a few rows of headroom above the note
     cp NOTE_MAX + 1
@@ -192,14 +190,20 @@ RollCursorMoved:
 RollScrollFix:
     ld d, 0
     ld a, [wRollCell]
-    swap a
-    and 15                  ; page of the cursor cell
     ld b, a
-    ld a, [wRollPage]
-    cp b
-    jr z, .samePage
+    ld a, [wPageCell]
+    ld c, a
     ld a, b
-    call RollSetPage
+    cp c
+    jr c, .newPage          ; before the page
+    ld a, [wPageCols]
+    add c                   ; first cell after the page
+    ld c, a
+    ld a, b
+    cp c
+    jr c, .samePage         ; inside the page
+.newPage:
+    call RollPageFromCell
     ld d, 1
 .samePage:
     ld a, [wRollNote]
@@ -225,22 +229,52 @@ RollScrollFix:
     rra                     ; carry = changed
     ret
 
-; a = page index -> wRollPage, wPageTick = page * 16 * wDivTicks. Clobbers a, b, c.
+; a = page index -> wRollPage, wPageTick = page * span, wPageCell = page * cols.
+; Clobbers a, b, c.
 RollSetPage:
     ld [wRollPage], a
     ld b, a
-    ld a, [wDivTicks]
-    swap a                  ; span of a page in ticks (16 * div, at most 192)
+    ld a, [wPageSpan]
     ld c, a
     xor a
     inc b
-.l: dec b
-    jr z, .done
+.tick:
+    dec b
+    jr z, .tickDone
     add c
+    jr .tick
+.tickDone:
+    ld [wPageTick], a
+    ld a, [wRollPage]
+    ld b, a
+    ld a, [wPageCols]
+    ld c, a
+    xor a
+    inc b
+.cell:
+    dec b
+    jr z, .cellDone
+    add c
+    jr .cell
+.cellDone:
+    ld [wPageCell], a
+    ret
+
+; Show the page that contains the cursor cell: page = wRollCell / wPageCols.
+; Clobbers a, b, c.
+RollPageFromCell:
+    ld a, [wPageCols]
+    ld c, a
+    ld a, [wRollCell]
+    ld b, 0
+.l: cp c
+    jr c, .done
+    sub c
+    inc b
     jr .l
 .done:
-    ld [wPageTick], a
-    ret
+    ld a, b
+    jp RollSetPage
 
 ; While playing with wFollow set: keep the playhead's tick inside the page.
 ; The user scrolling (moving the cursor) clears wFollow.
@@ -253,16 +287,14 @@ RollFollow:
     sub c
     jr c, .move             ; before the page
     ld d, a
-    ld a, [wDivTicks]
-    swap a
-    ld e, a                 ; span
+    ld a, [wPageSpan]
+    ld e, a
     ld a, d
     cp e
     ret c                   ; still inside the page
 .move:
-    ld a, [wDivTicks]
-    swap a
-    ld e, a                 ; span of a page in ticks
+    ld a, [wPageSpan]
+    ld e, a
     ld a, b                 ; tick
     ld d, 0                 ; d = page index
 .l: cp e
@@ -293,13 +325,18 @@ MarkAllRender:
     ret
 
 ; ---------------------------------------------------------------- column summary
-; For the visible page of the selected channel, work out for each of the 16
-; columns (wDivTicks ticks each):
+; For the visible page of the selected channel, work out for each of the
+; wPageCols columns (wDivTicks ticks each):
 ;   wColPitch[c]  the pitch drawn in the column (0 = none): a note-on inside the
 ;                 column wins, else the note already sounding when it starts,
 ;                 and an OFF in the very first tick of a column silences it
-;   wColHead[c]   bit 0 = a note starts in this column, bit 1 = beat line column
-; and the ruler line (wRulerBuf). Runs outside VBlank: at most about 400 ticks scanned.
+;   wColHead[c]   flags: bit 0 = a note starts in this column, bit 1 = beat line
+;                 column, bit 3 = bar line column, bit 2 = unused column (the
+;                 page has fewer than 16 columns; drawn blank)
+; and the ruler line (wRulerBuf): bar numbers over the bar lines, dots over the
+; other beats, nothing after the loop end. The page starts on a beat, so the
+; bar/beat marks stay where they are when the grid division changes.
+; Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
     ld a, [wSelCh]
     add HIGH(wPattern)
@@ -333,29 +370,46 @@ BuildCols:
 .modDone:
     ld [wBCPhase], a
     ld a, e
-    ld [wBCBeat], a
+    ld [wBCBeat], a         ; absolute beat number (bar = beat / 4)
     xor a
     ld [wBCCol], a
 .col:
+    ld a, [wBCCol]
+    ld hl, wPageCols
+    cp [hl]
+    jp nc, .padFill
     ld a, c
     cp SEQ_TICKS
-    jp nc, .beyond
-    ld a, [wBCPhase]        ; beat line column?
+    jp nc, .padFill         ; (never happens: pages tile the pattern exactly)
+    ld a, [wBCPhase]        ; beat / bar line column?
     and a
-    ld a, 0
-    jr nz, .notBeat
-    ld a, 2
-.notBeat:
+    jr nz, .noBeat
+    ld a, [wBCBeat]
+    and 3
+    ld a, 2                 ; beat line
+    jr nz, .flagSet
+    ld a, 2 | 8             ; bar line (first beat of a bar)
+    jr .flagSet
+.noBeat:
+    xor a
+.flagSet:
     ld [wBCFlag], a
-    and a                   ; ruler: beat number on a beat column, a dot after the loop end
+    and a                   ; ruler tile: only beat columns inside the loop get a mark
     ld a, 0
     jr z, .rulerSet
     ld a, c
     ld hl, wSeqLen
     cp [hl]
+    ld a, 0
+    jr nc, .rulerSet        ; after the loop end: blank
+    ld a, [wBCFlag]
+    bit 3, a
     ld a, '.' - 32
-    jr nc, .rulerSet        ; tick >= loop length
+    jr z, .rulerSet         ; ordinary beat: a dot
     ld a, [wBCBeat]
+    srl a
+    srl a
+    inc a                   ; bar number, 1-based
     call NibbleTile
 .rulerSet:
     call BCStoreRuler
@@ -408,33 +462,22 @@ BuildCols:
     pop af
 .phaseOk:
     ld [wBCPhase], a
-    jr .storeCol
-.beyond:                    ; past the end of the pattern: empty column
+    call BCStoreCol
+    jp .col
+.padFill:                   ; columns the page does not use
+    ld a, [wBCCol]
+    cp SEQ_PAGE
+    jr nc, .finish
     xor a
     ld [wBCPitch], a
     ld [wBCHead], a
+    ld a, 4
     ld [wBCFlag], a
+    xor a
     call BCStoreRuler
-.storeCol:
-    ld a, [wBCCol]
-    add LOW(wColPitch)
-    ld l, a
-    ld h, HIGH(wColPitch)
-    ld a, [wBCPitch]
-    ld [hl], a
-    ld a, l
-    add SEQ_PAGE
-    ld l, a
-    ld a, [wBCHead]
-    ld e, a
-    ld a, [wBCFlag]
-    or e
-    ld [hl], a
-    ld a, [wBCCol]
-    inc a
-    ld [wBCCol], a
-    cp SEQ_PAGE
-    jp c, .col
+    call BCStoreCol
+    jr .padFill
+.finish:
     ; ---- ruler ends: inverted channel label on the left, page number on the right
     ld de, ChanLabels
     ld a, [wSelCh]
@@ -460,6 +503,28 @@ BuildCols:
     call NibbleTile
     add TILE_INV
     ld [hl], a
+    ret
+
+; Store the current column (wBCPitch, wBCHead | wBCFlag) and move to the next one.
+; Clobbers a, e, hl (keeps b, c, d).
+BCStoreCol:
+    ld a, [wBCCol]
+    add LOW(wColPitch)
+    ld l, a
+    ld h, HIGH(wColPitch)
+    ld a, [wBCPitch]
+    ld [hl], a
+    ld a, l
+    add SEQ_PAGE
+    ld l, a
+    ld a, [wBCHead]
+    ld e, a
+    ld a, [wBCFlag]
+    or e
+    ld [hl], a
+    ld a, [wBCCol]
+    inc a
+    ld [wBCCol], a
     ret
 
 ; a = tile -> wRulerBuf[2 + wBCCol]. Clobbers a, hl (keeps b, c, d).
@@ -546,12 +611,12 @@ RenderRow:
     ld a, [wRollNote]
     cp b
     jr nz, .noCursor
-    ld a, [wRollPage]
-    swap a
+    ld a, [wPageCell]
     ld d, a
     ld a, [wRollCell]
     sub d                   ; column = cell - first cell of the page
-    cp SEQ_PAGE
+    ld hl, wPageCols
+    cp [hl]
     jr c, .haveCur
 .noCursor:
     ld a, $FF
@@ -643,19 +708,26 @@ RenderRow:
     ld a, T_NOTE_HEAD
     jr .put
 .emptyCell:
+    bit 2, d                ; unused column (short page): blank
+    ld a, 0
+    jr nz, .put
     ld a, [wRRCur]
     cp e
     ld a, T_CUR_EMP
     jr z, .put
-    bit 1, d                ; background: beat column? black-key row?
-    ld a, 0
-    jr z, .bg
-    ld a, 2
-.bg:
+    bit 3, d                ; background: bar line / beat line / plain sub-grid cell
+    jr z, .notBar
+    ld a, T_BAR_W
+    jr .addBlack
+.notBar:
+    bit 1, d
+    ld a, T_EMP_W
+    jr z, .addBlack
+    ld a, T_EMP_W + 2
+.addBlack:
     ld b, a
-    ld a, [wRRBlack]
+    ld a, [wRRBlack]        ; +1 on black-key rows
     add b
-    add T_EMP_W
 .put:
     ld [hl+], a
     inc e
@@ -864,8 +936,7 @@ RollPlayheadCalc:
     sub c
     jr c, .hide             ; before the page
     ld b, a                 ; b = ticks since the page start
-    ld a, [wDivTicks]
-    swap a                  ; ticks in a page
+    ld a, [wPageSpan]       ; ticks in a page
     cp b
     jr z, .hide
     jr c, .hide             ; after the page
