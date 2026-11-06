@@ -15,7 +15,7 @@
 | M5b | ソング/チェイン(複数パターン) | todo |
 | M6 | **ブリッジ**: 設計・リンクプロトコル、ROM側の MIDI アウト/外部同期(SYNC)、参照実装、**C の中核 + ESP32-S3 ファームウェアのソース**。仕様: [BRIDGE.md](BRIDGE.md)、ファームウェア: [FIRMWARE.md](FIRMWARE.md) | ROM側・参照実装・C中核は done(PyBoyとの往復テスト通過、C中核は正解トレース一致)。ESP-IDF v5.5.6 でビルド成功(SPI版・ビットバン版)。**基板・リンクの実測・実機は todo** |
 | M7 | 実機(Chromatic+フラッシュカート)検証 | todo |
-| M6b | **ケーブルなしのリンク**(本体内蔵 ESP32 と、仮想ボタン+パレット RAM で通信)。調査: [CHROMATIC_INTERNALS.md](CHROMATIC_INTERNALS.md)、ROM 側の設計: [CHROMATIC_LINK.md](CHROMATIC_LINK.md) | ROM 側は done(`src/clink.asm`、キーボード画面方式、PyBoy テスト通過)。実機で確認済み: 仮想ボタンが届く、`gpd` が返る。**未確認: キーボード画面のシンボルで実際に音が鳴ること、上りスロットが `gpd` に見えること。MCU 側: 符号化・通信タスク・コンソールコマンド(`link`/`note`/`midi`)は実装・ホストテスト・ビルドまで done(本体には未書き込み)、BLE MIDI は todo** |
+| M6b | **ケーブルなしのリンク**(本体内蔵 ESP32 と、仮想ボタン+パレット RAM で通信)。調査: [CHROMATIC_INTERNALS.md](CHROMATIC_INTERNALS.md)、ROM 側の設計: [CHROMATIC_LINK.md](CHROMATIC_LINK.md) | ROM 側は done(`src/clink.asm`、キーボード画面方式、PyBoy テスト通過)。実機で確認済み: 仮想ボタンが届く、`gpd` が返る、**MCU のコンソール(`link on`、`note 60 500`)から ROM が鳴った(下り)、ROM のスロットが `gpd` に見えた(上り)**。MCU 側: 符号化・通信タスク・コンソールコマンドは done(v4 を本体に書いて確認)。**未確認: 遅延・連打・ほかのチャンネル。BLE MIDI は todo(アプリ領域の拡張が要る)** |
 | M8 | BLE MIDI(ESP32ブリッジ) | todo |
 
 ## 操作(M4)
