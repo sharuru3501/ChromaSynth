@@ -14,6 +14,12 @@ cd "$WORK"
 git reset -q --hard && git clean -fdq main   # back to the pristine tag, keep build/ and managed_components/
 for p in "$HERE"/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
 cp "$HERE"/src/*.c "$HERE"/src/*.h main/   # the link core and task (src/ is also what the host tests build)
+if [ "${CHLINK_BLE:-1}" = "0" ]; then   # -Os without the BLE stack: to tell the effect of -Os from that of BLE
+    echo "#pragma once" > main/chlink_config.h
+    echo "#define CHLINK_WITH_BLE 0" >> main/chlink_config.h
+    grep -v -E "CONFIG_BT_|CONFIG_BTDM_" sdkconfig.defaults > sdkconfig.defaults.tmp && mv sdkconfig.defaults.tmp sdkconfig.defaults
+    echo "built WITHOUT BLE (CHLINK_BLE=0)"
+fi
 . "${IDF_V53:-$HOME/esp/esp-idf-v5.3}/export.sh" >/dev/null 2>&1
 rm -f sdkconfig   # generated from sdkconfig.defaults (the patches add BLE and -Os there); a stale one would win
 idf.py set-target esp32 >/dev/null 2>&1 || true

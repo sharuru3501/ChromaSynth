@@ -3,11 +3,17 @@
 // Console: `ble` (state and counters), `heap` (free memory: the BLE stack is big, check after it started).
 #include "chlink_ble.h"
 
+#include "chlink_config.h"
 #include "chlink_link.h"
 #include "chlink_proto.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#if CHLINK_WITH_BLE
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
@@ -15,9 +21,6 @@
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
-
-#include <stdio.h>
-#include <string.h>
 
 static uint8_t s_addr_type;
 static volatile bool s_started = false, s_connected = false;
@@ -166,6 +169,8 @@ static int cmd_ble(int argc, char **argv)
     return 0;
 }
 
+#endif  // CHLINK_WITH_BLE
+
 static int cmd_heap(int argc, char **argv)
 {
     (void)argc;
@@ -175,6 +180,7 @@ static int cmd_heap(int argc, char **argv)
     return 0;
 }
 
+#if CHLINK_WITH_BLE
 void ChLinkBle_Start(void)
 {
     const esp_console_cmd_t cmds[] = {
@@ -204,3 +210,11 @@ void ChLinkBle_Start(void)
     nimble_port_freertos_init(host_task);
     s_started = true;
 }
+#else
+void ChLinkBle_Start(void)
+{
+    const esp_console_cmd_t heap = {.command = "heap", .help = "free heap memory", .func = &cmd_heap};
+    (void)esp_console_cmd_register(&heap);
+    printf("BLE MIDI: not built into this firmware (CHLINK_BLE=0)\n");
+}
+#endif
