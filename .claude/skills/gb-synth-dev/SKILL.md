@@ -36,5 +36,8 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - BLE MIDI: GBカート側からは無線を扱えないため、**ESP32 等のブリッジ**が BLE MIDI ⇄ リンクポートを変換する。最後に実装。
 
 ## 検証
+- `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
+- VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。
+- CH3 は同じ period で パルスより1オクターブ低い。ノートを+12 してから period テーブルを引く。
 - `make` 警告ゼロ + `rgbfix -v` 成功は最低条件。
 - 音は SameBoy で聴感確認。MIDI は実機ブリッジが無いうちはエミュレータのリンク入力が無いので、`wRing` にバイトを直接積むテストモードを用意して確認する(予定)。
