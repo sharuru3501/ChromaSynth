@@ -1,16 +1,15 @@
 ; Cable-less link to the Chromatic's built-in ESP32. Design: docs/CHROMATIC_LINK.md.
 ;
 ;   down (ESP32 -> ROM): the ESP32 presses virtual buttons that the FPGA ORs into the
-;     joypad. A frame with UP+DOWN (or LEFT+RIGHT) both pressed cannot come from the
-;     real d-pad, so it is a data symbol (ReadJoy finds it, see joy.asm):
-;       phase A: UP+DOWN pressed, exactly one of LEFT/RIGHT; data bit 4 = LEFT
-;       phase B: LEFT+RIGHT pressed, exactly one of UP/DOWN; data bit 4 = UP
-;       data bits 3..0 = START, SELECT, B, A
+;     joypad. This works on the keyboard screen only (SCREEN_KBD): there ReadJoy (joy.asm) reads
+;     the pad as data and hides it from the UI. (The FPGA cancels UP+DOWN and LEFT+RIGHT, so a
+;     symbol never has an opposite pair.)
+;       phase A: UP held; phase B: DOWN held; data bits 3..0 = LEFT, START, B, A
 ;     Consecutive symbols alternate phase A/B; a repeat of the last phase is the same
 ;     symbol still being held and is ignored.
-;     Packets: the first symbol's bit 4 is the type.
-;       play packet    (3 symbols): on(1) note(7) vel(3) check(3), mono, on the selected channel
-;       general packet (6 symbols): 3 MIDI bytes (24 bits) + 5-bit check; HELLO = $FE $43 $53
+;     Packets: the first symbol's bit 3 is the type; checks are sums mod 15.
+;       play packet    (4 symbols): on(1) note(7) vel(3) check(4), mono, on the selected channel
+;       general packet (8 symbols): 3 MIDI bytes (24 bits), 3 zero bits, check(4); HELLO = $FE $43 $53
 ;   up (ROM -> ESP32): once linked, 4 bytes are written to OBJ palette 1 colours 1-2
 ;     (the FPGA hands them to the MCU as "game palette data"): status, data1, data2 and a
 ;     header len(2) seq(3) ack(1) nack(1). Pad MIDI messages shorter than 3 bytes with $FE.
@@ -69,16 +68,16 @@ CLinkRx:
     ld a, [wClN]
     and a
     jr nz, .more
-    ; first symbol of a packet: bit 4 = type
+    ; first symbol of a packet: bit 3 = type
     xor a
     ld [wClNack], a
-    bit 4, c
+    bit 3, c
     jr z, .type
     inc a
 .type:
     ld [wClMode], a
     ld a, c
-    and $0F
+    and 7
     ld [wClBuf], a
     ld a, 1
     ld [wClN], a
@@ -96,12 +95,12 @@ CLinkRx:
     and a
     jr nz, .general
     ld a, b
-    cp 3
+    cp 4
     ret c
     jr ClPlayDone
 .general:
     ld a, b
-    cp 6
+    cp 8
     ret c
     jr ClGenDone
 
@@ -112,50 +111,54 @@ ClBad:
     ld [wClNack], a
     ret
 
-; Play packet: wClBuf = s0' (on, note 6..4), s1 (note 3..0, vel 2), s2 (vel 1..0, check 3).
+; Play packet: wClBuf = s0' (on, note 6..5), s1 (note 4..1), s2 (note 0, vel 2..0), s3 = check.
 ClPlayDone:
     xor a
     ld [wClN], a
-    ld a, [wClBuf + 2]
-    ld d, a                 ; d = s2
-    srl a
-    srl a
-    srl a
-    ld e, a                 ; e = velocity bits 1..0
     ld a, [wClBuf]
     ld b, a                 ; b = s0'
     ld a, [wClBuf + 1]
     ld c, a                 ; c = s1
+    ld a, [wClBuf + 2]
+    ld e, a                 ; e = s2
     add a, b
-    add a, e
-    and 7
-    ld h, a
-    ld a, d
-    and 7
+    add a, c                ; at most 7 + 15 + 15
+.mod15:
+    cp 15
+    jr c, .modDone
+    sub 15
+    jr .mod15
+.modDone:
+    ld h, a                 ; mod 15, so that every single changed bit (1, 2, 4, 8) changes the check
+    ld a, [wClBuf + 3]
     cp h
-    jr nz, ClBad
+    jp nz, ClBad
     ld a, [wClLinked]
     and a
     ret z                   ; play packets count only after HELLO
     xor a
     ld [wClTimer], a
-    ld a, c                 ; velocity = (s1 bit 0) * 4 + e, 0..7
-    and 1
-    add a, a
-    add a, a
-    or e
+    ld a, b                 ; note = (s0' & 3) << 5 | s1 << 1 | s2 >> 3
+    and 3
     swap a
-    or 8                    ; -> 8..120: ScaleVol turns that into volume 2..16 of 16
-    ld e, a
-    ld a, b                 ; note = (s0' & 7) << 4 | s1 >> 1
-    and 7
-    swap a
+    add a, a
     ld h, a
     ld a, c
+    add a, a
+    or h
+    ld h, a
+    ld a, e
+    srl a
+    srl a
     srl a
     or h
     ld d, a                 ; d = note
-    bit 3, b
+    ld a, e                 ; velocity = s2 & 7 -> (vel << 4) | 8: ScaleVol turns that into volume 2..16 of 16
+    and 7
+    swap a
+    or 8
+    ld e, a
+    bit 2, b
     jr z, .off
     ld a, [wSelCh]
     cp NUM_CH
@@ -181,53 +184,52 @@ ClPlayDone:
     ret nz                  ; a newer note replaced this one (mono legato): leave it
     jp NoteOff
 
-; General packet: wClBuf = s0' (4 bits), s1..s4 (5 bits each), s5 = check.
+; \1 = the first of three symbols (3+4+4 bits, the byte is bits 7..5, 4..1, 0 of them), \2 = destination
+MACRO PackByte
+    ld a, [\1]
+    and 7
+    swap a
+    add a, a
+    ld b, a
+    ld a, [\1 + 1]
+    add a, a
+    or b
+    ld b, a
+    ld a, [\1 + 2]
+    srl a
+    srl a
+    srl a
+    or b
+    ld [\2], a
+ENDM
+
+; General packet: wClBuf = s0' (3 bits), s1..s6 (4 bits each), s7 = check.
+;   B0 = s0' << 5 | s1 << 1 | s2 >> 3, B1 = (s2 & 7) << 5 | s3 << 1 | s4 >> 3,
+;   B2 = (s4 & 7) << 5 | s5 << 1 | s6 >> 3; s6 & 7 must be 0.
 ClGenDone:
     xor a
     ld [wClN], a
     ld hl, wClBuf
-    ld b, 5
+    ld b, 7
 .sum:
     add a, [hl]
     inc hl
     dec b
     jr nz, .sum
-    and $1F
+.mod15:
+    cp 15
+    jr c, .modDone
+    sub 15
+    jr .mod15
+.modDone:
     cp [hl]
     jp nz, ClBad
-    ; bytes: B0 = s0' << 4 | s1 >> 1, B1 = (s1 & 1) << 7 | s2 << 2 | s3 >> 3,
-    ;        B2 = (s3 & 7) << 5 | s4
-    ld a, [wClBuf]
-    swap a
-    ld b, a
-    ld a, [wClBuf + 1]
-    ld c, a
-    srl a
-    or b
-    ld [wClMsg], a
-    ld a, c
-    and 1
-    rrca
-    ld b, a
-    ld a, [wClBuf + 2]
-    add a, a
-    add a, a
-    or b
-    ld b, a
-    ld a, [wClBuf + 3]
-    srl a
-    srl a
-    srl a
-    or b
-    ld [wClMsg + 1], a
-    ld a, [wClBuf + 3]
+    ld a, [wClBuf + 6]
     and 7
-    swap a
-    add a, a
-    ld b, a
-    ld a, [wClBuf + 4]
-    or b
-    ld [wClMsg + 2], a
+    jp nz, ClBad
+    PackByte wClBuf, wClMsg
+    PackByte wClBuf + 2, wClMsg + 1
+    PackByte wClBuf + 4, wClMsg + 2
     ; HELLO?
     ld a, [wClMsg]
     cp CL_HELLO0

@@ -12,45 +12,47 @@ HELLO = (0xFE, 0x43, 0x53)
 PAD = 0xFE  # pads MIDI messages shorter than 3 bytes (Active Sensing: ignored by the ROM's parser)
 
 
-def _check_play(s0, s1, vel_lo):
-    return (s0 + s1 + vel_lo) & 7
+def _check(nibbles):
+    """Sum mod 15 (not & 15): each single changed bit (1, 2, 4, 8) must change it."""
+    return sum(nibbles) % 15
 
 
 def encode_play(on, note, vel127):
-    """Mono keyboard note on the ROM's selected channel: 3 symbols (data bits only, phase added later)."""
+    """Mono keyboard note on the ROM's selected channel: 4 symbols of 4 bits (phase added later).
+    s0 = type 0 | on | note 6..5, s1 = note 4..1, s2 = note 0 | vel(3), s3 = check."""
     vel = max(0, min(7, vel127 >> 4))
-    s0 = (1 if on else 0) << 3 | (note >> 4) & 7  # bit 4 (type) = 0
-    s1 = (note & 15) << 1 | (vel >> 2) & 1
-    s2 = (vel & 3) << 3 | _check_play(s0, s1, vel & 3)
-    return [s0, s1, s2]
+    s0 = (1 if on else 0) << 2 | (note >> 5) & 3
+    s1 = (note >> 1) & 15
+    s2 = (note & 1) << 3 | vel
+    return [s0, s1, s2, _check([s0, s1, s2])]
 
 
 def encode_general(b0, b1, b2):
-    """3 MIDI bytes: 6 symbols. Bit 4 of the first symbol marks a general packet."""
-    s0 = 0x10 | (b0 >> 4)
-    s1 = (b0 & 15) << 1 | (b1 >> 7)
-    s2 = (b1 >> 2) & 31
-    s3 = (b1 & 3) << 3 | (b2 >> 5)
-    s4 = b2 & 31
-    s5 = ((s0 & 15) + s1 + s2 + s3 + s4) & 31
-    return [s0, s1, s2, s3, s4, s5]
+    """3 MIDI bytes: 8 symbols. s0 = type 1 | b0 7..5; the 24 bits run through s0..s6, s6's low 3 bits are 0,
+    s7 = check."""
+    s0 = 8 | b0 >> 5
+    s1 = (b0 >> 1) & 15
+    s2 = (b0 & 1) << 3 | b1 >> 5
+    s3 = (b1 >> 1) & 15
+    s4 = (b1 & 1) << 3 | b2 >> 5
+    s5 = (b2 >> 1) & 15
+    s6 = (b2 & 1) << 3
+    body = [s0 & 7, s1, s2, s3, s4, s5, s6]
+    return [s0, s1, s2, s3, s4, s5, s6, _check(body)]
 
 
 def with_phases(symbols, first_phase):
-    """[(phase, data5)]: phases alternate A(0)/B(1) across ALL symbols, starting at first_phase."""
+    """[(phase, data4)]: phases alternate A(0)/B(1) across ALL symbols, starting at first_phase."""
     return [((first_phase + i) & 1, s) for i, s in enumerate(symbols)]
 
 
 def buttons(phase, data):
-    """Virtual buttons for one symbol. data bits: 4 = LEFT (phase A) / UP (phase B), 3..0 = START SELECT B A."""
-    held = set()
-    if phase == 0:
-        held |= {"up", "down"}
-        held.add("left" if data & 16 else "right")
-    else:
-        held |= {"left", "right"}
-        held.add("up" if data & 16 else "down")
-    for bit, name in ((0, "a"), (1, "b"), (2, "select"), (3, "start")):
+    """Virtual buttons for one symbol (the ROM must be on its keyboard screen).
+    Phase A = UP held, phase B = DOWN held. The FPGA cancels UP+DOWN and LEFT+RIGHT, so a symbol never
+    has an opposite pair. data bits: 0 A, 1 B, 2 START, 3 LEFT. SELECT and RIGHT are never pressed:
+    SELECT belongs to the person (channel select; SELECT+START held = leave the screen)."""
+    held = {"up" if phase == 0 else "down"}
+    for bit, name in ((0, "a"), (1, "b"), (2, "start"), (3, "left")):
         if data & (1 << bit):
             held.add(name)
     return held

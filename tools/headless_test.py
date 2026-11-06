@@ -601,7 +601,14 @@ for i in range(256):
     mem[P + 256 + i] = 0
 press("start")
 pb.tick(4)
-check("START -> back to play screen", v("wScreen") == 0, v("wScreen"))
+check("START from the sequencer -> keyboard screen", v("wScreen") == 3, v("wScreen"))
+pb.button_press("select")
+pb.button_press("start")
+pb.tick(70)
+pb.button_release("select")
+pb.button_release("start")
+pb.tick(6)
+check("SELECT+START held on the keyboard screen -> back to play screen", v("wScreen") == 0, v("wScreen"))
 pb.tick(20)
 shot("12_play_again")
 

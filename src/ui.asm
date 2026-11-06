@@ -55,7 +55,23 @@ BuildScreen:
     jr z, .play
     cp SCREEN_SEQ
     jp z, BuildSeq
+    cp SCREEN_KBD
+    jr z, .kbd
     jr .edit
+.kbd:
+    call .play              ; the channel rows and status line are the play screen's
+    ld hl, _SCRN0 + 4
+    ld de, sKbdTitle
+    call DrawString
+    ld hl, _SCRN0 + 14 * 32
+    ld de, sKbdHelp1
+    call DrawString
+    ld hl, _SCRN0 + 15 * 32
+    ld de, sKbdHelp2
+    call DrawString
+    ld hl, _SCRN0 + 16 * 32
+    ld de, sKbdHelp3
+    jp DrawString
 .play:
     ld hl, _SCRN0 + 4
     ld de, sTitle
@@ -147,6 +163,8 @@ UpdateUI:
     jr z, .play
     cp SCREEN_SEQ
     jp z, UpdateSeq
+    cp SCREEN_KBD
+    jr z, .play
     jp UpdateEdit
 .play:
     ld a, [wDirty]
@@ -505,6 +523,10 @@ sRx:          db "RX", 0
 sHelp1:       db "A:PLAY  START:SCREEN", 0
 sHelp2:       db "SEL:CH  PAD:NOTE", 0
 sHelp3:       db "SEL+A:SAVE +B:LOAD", 0
+sKbdTitle:    db "KEYBOARD   ", 0
+sKbdHelp1:    db "PAD BUTTONS: OFF    ", 0
+sKbdHelp2:    db "SEL TAP: NEXT CH    ", 0
+sKbdHelp3:    db "HOLD SEL+START: EXIT", 0
 sPatch:       db "PATCH", 0
 sCh:          db "CH", 0
 sEditHelp1:   db "UD:ROW  LR:VALUE", 0

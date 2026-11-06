@@ -2,7 +2,7 @@
 """Test of the cable-less Chromatic link (src/clink.asm) with PyBoy. Run `make` first.
 
 The MCU is played by tools/chromatic_link_ref.py: it holds virtual buttons for the ROM's
-joypad reads (down), and decodes what the ROM wrote to OBJ palette 1 (up; the test reads the
+joypad reads (down; the keyboard screen reads them as data), and decodes what the ROM wrote to OBJ palette 1 (up; the test reads the
 ROM's copy of the slot, wClSlot, because PyBoy cannot read CGB palette RAM back).
 What this does NOT prove: that the FPGA really passes the buttons through and returns the
 palette bytes as `gpd` (see docs/CHROMATIC_INTERNALS.md); that needs the real console.
@@ -112,18 +112,46 @@ def press(btn, frames=4):
 
 # ---------------------------------------------------------------- reference model sanity
 syms = cl.with_phases(cl.encode_general(0x90, 0x3C, 0x64), 0)
-check("every symbol frame has UP+DOWN or LEFT+RIGHT, never both pairs",
-      all(("up" in cl.buttons(p, d) and "down" in cl.buttons(p, d)) != ("left" in cl.buttons(p, d) and "right" in cl.buttons(p, d))
-          for p in (0, 1) for d in range(32)))
-check("a general packet is 6 symbols, a play packet 3", len(syms) == 6 and len(cl.encode_play(1, 60, 127)) == 3)
+allb = [cl.buttons(p, d) for p in (0, 1) for d in range(32)]
+check("a symbol never presses SELECT or RIGHT, never UP+DOWN or LEFT+RIGHT (the FPGA would cancel them)",
+      all("select" not in b and "right" not in b and not ({"up", "down"} <= b) and not ({"left", "right"} <= b) for b in allb))
+check("a symbol presses exactly one of UP/DOWN (the phase)", all(("up" in b) != ("down" in b) for b in allb))
+check("the 16 data values give 16 different button sets per phase", all(len({frozenset(cl.buttons(p, d)) for d in range(16)}) == 16 for p in (0, 1)))
+check("every symbol is 4 bits", all(0 <= x < 16 for x in cl.encode_general(0xFF, 0xFF, 0xFF) + cl.encode_play(1, 127, 127)))
+check("a single changed bit always changes the check (play)", all(
+    cl.encode_play(1, 60, 127)[3] != cl._check([cl.encode_play(1, 60, 127)[i] ^ (1 << k) if i == j else cl.encode_play(1, 60, 127)[i] for i in range(3)])
+    for j in range(3) for k in range(4)))
+check("a general packet is 8 symbols, a play packet 4", len(syms) == 8 and len(cl.encode_play(1, 60, 127)) == 4)
+
+# ---------------------------------------------------------------- the keyboard screen
+def enter_kbd():
+    for _ in range(8):
+        if v("wScreen") == 3:
+            break
+        press("start")
+    pb.tick(10)
+
+
+press("a")  # a normal screen: A plays a note (the symbols below are only read on the keyboard screen)
+pb.tick(20)
+screens = [v("wScreen")]
+for _ in range(4):
+    press("start")
+    screens.append(v("wScreen"))
+check("START cycles play -> edit -> sequencer -> keyboard, and does not leave the keyboard screen", screens == [0, 1, 2, 3, 3], screens)
+enter_kbd()
+check("on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 
 # ---------------------------------------------------------------- not linked: nothing happens, buttons are masked
 screen0 = v("wScreen")
 play(1, 60)
 check("not linked: a play packet does nothing", cur(0) == 0 and v("wClLinked") == 0, cur(0))
-check("not linked: the symbols never reach the UI (screen unchanged)", v("wScreen") == screen0)
+check("the symbols (they press START, A, B, UP, DOWN, LEFT) never reach the UI: still the keyboard screen",
+      v("wScreen") == screen0 and v("wSeqPlay") == 0, v("wScreen"))
 press("a")
-check("a real A press still plays a note (unlinked)", cur(v("wSelCh")) != 0 or True)
+check("a real A press on the keyboard screen plays nothing (it is not a symbol)", cur(v("wSelCh")) == 0, cur(v("wSelCh")))
+press("start")
+check("a real START on the keyboard screen does not change the screen", v("wScreen") == 3, v("wScreen"))
 pb.tick(30)
 
 # ---------------------------------------------------------------- HELLO
@@ -131,7 +159,7 @@ general(*cl.HELLO)
 check("HELLO links", v("wClLinked") == 1)
 check("HELLO is not fed to the MIDI parser", v("wMidiStatus") in (0, ) or True)
 check("ack = phase of the last accepted symbol (uplink header)", (slot()[3] >> 1) & 1 == (next_phase() ^ 1), slot())
-check("the symbol frames did not touch the UI (screen, sequencer)", v("wScreen") == screen0 and v("wSeqPlay") == 0)
+check("the symbol frames did not touch the UI (screen, sequencer)", v("wScreen") == 3 and v("wSeqPlay") == 0)
 
 # ---------------------------------------------------------------- play packets (mono, selected channel)
 mem[sym["wSelCh"]] = 0
@@ -178,8 +206,9 @@ general(0xB1, 123, 0x00)
 check("CC123 over the link silences the channel", cur(1) == 0, cur(1))
 
 # ---------------------------------------------------------------- real buttons mixed in: detected, resent
+# (a person pressing LEFT while a symbol is held: that changes data bit 3 = 8, which "sum & 7" would miss)
 before = cur(0)
-play(1, 65, extra=["select"], extra_at=1)
+play(1, 65, extra=["left"], extra_at=1)
 check("a real button pressed during a packet corrupts it: rejected", cur(0) == before and v("wClNack") == 1,
       (cur(0), v("wClNack")))
 check("the ROM reports the failure to the ESP32 (nack bit)", slot()[3] & 1 == 1, slot())
@@ -190,24 +219,35 @@ play(0, 65)
 
 # the same for a general packet (its 5-bit check)
 before = cur(1)
-general(0x91, 0x41, 0x50, extra=["select"], extra_at=2)
+general(0x91, 0x41, 0x50, extra=["left"], extra_at=3)
 check("a real button pressed during a general packet corrupts it: rejected", cur(1) == before and v("wClNack") == 1,
       (cur(1), v("wClNack")))
 general(0x91, 0x41, 0x50)
 check("... and the resent general packet is accepted", cur(1) == 0x41 and v("wClNack") == 0, cur(1))
 general(0x81, 0x41, 0x00)
 
-# ack follows the phase of the last accepted symbol, for both phases
+# ack follows the phase of the last accepted symbol, checked after every single symbol (both phases occur)
 acks_ok = True
 seen = set()
-for i in range(4):
-    for on in (1, 0):
-        play(on, 60)
+for on in (1, 0, 1, 0):
+    for ph, data in cl.with_phases(cl.encode_play(on, 60, 127), next_phase()):
+        hold(cl.buttons(ph, data), 3)
         pb.tick(1)
-        want = next_phase() ^ 1
-        seen.add(want)
-        acks_ok &= ((slot()[3] >> 1) & 1) == want
-check("ack in the uplink header equals the last accepted phase (both 0 and 1 seen)", acks_ok and seen == {0, 1}, seen)
+        acks_ok &= ((slot()[3] >> 1) & 1) == ph
+        seen.add(ph)
+    release_all()
+check("ack in the uplink header equals the phase of the last accepted symbol (both 0 and 1 seen)", acks_ok and seen == {0, 1}, seen)
+play(0, 60)
+
+# a physical SELECT during a symbol makes it unreadable (SELECT is never data): the packet stalls, the sender waits
+# for the half packet to time out and sends it again
+before = cur(0)
+play(1, 66, extra=["select"], extra_at=1)  # (the SELECT tap also moves the channel selection: put it back)
+mem[sym["wSelCh"]] = 0
+pb.tick(35)
+play(1, 66)
+check("a symbol lost to a physical SELECT: after the idle timeout the resent packet works", cur(0) == 66, cur(0))
+play(0, 66)
 
 # a half packet is dropped after a while
 send(cl.with_phases(cl.encode_play(1, 67, 127)[:2], next_phase()))
@@ -216,12 +256,25 @@ play(1, 69)
 check("a half-received packet times out and the next packet is still understood", cur(0) == 69, cur(0))
 play(0, 69)
 
-# ---------------------------------------------------------------- real buttons between packets work normally
-screen0 = v("wScreen")
-press("start")
-check("a real START between packets still changes the screen", v("wScreen") != screen0, v("wScreen"))
-while v("wScreen") != screen0:
-    press("start")
+# ---------------------------------------------------------------- physical buttons on the keyboard screen
+ch0 = v("wSelCh")
+press("select")
+check("SELECT tap on the keyboard screen selects the next channel", v("wSelCh") == (ch0 + 1) % 4, (ch0, v("wSelCh")))
+mem[sym["wSelCh"]] = 0
+pb.button_press("select")
+pb.button_press("start")
+pb.tick(40)
+check("SELECT+START held 40 frames: still on the keyboard screen", v("wScreen") == 3)
+pb.tick(40)
+check("SELECT+START held 80 frames: back to the play screen", v("wScreen") == 0, v("wScreen"))
+pb.button_release("select")
+pb.button_release("start")
+pb.tick(10)
+check("leaving did not start the sequencer or save", v("wSeqPlay") == 0)
+enter_kbd()
+check("re-entered the keyboard screen", v("wScreen") == 3)
+general(*cl.HELLO)
+check("HELLO again after the screen change", v("wClLinked") == 1)
 
 # ---------------------------------------------------------------- up: slots
 TX = sym["wTx"]

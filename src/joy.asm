@@ -1,5 +1,6 @@
 ; Joypad handling.
-;  All screens: START = next screen (play -> edit -> sequencer),
+;  All screens: START = next screen (play -> edit -> sequencer -> keyboard; not on the keyboard
+;               screen, which is left by holding SELECT+START),
 ;               SELECT+START = sequencer play/stop,
 ;               SELECT tap = next channel (all screens; the roll shows it),
 ;               SELECT+A = save to SRAM, SELECT+B = load.
@@ -13,9 +14,16 @@ INCLUDE "synth.inc"
 SECTION "Joypad", ROM0
 
 ; wJoy bits: 7 down, 6 up, 5 left, 4 right, 3 start, 2 select, 1 B, 0 A (1 = pressed).
-; The Chromatic's ESP32 can press virtual buttons (src/clink.asm). Their data frames have
-; UP+DOWN or LEFT+RIGHT both pressed, which the real d-pad cannot do: such a frame is
-; handed to CLinkRx and wJoy stays 0 so that the UI never sees it.
+;
+; The Chromatic's ESP32 can press virtual buttons (docs/CHROMATIC_LINK.md). The FPGA cancels
+; UP+DOWN and LEFT+RIGHT, so a symbol never contains an opposite pair. The keyboard screen
+; (SCREEN_KBD) reads the pad as data and hides it from the UI:
+;   symbol = exactly one of UP (phase A) / DOWN (phase B) held; RIGHT and SELECT not held;
+;   data bits 3..0 = LEFT, START, B, A.
+; The ESP32 never presses SELECT or RIGHT. SELECT alone still reaches the UI (tap = next channel);
+; SELECT+START held for KBD_EXIT_FRAMES leaves the screen.
+DEF KBD_EXIT_FRAMES EQU 60
+
 ReadJoy:
     ld a, [wJoy]
     ld [wJoyPrev], a
@@ -27,52 +35,73 @@ ReadJoy:
     call ReadPadRaw         ; a virtual button changed between the two groups: read again
 .stable:
     ld b, a
-    and $C0
-    cp $C0
-    jr nz, .notUD
-    ld a, b                 ; UP+DOWN: phase A symbol if exactly one of LEFT/RIGHT
-    and $30
-    jr z, .masked
-    cp $30
-    jr z, .masked
-    ld d, 0
-    cp $20
-    jr nz, .phaseA
-    ld d, $10               ; LEFT pressed = data bit 4
-.phaseA:
-    ld c, 0
-    jr .sym
-.notUD:
-    ld a, b
-    and $30
-    cp $30
+    ld a, [wScreen]
+    cp SCREEN_KBD
+    jr z, .kbd
+    ld a, [wKbdExit]        ; $FF = just left the keyboard screen with SELECT+START still held
+    inc a
     jr nz, .plain
-    ld a, b                 ; LEFT+RIGHT: phase B symbol if exactly one of UP/DOWN
+    ld a, b
+    and $0C
+    jr nz, .hide            ; wait until both are released, or the UI would toggle the sequencer
+    ld [wKbdExit], a        ; a = 0
+.plain:
+    ld a, b
+    ld [wJoy], a
+    ret
+.kbd:
+    ld a, b
+    and $0C
+    cp $0C
+    jr nz, .noExit
+    ld a, [wKbdExit]
+    inc a
+    ld [wKbdExit], a
+    cp KBD_EXIT_FRAMES
+    jr c, .hide
+    xor a                   ; leave: back to the play screen
+    ld [wClN], a
+    ld [wClHave], a
+    ld a, $FF
+    ld [wKbdExit], a
+    ld a, 1                 ; request = SCREEN_PLAY + 1
+    ld [wScreenReq], a
+    jr .hide
+.noExit:
+    xor a
+    ld [wKbdExit], a
+    ld a, b
+    and $14                 ; SELECT or RIGHT: never part of a symbol
+    jr nz, .hide
+    ld a, b
     and $C0
-    jr z, .masked
-    cp $C0
-    jr z, .masked
-    ld d, 0
+    ld c, 0
     cp $40
-    jr nz, .phaseB
-    ld d, $10               ; UP pressed = data bit 4
-.phaseB:
-    ld c, 1
+    jr z, .sym              ; UP only = phase A
+    inc c
+    cp $80
+    jr nz, .hide            ; neither: not a symbol
 .sym:
     ld a, b
-    and $0F
-    or d
+    and $03                 ; A, B
+    ld d, a
+    bit 3, b
+    jr z, .noStart
+    set 2, d
+.noStart:
+    bit 5, b
+    jr z, .noLeft
+    set 3, d
+.noLeft:
+    ld a, d
     ld [wClSym], a
     ld a, c
     ld [wClPh], a
     ld a, 1
     ld [wClHave], a
-.masked:
-    xor a
-    ld [wJoy], a
-    ret
-.plain:
+.hide:
     ld a, b
+    and $04                 ; only SELECT reaches the UI
     ld [wJoy], a
     ret
 
@@ -170,7 +199,7 @@ HandleJoy:
 .cycle:
     ld a, [wScreen]
     inc a
-    cp 3
+    cp 4
     jr c, .reqOk
     xor a
 .reqOk:
