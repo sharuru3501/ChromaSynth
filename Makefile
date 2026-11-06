@@ -33,6 +33,7 @@ gen:
 	python3 tools/gen_tempo.py > src/tempo.inc
 	python3 tools/gen_divs.py > src/divs.inc
 	python3 tools/gen_pattern.py > src/pattern.inc
+	python3 tools/gen_bend.py > src/bend.inc
 
 run: $(TARGET)
 	open -a SameBoy $(TARGET)

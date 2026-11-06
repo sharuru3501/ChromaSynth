@@ -62,6 +62,11 @@ wMidiChNum:     db          ; MIDI channel (1-16) of the message being handled
 wMidiVel:       db
 wMidiRR:        db          ; last GB channel that was stolen for a new note
 wVoiceVol:      ds NUM_CH   ; volume nibble last used per channel (after velocity; debug/test)
+wBend:          ds NUM_CH   ; pitch bend per GB channel: MIDI MSB 0..127, 64 = centre
+wTickOn:        ds NUM_CH   ; 1 = this channel's period was last written with a modulation offset
+wTickOff:       dw          ; scratch: vibrato offset while the bend offset is computed
+wBendP:         db          ; scratch: (2048 - period) >> 3
+wBendSign:      db
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
 wSeqPlay:       db          ; 1 = sequencer running

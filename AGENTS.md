@@ -14,14 +14,15 @@ MIDI入出力(まず有線、最後に BLE MIDI)も行う。詳細設計は [doc
 ```bash
 make          # build/chromasynth.gb を生成
 make run      # SameBoy で起動
-make gen      # notetable/font/waves/tempo/divs/pattern の include を再生成
+make gen      # notetable/font/waves/tempo/divs/pattern/bend の include を再生成
 python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install pyboy pillow、先に make)
 python3 tools/headless_save_test.py   # SRAM保存のテスト
+python3 tools/headless_midi_test.py   # MIDI入力のテスト(リングバッファへ直接バイトを注入)
 make clean
 ```
 
 ## ディレクトリ
-- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(ティック再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。ピアノロールの設計は `docs/ROLL_DESIGN.md`シンボルは `-E` で全export
+- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`(MIDI解析とルーティング。仕様は `docs/MIDI.md`), `joy.asm`, `ui.asm`, `seq.asm`(ティック再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。ピアノロールの設計は `docs/ROLL_DESIGN.md`シンボルは `-E` で全export
 - `inc/` 共有 include(`hardware.inc` は必要なレジスタだけ定義した自前版)
 - `tools/` コード/データ生成スクリプト
 - `docs/` 設計・ロードマップ
@@ -31,7 +32,7 @@ make clean
 1. **小さく進める**: マイルストーン単位(ROADMAP参照)で、各ステップで `make` が通る状態でコミット。
 2. **コミットはConventional風**(`feat:`/`fix:`/`docs:`/`chore:`)。ビルド成果物(`build/`, `*.gb`)は無視。
 3. **`-Weverything` で警告ゼロ**を維持。
-4. 生成ファイル(`src/notetable.inc`, `font.inc`, `waves.inc`, `tempo.inc`, `divs.inc`, `pattern.inc`)は手で編集しない。`tools/gen_*.py` を直して `make gen`。音域は `inc/synth.inc` が唯一の定義元。
+4. 生成ファイル(`src/notetable.inc`, `font.inc`, `waves.inc`, `tempo.inc`, `divs.inc`, `pattern.inc`, `bend.inc`)は手で編集しない。`tools/gen_*.py` を直して `make gen`。音域は `inc/synth.inc` が唯一の定義元。
 5. 割り込みハンドラは最小限に(シリアルISRはリングバッファに積むだけ)。重い処理はメインループ。
 6. APU レジスタの注意: NR12 等のエンベロープは**トリガ時にしか反映されない**、DAC は NRx2 の上位5bitが0で OFF、波形RAMは CH3 停止中にのみ安全に書ける。
 7. 実機/エミュレータで確認できていない動作を「動作確認済み」と書かない。ROADMAP の状態欄に `untested` を付ける。

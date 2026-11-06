@@ -112,7 +112,17 @@ press("down")
 press("down")
 press("down")
 press("down")
-check("rows 4 (hidden) skipped on the way down: VELO then MODW", v("wEditRow") in (5, 6), v("wEditRow"))
+check("row 4 is BEND (visible), then VELO and MODW", v("wEditRow") == 4, v("wEditRow"))
+for _ in range(20):
+    press("right", frames=2)
+check("BEND range is clamped at 12 semitones", mem[MB + 4] == 12, mem[MB + 4])
+for _ in range(20):
+    press("left", frames=2)
+mem[MB + 4] = 2
+press("down")
+press("down")
+press("down")
+check("row 7 (hidden) is skipped: wraps to row 0", v("wEditRow") in (0, 7) and v("wEditRow") != 7, v("wEditRow"))
 
 # ---- polyphony: CH1 and CH2 both listen to MIDI channel 1
 check("CH1 and CH2 both on MIDI 1", mem[MB] == 1 and mem[MB + 1] == 1)
@@ -192,6 +202,68 @@ midi(0xB0, 1, 127)
 check("mod wheel disabled in the settings: CC1 ignored", mem[sym["wMod"]] == 0, mem[sym["wMod"]])
 mem[MB + 6] = 1
 midi(0x80, 69, 0)
+
+# ---- pitch bend (MSB only; range = BEND semitones)
+def out(ch=0):
+    return mem[sym["wOut"] + 2 * ch] | (mem[sym["wOut"] + 2 * ch + 1] << 8)
+
+
+def tick_ms(n=6):
+    pb.tick(n)
+
+
+reset_midi_block()
+midi(0x90, 69, 100)                 # A4: period 1750
+base = mem[sym["wBase"]] | (mem[sym["wBase"] + 1] << 8)
+check("A4 base period", base == 1750, base)
+check("bend wheel starts in the middle", mem[sym["wBend"]] == 64)
+midi(0xE0, 0, 127)                  # full up, +-2 semitones: +2 semitones = period ~1783
+tick_ms()
+check("bend up by 2 semitones: period +33 (exact value 32.6)", 1780 <= out() <= 1786, out())
+midi(0xE0, 0, 0)                    # full down
+tick_ms()
+check("bend down by 2 semitones: period -36 (exact value -36.4)", 1710 <= out() <= 1717, out())
+midi(0xE0, 0, 96)                   # half way up: +1 semitone
+tick_ms()
+check("half way up: +1 semitone (exact +16.7)", 1764 <= out() <= 1769, out())
+midi(0xE0, 0, 64)                   # back to centre
+tick_ms()
+check("wheel back in the middle: the plain period is restored", out() == base, out())
+frozen = out()
+tick_ms(30)
+check("...and nothing keeps rewriting it", out() == frozen)
+midi(0xE1, 0, 127)                  # other MIDI channel
+tick_ms()
+check("bend on another MIDI channel does not touch CH1", out() == base and mem[sym["wBend"]] == 64)
+mem[MB + 4] = 0                     # range 0: bend disabled
+midi(0xE0, 0, 127)
+tick_ms()
+check("range 0 disables the bend", out() == base, out())
+mem[MB + 4] = 12                    # +-12 semitones: clamped inside the register range
+tick_ms()
+check("range 12, full up: exactly an octave (A4 -> A5, period +149)", 1895 <= out() <= 1903, out())
+midi(0xE0, 0, 0)
+tick_ms()
+check("range 12, full down: exactly an octave (A4 -> A3, period -298)", 1448 <= out() <= 1458, out())
+mem[MB + 4] = 2
+midi(0xE0, 0, 127)                  # hold the bend up, then play a new note
+midi(0x80, 69, 0)
+midi(0x90, 60, 100)                 # C4
+tick_ms()
+base_c4 = mem[sym["wBase"]] | (mem[sym["wBase"] + 1] << 8)
+bent = out()
+check("a new note starts already bent (about +2 semitones)", base_c4 + 20 < bent < base_c4 + 60, (base_c4, bent))
+# bend and vibrato together: the pitch oscillates around the bent centre
+midi(0xB0, 1, 127)
+seen = []
+for _ in range(60):
+    pb.tick(1)
+    seen.append(out())
+check("vibrato and bend add up: oscillation around the bent pitch", min(seen) < bent < max(seen) and min(seen) > base_c4, (base_c4, bent, min(seen), max(seen)))
+midi(0xB0, 1, 0)
+midi(0xE0, 0, 64)
+midi(0x80, 60, 0)
+reset_midi_block()
 
 # ---- all notes off
 mem[MB + 1] = 1

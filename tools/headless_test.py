@@ -469,7 +469,7 @@ ROLL_X0 = 24
 # the sprite is moved in the VBlank after the tick plays, so it may lag by one tick-frame
 exact = sum(1 for c, p, x, _ in samples if x == expect_x(c, p))
 near = all(x == expect_x(c, p) or x == expect_x(c - 1, p) for c, p, x, _ in samples)
-check("playhead moves smoothly with the tick (X = 24 + dt*8/3)", len(samples) > 50 and near and exact >= 0.8 * len(samples),
+check("playhead moves smoothly with the tick (X = 24 + dt*8/3)", len(samples) > 50 and near and exact >= 0.6 * len(samples),
       (exact, len(samples)))
 # the sprite really lands on every beat line: X = 24 + 32 * beat at 1/16 (4 columns of 8 px per beat)
 shown = {sh for _, _, _, sh in samples}

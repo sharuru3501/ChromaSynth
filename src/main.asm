@@ -44,6 +44,11 @@ EntryPoint:
     call SetDivision
     ld a, 127
     ld [wNoteVel], a       ; full velocity unless a MIDI note says otherwise
+    ld a, 64               ; pitch bend wheel in the middle
+    ld [wBend], a
+    ld [wBend + 1], a
+    ld [wBend + 2], a
+    ld [wBend + 3], a
     ld a, 60                ; piano-roll cursor starts on C4; window top = C5
     ld [wRollNote], a
     ld a, 72

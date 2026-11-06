@@ -109,6 +109,7 @@ VoicePulse1:
     call SetCur
     call GetPeriod
     call StoreBase
+    call ApplyBendDE        ; a held bend applies from the first moment
     ld hl, wPatch
     ld a, [hl+]
     rrca
@@ -151,6 +152,7 @@ VoicePulse2:
     call SetCur
     call GetPeriod
     call StoreBase
+    call ApplyBendDE
     ld hl, wPatch + PATCH_SIZE
     ld a, [hl+]
     rrca
@@ -184,6 +186,7 @@ VoiceWave:
     ld b, a
     call GetPeriod
     call StoreBase
+    call ApplyBendDE
     xor a
     ldh [rNR30], a          ; DAC off while rewriting wave RAM
     call LoadWave
@@ -310,6 +313,91 @@ TickChannel:                ; c = channel 0..2
     ld a, [hl]
     and a
     ret z
+    call VibOffset          ; hl = signed vibrato offset
+    ld a, l
+    ld [wTickOff], a
+    ld a, h
+    ld [wTickOff + 1], a
+    ld a, c                 ; de = base period of the note
+    add a
+    add LOW(wBase)
+    ld l, a
+    ld h, HIGH(wBase)
+    ld a, [hl+]
+    ld e, a
+    ld d, [hl]
+    call BendOffset         ; hl = signed pitch bend offset (keeps c, de)
+    ld a, [wTickOff]
+    add l
+    ld l, a
+    ld a, [wTickOff + 1]
+    adc h
+    ld h, a                 ; hl = vibrato + bend
+    ld a, h
+    or l
+    jr nz, .modulated
+    ld hl, wTickOn          ; nothing to add: if the last write was modulated,
+    call HLplusC            ; put the plain period back once, then stay quiet
+    ld a, [hl]
+    and a
+    ret z
+    xor a
+    ld [hl], a
+    ld hl, 0
+    jr .apply
+.modulated:
+    push hl
+    ld hl, wTickOn
+    call HLplusC
+    ld [hl], 1
+    pop hl
+.apply:
+    add hl, de              ; base + offset, clamped to 0..2047
+    bit 7, h
+    jr z, .notNeg
+    ld hl, 0
+.notNeg:
+    ld a, h
+    cp 8
+    jr c, .inRange
+    ld hl, $07FF
+.inRange:
+    ld d, h
+    ld e, l
+    ld a, c
+    add a
+    add LOW(wOut)
+    ld l, a
+    ld h, HIGH(wOut)
+    ld [hl], e
+    inc l
+    ld [hl], d
+    ld a, c
+    and a
+    jr z, .ch1
+    dec a
+    jr z, .ch2
+    ld a, e
+    ldh [rNR33], a
+    ld a, d
+    ldh [rNR34], a          ; bit 7 clear: no retrigger
+    ret
+.ch1:
+    ld a, e
+    ldh [rNR13], a
+    ld a, d
+    ldh [rNR14], a
+    ret
+.ch2:
+    ld a, e
+    ldh [rNR23], a
+    ld a, d
+    ldh [rNR24], a
+    ret
+
+; c = channel -> hl = signed vibrato offset in period units (0 if there is none).
+; Keeps c. Clobbers a, b, d, e.
+VibOffset:
     ld a, c
     add a
     add a
@@ -331,7 +419,10 @@ TickChannel:                ; c = channel 0..2
 .patchDepth:
     ld a, b
     and a
-    ret z
+    jr nz, .active
+    ld hl, 0
+    ret
+.active:
     ld a, [hl]              ; speed
     ld d, a
     add a
@@ -370,8 +461,7 @@ TickChannel:                ; c = channel 0..2
     ld [wVibM], a
     ld a, d
     ld [wVibSign], a
-    ; de = base period
-    ld a, c
+    ld a, c                 ; de = base period
     add a
     add LOW(wBase)
     ld l, a
@@ -379,8 +469,7 @@ TickChannel:                ; c = channel 0..2
     ld a, [hl+]
     ld e, a
     ld d, [hl]
-    ; hl = 2048 - base
-    ld hl, 2048
+    ld hl, 2048             ; hl = 2048 - base
     ld a, l
     sub e
     ld l, a
@@ -397,65 +486,118 @@ TickChannel:                ; c = channel 0..2
     or b
     ld b, a
     ld a, [wVibM]
-    push de
     call Mul8               ; hl = m * (P >> 4)
     add hl, hl
-    ld a, h                 ; off = product >> 7
-    pop de
-    ld b, a
+    ld l, h                 ; off = product >> 7  (<= 54)
+    ld h, 0
     ld a, [wVibSign]
     and a
-    jr nz, .neg
-    ld a, e
-    add b
-    ld e, a
-    jr nc, .chkHi
-    inc d
-.chkHi:
-    ld a, d
-    cp 8
-    jr c, .write
-    ld de, $07FF
-    jr .write
-.neg:
-    ld a, e
-    sub b
-    ld e, a
-    jr nc, .write
-    dec d
-    bit 7, d
-    jr z, .write
-    ld de, 0
-.write:
-    ld a, c
-    add a
-    add LOW(wOut)
+    ret z
+    xor a                   ; negative: hl = -hl
+    sub l
     ld l, a
-    ld h, HIGH(wOut)
-    ld [hl], e
-    inc l
-    ld [hl], d
-    ld a, c
+    ld a, 0
+    sbc h
+    ld h, a
+    ret
+
+; c = channel (0..2), de = base period -> hl = signed period offset for the channel's
+; pitch bend. Keeps c and de. Clobbers a, b.
+; With P = 2048 - period (proportional to 1/frequency) the exact offsets are
+;   up    P * (1 - 2^(-s/12))        down   -P * (2^(s/12) - 1)      (s = semitones)
+; The factors come from BendUp / BendDown (tools/gen_bend.py), looked up by
+; m = |bend| * range / 4 (so s = m / 16); then offset = (P >> 3) * factor / 16.
+BendOffset:
+    push de
+    ld hl, 2048             ; wBendP = (2048 - period) >> 3
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a
+    ld a, l
+    srl a
+    srl a
+    srl a
+    ld b, a
+    ld a, h
+    swap a
+    add a                   ; h << 5
+    or b
+    ld [wBendP], a
+    ld hl, wBend
+    call HLplusC
+    ld a, [hl]
+    sub 64                  ; signed bend, -64..63
+    jr z, .zero
+    ld d, 0
+    bit 7, a
+    jr z, .mag
+    cpl
+    inc a                   ; |bend|
+    inc d                   ; downwards
+.mag:
+    ld e, a
+    ld a, d
+    ld [wBendSign], a
+    ld a, [wPatch + MIDI_BLOCK + PM_BEND]
     and a
-    jr z, .ch1
-    dec a
-    jr z, .ch2
-    ld a, e
-    ldh [rNR33], a
-    ld a, d
-    ldh [rNR34], a          ; bit 7 clear: no retrigger
+    jr z, .zero             ; range 0: bend disabled
+    ld b, a                 ; b = range in semitones
+    ld a, e                 ; a = |bend|
+    call Mul8               ; hl = |bend| * range  (<= 768)
+    srl h
+    rr l
+    srl h
+    rr l                    ; hl = m (<= 192)
+    ld de, BendUp
+    ld a, [wBendSign]
+    and a
+    jr z, .lookup
+    ld de, BendDown
+.lookup:
+    add hl, de
+    ld b, [hl]              ; factor * 128
+    ld a, [wBendP]
+    call Mul8               ; hl = (P >> 3) * factor
+    REPT 4
+        srl h
+        rr l
+    ENDR                    ; / 16
+    ld a, [wBendSign]
+    and a
+    jr z, .done
+    xor a                   ; downwards: hl = -hl
+    sub l
+    ld l, a
+    ld a, 0
+    sbc h
+    ld h, a
+.done:
+    pop de
     ret
-.ch1:
-    ld a, e
-    ldh [rNR13], a
-    ld a, d
-    ldh [rNR14], a
+.zero:
+    ld hl, 0
+    pop de
     ret
-.ch2:
-    ld a, e
-    ldh [rNR23], a
-    ld a, d
-    ldh [rNR24], a
+
+; de = base period of a note starting on channel c -> de plus the pitch bend that
+; is in effect, clamped to 0..2047. Keeps c. Clobbers a, b, hl.
+ApplyBendDE:
+    call BendOffset
+    add hl, de
+    bit 7, h
+    jr z, .pos
+    ld hl, 0
+.pos:
+    ld a, h
+    cp 8
+    jr c, .ok
+    ld hl, $07FF
+.ok:
+    ld d, h
+    ld e, l
     ret
 
 ; a = patch volume 0..15 -> volume scaled by the note velocity (wNoteVel 0..127)
@@ -514,5 +656,6 @@ DefaultPatch:
 DirtyBits:  db %00000001, %00000010, %00000100, %00001000
             db %00010000, %00100000, %01000000, %10000000
 
+INCLUDE "bend.inc"
 INCLUDE "notetable.inc"
 INCLUDE "waves.inc"

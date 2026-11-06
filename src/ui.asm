@@ -573,7 +573,7 @@ PT_Midi:
     PARAM 16, "CH2 "
     PARAM 16, "CH3 "
     PARAM 16, "CH4 "
-    PARAM $FF, "    "
+    PARAM 12, "BEND"
     PARAM 1, "VELO"
     PARAM 1, "MODW"
     PARAM $FF, "    "

@@ -7,7 +7,8 @@
 ; else to an idle one, else it steals one in round-robin order.
 ;
 ; Handled messages: note on/off (velocity 0 = off), CC1 (mod wheel -> vibrato
-; depth), CC120/CC123 (all sound/notes off). Realtime messages are ignored for now
+; depth), CC120/CC123 (all sound/notes off), pitch bend (MSB only; range = the BEND
+; setting in semitones). Realtime messages are ignored for now
 ; (clock/start/stop belong to the DAW-sync milestone).
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
@@ -83,7 +84,9 @@ MidiByte:
     jr z, MidiNoteOff
     cp $B0
     jp z, MidiCC
-    ret                     ; (pitch bend etc.: not handled yet)
+    cp $E0
+    jp z, MidiBend
+    ret                     ; (aftertouch etc.: not handled)
 .noteOn:
     ld a, b                 ; velocity
     and a
@@ -167,6 +170,23 @@ MidiNoteOff:
     push bc
     call NoteOff
     pop bc
+.next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .l
+    ret
+
+; Pitch bend: wMidiData1 = LSB (ignored), b = MSB (64 = centre).
+MidiBend:
+    ld d, b
+    ld c, 0
+.l: call IsAssigned
+    and a
+    jr z, .next
+    ld hl, wBend
+    call HLplusC
+    ld [hl], d
 .next:
     inc c
     ld a, c
