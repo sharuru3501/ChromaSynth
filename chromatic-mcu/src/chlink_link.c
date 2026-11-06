@@ -22,6 +22,7 @@
 #include "chlink.h"
 #include "chlink_proto.h"
 #include "esp_console.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "fpga_tx.h"
 #include "freertos/FreeRTOS.h"
@@ -102,22 +103,58 @@ static bool may_send(bool handshake)
     return st == RS_OTHER || (handshake && st == RS_KBD);
 }
 
-// Sends the symbols, checking the ROM before each one. Returns false (and releases the buttons) if the ROM
-// is no longer on the keyboard screen; the packet is then left half sent, which the ROM drops by itself.
+// Waits until the microsecond clock reaches t_us. The tick is 10 ms, so long waits use vTaskDelay and the last few
+// milliseconds a short busy wait (it never exceeds 10 ms, and the FPGA reply the link task waits for is already in).
+static void wait_until(int64_t t_us)
+{
+    for (;;)
+    {
+        const int64_t rem = t_us - esp_timer_get_time();
+        if (rem <= 0) return;
+        if (rem >= 10000)
+        {
+            vTaskDelay(pdMS_TO_TICKS((uint32_t)(rem / 1000)));
+        }
+        else
+        {
+            esp_rom_delay_us((uint32_t)rem);
+        }
+    }
+}
+
+// Sends the symbols. The ROM is looked at before the first symbol, and again before every later one: that
+// look is made at the END of the previous symbol's hold (the FPGA needs about 7 ms to answer), so it costs
+// no extra time. Returns false (and releases the buttons) if the ROM is no longer on the keyboard screen; the
+// packet is then left half sent, which the ROM drops by itself.
 static bool send_symbols(const uint8_t *syms, int n, bool handshake)
 {
+    if (!may_send(handshake))
+    {
+        FPGA_Tx_RawPoke(0);
+        s_aborted++;
+        s_armed = false;
+        return false;
+    }
     for (int i = 0; i < n; i++)
     {
-        if (!may_send(handshake))
-        {
-            FPGA_Tx_RawPoke(0);
-            s_aborted++;
-            s_armed = false;
-            return false;
-        }
+        const int64_t t0 = esp_timer_get_time();
+        const int64_t hold_us = (int64_t)s_hold_ms * 1000;
         FPGA_Tx_RawPoke(chl_buttons(s_phase, syms[i]));
-        delay_ms(s_hold_ms);
         s_phase ^= 1;
+        if (i + 1 < n)
+        {
+            int64_t est = s_check.last ? (int64_t)s_check.last : 8000;   // how long the look takes
+            if (est > 20000) est = 20000;
+            wait_until(t0 + hold_us - est - 500);
+            if (!may_send(handshake))
+            {
+                FPGA_Tx_RawPoke(0);
+                s_aborted++;
+                s_armed = false;
+                return false;
+            }
+        }
+        wait_until(t0 + hold_us);
     }
     FPGA_Tx_RawPoke(0);
     delay_ms(GAP_MS);
