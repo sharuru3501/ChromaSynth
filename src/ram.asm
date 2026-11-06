@@ -46,6 +46,7 @@ wMidiData1:     db
 wLastRx:        db          ; last raw MIDI byte (shown on screen)
 wJoy:           db
 wJoyPrev:       db
+wRepTimer:      db          ; frames until the held d-pad direction repeats
 wBootTimer:     db          ; frames left of the boot beep
 wSelCh:         db          ; channel the pad plays/edits (0..3)
 wPadCh:         db          ; channel the A button was pressed on

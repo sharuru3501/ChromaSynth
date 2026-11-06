@@ -45,6 +45,32 @@ HandleJoy:
     and b
     ld d, a                 ; d = newly pressed
 
+    ; d-pad auto-repeat: a held direction becomes a fresh "press" every
+    ; REPEAT_RATE frames after REPEAT_DELAY frames. Any change of the d-pad
+    ; state (new direction, release) restarts the delay.
+    ld a, [wJoy]
+    and %11110000
+    ld b, a                 ; b = d-pad directions held now
+    ld a, [wJoyPrev]
+    and %11110000
+    cp b
+    jr nz, .repeatRestart
+    ld a, b
+    and a
+    jr z, .repeatDone
+    ld hl, wRepTimer
+    dec [hl]
+    jr nz, .repeatDone
+    ld [hl], REPEAT_RATE
+    ld a, d
+    or b
+    ld d, a
+    jr .repeatDone
+.repeatRestart:
+    ld a, REPEAT_DELAY
+    ld [wRepTimer], a
+.repeatDone:
+
     bit PADB_SELECT, d
     jr z, .noSelPress
     xor a

@@ -276,6 +276,22 @@ press("down")
 press("left")
 check("back at C4 step 0", (v("wRollNote"), v("wRollStep")) == (60, 0))
 
+# --- d-pad auto-repeat: holding RIGHT keeps moving the cursor after an initial delay
+hold("right", frames=0)
+pb.tick(10)
+check("auto-repeat: only the first move before the initial delay", v("wRollStep") == 1, v("wRollStep"))
+pb.tick(30)
+check("auto-repeat: a held direction keeps moving the cursor", v("wRollStep") >= 6, v("wRollStep"))
+release("right")
+stop_at = v("wRollStep")
+pb.tick(20)
+check("auto-repeat stops on release", v("wRollStep") == stop_at)
+hold("left", frames=0)
+pb.tick(120)
+release("left")
+check("auto-repeat to the left stops at step 0", v("wRollStep") == 0, v("wRollStep"))
+pb.tick(10)
+
 # B + d-pad jumps and must not delete anything
 hold("b")
 press("right")
@@ -428,6 +444,7 @@ check("playhead sprite follows the played step", len(heads) > 50 and near and ex
       (exact, len(heads)))
 oam_x = mem[0xFE01]
 check("playhead sprite is placed in OAM", mem[0xFE00] == 24 and oam_x == 24 + 8 * v("wPlayCol"), (mem[0xFE00], oam_x))
+check("playhead line sits at the left edge of its cell (on the beat line)", mem[0x8000 + 72 * 16] == 0xC0 and mem[0x8000 + 72 * 16 + 1] == 0x00)
 check("16 playhead sprites stacked on the grid rows", mem[0xFE00 + 15 * 4] == 24 + 15 * 8 and mem[0xFE02] == 72)
 tap_while("select", "start")
 check("SELECT+START stops playback", v("wSeqPlay") == 0)
