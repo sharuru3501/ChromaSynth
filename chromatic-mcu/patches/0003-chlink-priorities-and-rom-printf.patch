@@ -1,0 +1,102 @@
+--- a/main/chlink.c
++++ b/main/chlink.c
+@@ -7,6 +7,7 @@
+ #include "chlink.h"
+ 
+ #include "esp_console.h"
++#include "esp_rom_sys.h"
+ #include "fpga_tx.h"
+ #include "freertos/FreeRTOS.h"
+ #include "freertos/semphr.h"
+@@ -16,6 +17,16 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++// Print on the console (stdout) AND straight into the UART FIFO via the ROM, so that a lost or
++// unflushed stdout cannot hide the self test.
++#define OUT(...)                \
++    do                          \
++    {                           \
++        esp_rom_printf(__VA_ARGS__); \
++        printf(__VA_ARGS__);    \
++        fflush(stdout);         \
++    } while (0)
++
+ static volatile bool s_want = false;
+ static uint8_t s_gpd[8];
+ static SemaphoreHandle_t s_sem = NULL;
+@@ -36,7 +47,7 @@
+ {
+     (void)argc;
+     (void)argv;
+-    printf("chlink test firmware v1 (stock v4.6 + sym/gpd + selftest, console on USB)\n");
++    printf("chlink test firmware v2 (stock v4.6 + sym/gpd + selftest, console on USB)\n");
+     return 0;
+ }
+ 
+@@ -81,11 +92,11 @@
+     uint8_t g[8];
+     if (read_gpd(g))
+     {
+-        printf("%s gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", tag, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
++        OUT("%s gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", tag, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+     }
+     else
+     {
+-        printf("%s gpd timeout\n", tag);
++        OUT("%s gpd timeout\n", tag);
+     }
+ }
+ 
+@@ -94,27 +105,28 @@
+ static void selftest_task(void *arg)
+ {
+     (void)arg;
++    OUT("CHLINK v2 selftest task started\n");
+     vTaskDelay(pdMS_TO_TICKS(6000));
+-    printf("CHLINK v1 selftest start\n");
+-    printf("T1 gpd x5 (200 ms apart)\n");
++    OUT("CHLINK v2 selftest start\n");
++    OUT("T1 gpd x5 (200 ms apart)\n");
+     for (int i = 0; i < 5; i++)
+     {
+         print_gpd("T1");
+         vTaskDelay(pdMS_TO_TICKS(200));
+     }
+-    printf("T2 virtual START pulse: write MCU_buttons = 01 for 150 ms, then 00\n");
++    OUT("T2 virtual START pulse: write MCU_buttons = 01 for 150 ms, then 00\n");
+     FPGA_Tx_RawPoke(0x01);
+     vTaskDelay(pdMS_TO_TICKS(150));
+     FPGA_Tx_RawPoke(0x00);
+-    printf("T2 done (did the game react to START?)\n");
++    OUT("T2 done (did the game react to START?)\n");
+     vTaskDelay(pdMS_TO_TICKS(1000));
+-    printf("T3 gpd x5 again\n");
++    OUT("T3 gpd x5 again\n");
+     for (int i = 0; i < 5; i++)
+     {
+         print_gpd("T3");
+         vTaskDelay(pdMS_TO_TICKS(200));
+     }
+-    printf("selftest done; heartbeat gpd every 3 s\n");
++    OUT("selftest done; heartbeat gpd every 3 s\n");
+     for (;;)
+     {
+         vTaskDelay(pdMS_TO_TICKS(3000));
+@@ -166,5 +178,5 @@
+     {
+         (void)esp_console_cmd_register(&cmds[i]);
+     }
+-    (void)xTaskCreate(selftest_task, "chlink_selftest", 3072, NULL, 3, NULL);
++    (void)xTaskCreate(selftest_task, "chlink_selftest", 4096, NULL, 18, NULL);   // above the stock FPGA (15) and power (16) tasks
+ }
+--- a/main/main.c
++++ b/main/main.c
+@@ -342,6 +342,7 @@
+ 
+     // Prompt to be printed before each line.
+     ReplConfig.prompt = "mcu> ";
++    ReplConfig.task_priority = 17;   // chlink: above the stock FPGA (15) and power (16) tasks
+     ReplConfig.max_cmdline_length = 1024;
+ 
+     // chlink: keep the console on the default UART0 pins (GPIO1/3), which the FPGA's USB
