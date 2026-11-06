@@ -122,7 +122,11 @@ mem[MB + 4] = 2
 press("down")
 press("down")
 press("down")
-check("row 7 (hidden) is skipped: wraps to row 0", v("wEditRow") in (0, 7) and v("wEditRow") != 7, v("wEditRow"))
+check("row 7 is SYNC (the last row)", v("wEditRow") == 7, v("wEditRow"))
+for _ in range(20):
+    press("right", frames=2)
+check("SYNC is clamped at 2 (0 = off, 1 = out, 2 = in)", mem[MB + 7] == 2, mem[MB + 7])
+mem[MB + 7] = 0
 
 # ---- polyphony: CH1 and CH2 both listen to MIDI channel 1
 check("CH1 and CH2 both on MIDI 1", mem[MB] == 1 and mem[MB + 1] == 1)
@@ -286,6 +290,199 @@ midi(0xE0, 0, 64)                   # pitch bend (not handled yet): ignored clea
 midi(0xC0, 5)                       # program change: one data byte
 midi(0x90, 62, 100)
 check("unhandled messages are skipped without upsetting running status", cur(0) == 62 or cur(1) == 62, (cur(0), cur(1)))
+
+# =====================================================================
+# Link protocol and DAW sync (docs/BRIDGE.md)
+# =====================================================================
+TX = sym["wTx"]
+SYNC = MB + 7
+IDLE = 0xFD
+
+
+isr_reply = []
+isr_input = [None]
+# PyBoy cannot feed the serial unit (SB always reads back as $FF), so both sides of the ISR are
+# handled with hooks:
+#  - right after the ISR's "ldh a, [rSB]" (SerialISR + 5: push af/bc/hl are 3 bytes, ldh is 2)
+#    register A is overwritten with the byte the bridge "clocked in";
+#  - at ".send" register B holds the byte the ISR is about to load into SB: that is the reply.
+
+
+def _inject(ctx):
+    if isr_input[0] is not None:
+        pb.register_file.A = isr_input[0]
+
+
+pb.hook_register(0, sym["SerialISR"] + 5, _inject, None)
+pb.hook_register(0, sym["SerialISR.send"], lambda ctx: isr_reply.append(pb.register_file.B), None)
+
+
+def serial_byte(b):
+    """What the hardware does when the bridge clocks one byte through the GB: SB holds the
+    byte, the serial interrupt fires, the ISR loads the reply for the next transfer.
+    Returns that reply."""
+    isr_reply.clear()
+    isr_input[0] = b
+    mem[0xFF0F] = mem[0xFF0F] | 0x08
+    pb.tick(2)
+    isr_input[0] = None
+    assert len(isr_reply) == 1, f"serial ISR ran {len(isr_reply)} times"
+    return isr_reply[0]
+
+
+def tx_bytes():
+    return [mem[TX + i] for i in range(mem[sym["wTxHead"]])]
+
+
+def reset_tx():
+    mem[sym["wTxHead"]] = 0
+    mem[sym["wTxTail"]] = 0
+
+
+reset_midi_block()
+reset_tx()
+
+# ---- the serial ISR: idle filler in, queue out
+head = v("wRingHead")
+last_rx = v("wLastRx")
+check("ISR: an idle byte is answered with idle", serial_byte(IDLE) == IDLE)
+check("...and is not stored (ring and RX display untouched)", v("wRingHead") == head and v("wLastRx") == last_rx)
+mem[TX + 0], mem[TX + 1], mem[TX + 2] = 0x90, 60, 100
+mem[sym["wTxHead"]] = 3
+check("ISR: with bytes queued the reply is the next byte, in order",
+      [serial_byte(IDLE), serial_byte(IDLE), serial_byte(IDLE), serial_byte(IDLE)] == [0x90, 60, 100, IDLE])
+check("ISR: the queue is empty again (tail caught up with head)", v("wTxHead") == v("wTxTail"))
+for b in (0x90, 62, 100):           # a note-on arriving byte by byte through the ISR
+    serial_byte(b)
+pb.tick(3)
+check("a MIDI message clocked in through the serial ISR plays", cur(0) == 62, cur(0))
+check("...and the ring holds exactly what arrived", v("wRingHead") == (head + 3) & 0xFF, v("wRingHead"))
+midi(0xB0, 123, 0)
+
+# ---- SYNC_IN: the DAW's clock drives the sequencer (one $F8 per tick, 12 per beat)
+mem[SYNC] = 2
+midi(0xFA)
+check("SYNC_IN: MIDI start begins playback from tick 0", (v("wSeqPlay"), v("wSeqTick")) == (1, 0), (v("wSeqPlay"), v("wSeqTick")))
+pb.tick(30)
+check("no clock, no progress: the sequencer waits for the DAW", v("wSeqTick") == 0 and cur(0) == 0, (v("wSeqTick"), cur(0)))
+midi(0xF8)
+pb.tick(2)
+check("first clock plays tick 0 (demo: CH1 C4, CH3 C3)", (v("wSeqCur"), cur(0), cur(2)) == (0, 60, 48), (v("wSeqCur"), cur(0), cur(2)))
+for _ in range(12):
+    midi(0xF8)
+    pb.tick(1)
+check("12 clocks = one beat = 12 ticks", v("wSeqCur") == 12, v("wSeqCur"))
+check("tick 12 is where the demo plays E4 on CH1", cur(0) == 64, cur(0))
+for _ in range(12):
+    midi(0xF8)
+    pb.tick(1)
+check("tick 24 plays the bass G2 (43)", (v("wSeqCur"), cur(2)) == (24, 43), (v("wSeqCur"), cur(2)))
+midi(0xF8, 0xF8, 0xF8, 0xF8)
+pb.tick(2)
+check("a burst of 4 clocks is played within one frame", v("wSeqCur") == 28, v("wSeqCur"))
+midi(0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8)
+pb.tick(3)
+check("a burst larger than 4 is limited (the rest is dropped, nothing hangs)", 31 <= v("wSeqCur") <= 32, v("wSeqCur"))
+before = v("wSeqCur")
+midi(0x90, 62, 100, 0xF8, 100)      # a clock byte in the middle of a message
+pb.tick(2)
+check("a realtime byte inside a message does not break it (note-on still plays)", 62 in (cur(0), cur(1)), (cur(0), cur(1)))
+check("...and the clock inside it was counted", v("wSeqCur") == before + 1, (before, v("wSeqCur")))
+midi(0xFC)
+check("MIDI stop: playback stops and every channel is silent", v("wSeqPlay") == 0 and [cur(c) for c in range(4)] == [0, 0, 0, 0],
+      (v("wSeqPlay"), [cur(c) for c in range(4)]))
+stopped_at = v("wSeqTick")
+midi(0xF8, 0xF8)
+pb.tick(3)
+check("clocks while stopped are ignored", v("wSeqTick") == stopped_at and v("wSeqCur") == before + 1)
+midi(0xFB)
+check("MIDI continue resumes from where it stopped", (v("wSeqPlay"), v("wSeqTick")) == (1, stopped_at), (v("wSeqPlay"), v("wSeqTick")))
+midi(0xFA)
+check("MIDI start rewinds to tick 0", v("wSeqTick") == 0)
+midi(0xFC)
+# local start/stop is ignored while following the DAW
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(4)
+check("SYNC_IN: SELECT+START on the unit does nothing (the DAW is the master)", v("wSeqPlay") == 0, v("wSeqPlay"))
+mem[SYNC] = 0
+midi(0xFA)
+check("SYNC off: realtime messages are ignored", v("wSeqPlay") == 0)
+mem[SYNC] = 1
+midi(0xFA)
+check("SYNC out: incoming start is ignored too", v("wSeqPlay") == 0)
+
+# ---- SYNC_OUT: this unit is the master and sends clock, start/stop and the sequencer's notes
+reset_tx()
+mem[SYNC] = 1
+mem[sym["wBpm"]] = 120
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(2)
+check("SYNC_OUT: SELECT+START plays and queues MIDI start ($FA) first", v("wSeqPlay") == 1 and tx_bytes()[:1] == [0xFA], tx_bytes()[:4])
+pb.tick(120)                        # 2 seconds at 120 BPM = 48 ticks = 4 beats
+out = tx_bytes()
+clocks = out.count(0xF8)
+check("one $F8 per tick: about 48 clocks in 2 s at 120 BPM (12 per beat)", 45 <= clocks <= 50, clocks)
+check("the first tick sends C4 on MIDI channel 1 as note-on, velocity 100", [0xF8, 0x90, 60, 100] == out[1:5], out[:8])
+check("the bass (CH3 -> MIDI channel 3) goes out too: note-on 48 on $92", [0x92, 48, 100] in [out[i:i + 3] for i in range(len(out) - 2)])
+check("a note that ends is sent as note-off ($80, note, 0)", [0x80, 60, 0] in [out[i:i + 3] for i in range(len(out) - 2)])
+check("the queue never overflows or stalls playback", len(out) < 255 and v("wSeqPlay") == 1, len(out))
+pb.tick(300)                        # nobody drains the queue: it fills up and drops bytes quietly
+check("a full queue drops bytes quietly and the sequencer keeps running", v("wSeqPlay") == 1 and mem[sym["wTxHead"]] != mem[sym["wTxTail"]])
+tail = v("wTxTail")
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(3)
+check("SELECT+START again stops it", v("wSeqPlay") == 0)
+reset_tx()
+mem[SYNC] = 1
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(60)
+playing = tx_bytes()
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(3)
+out = tx_bytes()
+check("stop: MIDI stop ($FC) goes out, preceded by note-offs for the notes still sounding", out[-1] == 0xFC and 0x80 in out[len(playing):], out[len(playing):])
+reset_tx()
+mem[SYNC] = 0
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(60)
+check("SYNC off: nothing is queued for the bridge", tx_bytes() == [], tx_bytes()[:6])
+pb.button_press("select")
+pb.tick(3)
+pb.button_press("start")
+pb.tick(3)
+pb.button_release("start")
+pb.button_release("select")
+pb.tick(3)
 
 pb.stop(save=False)
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")

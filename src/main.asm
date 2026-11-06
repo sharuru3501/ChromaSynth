@@ -78,7 +78,7 @@ EntryPoint:
     ldh [rNR50], a
 
     ; --- link port as MIDI input: external clock (we are the slave)
-    xor a
+    ld a, MIDI_IDLE
     ldh [rSB], a
     ld a, $80
     ldh [rSC], a
@@ -131,23 +131,46 @@ VBlankISR:
     pop af
     reti
 
-; Serial transfer complete: push received byte into the ring, re-arm.
+; Serial transfer complete (the bridge clocked one byte through us).
+;   in : SB = the byte that arrived; MIDI_IDLE means "nothing to say" and is dropped
+;   out: SB = next byte for the bridge (from wTx, else MIDI_IDLE), SC re-armed so
+;        that we are ready for the next byte. The bridge must wait >= ~200 us between
+;        bytes: this routine takes about 100 cycles (~100 us) and the next byte must
+;        not start before SB/SC are ready.
 SerialISR:
     push af
+    push bc
     push hl
+    ldh a, [rSB]
+    cp MIDI_IDLE
+    jr z, .reply
+    ld b, a
     ld a, [wRingHead]
     ld l, a
     ld h, HIGH(wRing)
-    ldh a, [rSB]
-    ld [hl], a
+    ld [hl], b
     inc l                   ; 256-byte aligned ring: wraps naturally
     ld a, l
     ld [wRingHead], a
-    xor a
-    ldh [rSB], a            ; byte returned to the master (MIDI out later)
+.reply:
+    ld a, [wTxHead]
+    ld b, a
+    ld a, [wTxTail]
+    cp b
+    ld b, MIDI_IDLE
+    jr z, .send             ; queue empty
+    ld l, a
+    ld h, HIGH(wTx)
+    ld b, [hl]
+    inc a
+    ld [wTxTail], a
+.send:
+    ld a, b
+    ldh [rSB], a
     ld a, $80
     ldh [rSC], a
     pop hl
+    pop bc
     pop af
     reti
 

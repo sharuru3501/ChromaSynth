@@ -5,6 +5,11 @@ INCLUDE "synth.inc"
 SECTION "MIDI ring", WRAM0, ALIGN[8]
 wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 
+; Bytes waiting to go out to the bridge (main loop -> ISR). 256-byte ring that wraps
+; naturally; the main loop owns wTxHead, the ISR owns wTxTail.
+SECTION "MIDI tx ring", WRAM0, ALIGN[8]
+wTx:            ds 256
+
 ; Aligned so that "base + small offset" never carries into the high byte.
 SECTION "Patch", WRAM0, ALIGN[6]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
@@ -39,6 +44,9 @@ wOut:           ds NUM_CH * 2   ; last period written by the vibrato (debug/test
 SECTION "Vars", WRAM0
 wRingHead:      db          ; written by ISR
 wRingTail:      db          ; written by main loop
+wTxHead:        db          ; next free slot in wTx (written by the main loop)
+wTxTail:        db          ; next byte the ISR hands to the bridge
+wExtTicks:      db          ; clock ticks received from the DAW and not played yet (0..4)
 wVBlank:        db
 wMidiStatus:    db          ; running status (0 = none)
 wMidiCount:     db          ; data bytes received for current message

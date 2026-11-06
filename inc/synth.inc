@@ -19,6 +19,13 @@ DEF MIDI_BLOCK EQU NUM_CH * PATCH_SIZE
 DEF PM_BEND EQU 4           ; pitch bend range in semitones
 DEF PM_VELO EQU 5           ; 1 = velocity changes the volume
 DEF PM_MODW EQU 6           ; 1 = CC1 (mod wheel) raises the vibrato depth
+DEF PM_SYNC EQU 7           ; sync mode, see SYNC_*
+DEF SYNC_OFF EQU 0          ; no clock, nothing sent
+DEF SYNC_OUT EQU 1          ; this unit is the master: sends clock/start/stop and the sequencer's notes
+DEF SYNC_IN  EQU 2          ; this unit follows the DAW: clock/start/stop come from the link
+; Link protocol (see docs/BRIDGE.md): both directions use $FD as "nothing to send".
+; Clock is one $F8 per sequencer tick (12 per beat), not the MIDI standard 24 per beat.
+DEF MIDI_IDLE EQU $FD
 DEF PATCH_VIBD EQU 6
 DEF PATCH_VIBS EQU 7
 

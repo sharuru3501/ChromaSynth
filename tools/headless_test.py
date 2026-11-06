@@ -539,6 +539,9 @@ settle()
 # ---- grid division: triplets by placement, not by commands
 press("select")             # CH2 (empty)
 check("on CH2", v("wSelCh") == 1)
+check("SELECT tap on the roll places no stray note (it once trashed the d register)",
+      all(cell(1, i) == 0 for i in range(256)) and all(cell(0, i) == mem[sym["DefaultPattern"] + i] for i in range(0)),
+      [(i, cell(1, i)) for i in range(256) if cell(1, i)][:4])
 settle()
 chord_grid()
 check("B+A: grid 1/16 -> 1/16T (2 ticks per cell)", (v("wDiv"), v("wDivTicks")) == (5, 2), (v("wDiv"), v("wDivTicks")))

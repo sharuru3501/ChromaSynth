@@ -576,6 +576,6 @@ PT_Midi:
     PARAM 12, "BEND"
     PARAM 1, "VELO"
     PARAM 1, "MODW"
-    PARAM $FF, "    "
+    PARAM 2, "SYNC"
 
 INCLUDE "font.inc"

@@ -8,8 +8,8 @@
 ;
 ; Handled messages: note on/off (velocity 0 = off), CC1 (mod wheel -> vibrato
 ; depth), CC120/CC123 (all sound/notes off), pitch bend (MSB only; range = the BEND
-; setting in semitones). Realtime messages are ignored for now
-; (clock/start/stop belong to the DAW-sync milestone).
+; setting in semitones). Realtime messages (clock/start/continue/stop) drive the
+; sequencer in SYNC_IN mode. Output towards the bridge: MidiOut and friends.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -46,7 +46,7 @@ MidiByte:
     jr z, .data
     ld a, b
     cp $F8
-    ret nc                  ; realtime (clock/start/stop): TODO sync
+    jr nc, MidiRealtime     ; realtime messages never disturb running status
     ld [wMidiStatus], a
     xor a
     ld [wMidiCount], a
@@ -81,7 +81,7 @@ MidiByte:
     cp $90
     jr z, .noteOn
     cp $80
-    jr z, MidiNoteOff
+    jp z, MidiNoteOff
     cp $B0
     jp z, MidiCC
     cp $E0
@@ -90,9 +90,143 @@ MidiByte:
 .noteOn:
     ld a, b                 ; velocity
     and a
-    jr z, MidiNoteOff       ; velocity 0 == note off
+    jp z, MidiNoteOff       ; velocity 0 == note off
     ld [wMidiVel], a
-    ; fall through
+    jp MidiNoteOn
+
+; Realtime message in a (>= $F8). The bridge sends one $F8 per sequencer tick (12 per
+; beat) and $FA/$FB/$FC for start/continue/stop. Only acted on in SYNC_IN mode.
+MidiRealtime:
+    ld c, a
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_IN
+    ret nz
+    ld a, c
+    cp $F8
+    jr z, .clock
+    cp $FA
+    jr z, .start
+    cp $FB
+    jr z, .continue
+    cp $FC
+    ret nz
+    xor a                   ; stop
+    ld [wSeqPlay], a
+    ld [wExtTicks], a
+    call SeqSilence
+    jp MarkSeqStatus
+.clock:
+    ld a, [wSeqPlay]
+    and a
+    ret z                   ; not running: ticks mean nothing
+    ld a, [wExtTicks]
+    cp 4
+    ret nc                  ; a burst larger than the frame loop can absorb: drop
+    inc a
+    ld [wExtTicks], a
+    ret
+.start:
+    xor a
+    ld [wSeqTick], a        ; start from the beginning; the next clock plays tick 0
+    ld [wExtTicks], a
+.continue:
+    ld a, 1
+    ld [wSeqPlay], a
+    ld [wFollow], a
+    xor a
+    ld [wExtTicks], a
+    jp MarkSeqStatus
+
+; a = byte -> queue it for the bridge (dropped when the queue is full, e.g. nobody
+; is clocking the link). Clobbers a, b, hl.
+MidiOut:
+    ld b, a
+    ld a, [wTxHead]
+    inc a
+    ld hl, wTxTail
+    cp [hl]
+    ret z                   ; full
+    dec a
+    ld l, a
+    ld h, HIGH(wTx)
+    ld [hl], b
+    inc a
+    ld [wTxHead], a
+    ret
+
+; Same, but only when this unit is the sync master (SYNC_OUT).
+MidiOutSync:
+    ld c, a
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_OUT
+    ret nz
+    ld a, c
+    jr MidiOut
+
+; The sequencer starts note d on GB channel c: send it (and the note-off of whatever
+; that channel was playing). Only in SYNC_OUT mode, only if the channel has a MIDI
+; channel. Keeps c and d. Clobbers a, b, e, hl.
+NoteOutOn:
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_OUT
+    ret nz
+    ld hl, wPatch + MIDI_BLOCK
+    call HLplusC
+    ld a, [hl]
+    and a
+    ret z
+    dec a
+    ld e, a                 ; e = MIDI channel 0..15
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    and a
+    jr z, .on
+    ld a, $80
+    or e
+    call MidiOut
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    call MidiOut
+    xor a
+    call MidiOut
+.on:
+    ld a, $90
+    or e
+    call MidiOut
+    ld a, d
+    call MidiOut
+    ld a, 100
+    jp MidiOut
+
+; The sequencer releases GB channel c: send the note-off of what it is playing.
+; Keeps c. Clobbers a, b, e, hl.
+NoteOutOff:
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_OUT
+    ret nz
+    ld hl, wPatch + MIDI_BLOCK
+    call HLplusC
+    ld a, [hl]
+    and a
+    ret z
+    dec a
+    ld e, a
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    and a
+    ret z                   ; nothing sounding
+    ld a, $80
+    or e
+    call MidiOut
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    call MidiOut
+    xor a
+    jp MidiOut
 
 ; wMidiData1 = note, wMidiChNum = MIDI channel, wMidiVel = velocity.
 MidiNoteOn:

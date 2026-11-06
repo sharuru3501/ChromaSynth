@@ -31,6 +31,9 @@ SECTION "Sequencer", ROM0
 ; ---------------------------------------------------------------- playback
 ; Start/stop (SELECT+START on any screen).
 SeqToggle:
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_IN
+    ret z                   ; following the DAW: start/stop come over the link
     ld a, [wSeqPlay]
     xor 1
     ld [wSeqPlay], a
@@ -45,24 +48,48 @@ SeqToggle:
     ld [wSeqAcc], a
     ld a, d
     ld [wSeqAcc + 1], a
+    ld a, $FA               ; MIDI start (only sent when SYNC_OUT)
+    call MidiOutSync
     jp MarkSeqStatus
 .stop:
+    call SeqSilence
+    ld a, $FC               ; MIDI stop
+    call MidiOutSync
+    jp MarkSeqStatus
+
+; Release every channel (and tell the bridge about the notes that were sounding).
+SeqSilence:
     ld c, 0
-.silence:
+.l: push bc
+    call NoteOutOff
+    pop bc
     push bc
     call NoteOff
     pop bc
     inc c
     ld a, c
     cp NUM_CH
-    jr c, .silence
-    jp MarkSeqStatus
+    jr c, .l
+    ret
 
-; Called once per frame.
+; Called once per frame. Internal clock: the 8.8 accumulator below. SYNC_IN: the
+; DAW's clock (MidiRealtime counts the ticks, at most 4 waiting).
 SeqTick:
     ld a, [wSeqPlay]
     and a
     ret z
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_IN
+    jr nz, .internal
+.external:                  ; one tick per clock byte that came in over the link
+    ld a, [wExtTicks]
+    and a
+    ret z
+    dec a
+    ld [wExtTicks], a
+    call SeqStep
+    jr .external
+.internal:
     ld hl, wSeqAcc + 1
     inc [hl]                ; acc += 256
     call GetTickLen         ; de = tick length
@@ -87,6 +114,8 @@ SeqTick:
 SeqStep:
     ld a, [wSeqTick]
     ld [wSeqCur], a
+    ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)
+    call MidiOutSync
     ld c, 0
 .ch:
     ld a, [wSeqCur]
@@ -100,11 +129,15 @@ SeqStep:
     cp CELL_OFF
     jr nz, .on
     push bc
+    call NoteOutOff
     call NoteOff
     pop bc
     jr .next
 .on:
     push bc
+    ld d, a
+    call NoteOutOn          ; (SYNC_OUT: note-off of the old note, then the note-on)
+    ld a, d
     call NoteOn
     pop bc
 .next:

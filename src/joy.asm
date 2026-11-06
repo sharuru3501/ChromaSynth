@@ -146,7 +146,10 @@ HandleJoy:
     ld [wDirtyEdit], a
     ld a, [wScreen]
     cp SCREEN_SEQ
-    call z, RollChannelChanged ; the roll shows the selected channel
+    jr nz, .noSel
+    push de                 ; RollChannelChanged trashes d (this frame's new presses)
+    call RollChannelChanged ; the roll shows the selected channel
+    pop de
 .noSel:
     ld a, [wScreen]
     and a
