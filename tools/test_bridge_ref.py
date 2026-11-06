@@ -90,45 +90,96 @@ class Clock(unittest.TestCase):
 
     def test_12_to_24_per_beat_is_evenly_spaced(self):
         b = br.Bridge()
-        period = 60 / 120 / 12                           # 120 BPM: 41.67 ms per tick
+        period = 41_666                                  # 120 BPM: 41.67 ms per tick, in us
         for i in range(8):
             b.gb_in(br.CLOCK, i * period)
         times = sorted(t for t, _ in b.host_out)
-        gaps = [round((y - x) * 1000, 2) for x, y in zip(times[2:], times[3:])]
-        self.assertTrue(all(abs(g - period / 2 * 1000) < 0.05 for g in gaps), gaps)
+        gaps = [y - x for x, y in zip(times[2:], times[3:])]
+        self.assertTrue(all(abs(g - period / 2) <= 1 for g in gaps), gaps)
         # after the first interval is known there are two clocks per tick
         self.assertEqual(len(times), 8 + 7)
 
     def test_start_resets_the_tempo_reference(self):
         b = br.Bridge()
-        b.gb_in(br.CLOCK, 0.0)
-        b.gb_in(br.CLOCK, 0.04)
-        b.gb_in(br.STOP, 0.05)
-        b.gb_in(br.START, 5.0)
-        b.gb_in(br.CLOCK, 5.0)
+        b.gb_in(br.CLOCK, 0)
+        b.gb_in(br.CLOCK, 40_000)
+        b.gb_in(br.STOP, 50_000)
+        b.gb_in(br.START, 5_000_000)
+        b.gb_in(br.CLOCK, 5_000_000)
         n = len(b.host_out)
-        b.gb_in(br.CLOCK, 5.04)                          # first interval after the pause: interpolated
+        b.gb_in(br.CLOCK, 5_040_000)                     # first interval after the pause: interpolated
         self.assertEqual(len(b.host_out) - n, 2)
         c = br.Bridge()
-        c.gb_in(br.CLOCK, 0.0)
-        c.gb_in(br.START, 9.0)
-        c.gb_in(br.CLOCK, 9.0)
+        c.gb_in(br.CLOCK, 0)
+        c.gb_in(br.START, 9_000_000)
+        c.gb_in(br.CLOCK, 9_000_000)
         self.assertEqual([x for _, x in c.host_out].count(br.CLOCK), 2)   # no 9-second "half period"
 
     def test_gb_idle_bytes_are_filtered_and_notes_pass(self):
         b = br.Bridge()
         for byte in (br.IDLE, 0x90, 60, 100, br.IDLE, 0x80, 60, 0):
-            b.gb_in(byte, 0.0)
-        self.assertEqual(b.host_out_due(1.0), [0x90, 60, 100, 0x80, 60, 0])
+            b.gb_in(byte, 0)
+        self.assertEqual(b.host_out_due(1_000_000), [0x90, 60, 100, 0x80, 60, 0])
 
     def test_scheduled_clocks_come_out_in_time_order(self):
         b = br.Bridge()
-        b.gb_in(br.CLOCK, 0.0)
-        b.gb_in(br.CLOCK, 0.04)          # interval 40 ms -> the in-between clock is due at 0.06
-        self.assertEqual(b.host_out_due(0.039), [br.CLOCK])      # the tick at 0.00
-        self.assertEqual(b.host_out_due(0.041), [br.CLOCK])      # the tick at 0.04
-        self.assertEqual(b.host_out_due(0.059), [])
-        self.assertEqual(b.host_out_due(0.061), [br.CLOCK])      # the interpolated one at 0.06
+        b.gb_in(br.CLOCK, 0)
+        b.gb_in(br.CLOCK, 40_000)        # interval 40 ms -> the in-between clock is due at 60 ms
+        self.assertEqual(b.host_out_due(39_000), [br.CLOCK])      # the tick at 0
+        self.assertEqual(b.host_out_due(41_000), [br.CLOCK])      # the tick at 40 ms
+        self.assertEqual(b.host_out_due(59_000), [])
+        self.assertEqual(b.host_out_due(61_000), [br.CLOCK])      # the interpolated one at 60 ms
+
+    def test_a_note_arriving_before_a_pending_clock_is_ordered_by_time(self):
+        b = br.Bridge()
+        b.gb_in(br.CLOCK, 0)
+        b.gb_in(br.CLOCK, 40_000)        # pending interpolated clock at 60 ms
+        b.gb_in(0x90, 45_000)
+        b.gb_in(60, 45_000)
+        b.gb_in(100, 45_000)
+        self.assertEqual(b.host_out_due(100_000), [br.CLOCK, br.CLOCK, 0x90, 60, 100, br.CLOCK])
+
+
+class Link(unittest.TestCase):
+    def test_link_starts_down_and_only_polls(self):
+        b = br.Bridge()
+        b.host_in(bytes([0x90, 60, 100]))
+        self.assertEqual(b.link_next(), (br.IDLE, br.LINK_DOWN_POLL_US, False))
+        self.assertEqual(len(b.to_gb), 0)                         # nothing is hoarded for an absent GB
+
+    def test_ff_means_not_ready_and_anything_else_brings_the_link_up(self):
+        b = br.Bridge()
+        b.link_next()
+        b.link_rx(0xFF, 0)
+        self.assertFalse(b.link_up)
+        b.link_rx(br.IDLE, 1000)
+        self.assertTrue(b.link_up)
+        b.host_in(bytes([0x90, 60, 100]))
+        self.assertEqual(b.link_next(), (0x90, br.GAP_US, True))
+        self.assertEqual(b.link_next(), (60, br.GAP_US, True))
+        self.assertEqual(b.link_next(), (100, br.GAP_US, True))
+        self.assertEqual(b.link_next(), (br.IDLE, br.IDLE_POLL_US - br.BYTE_US, False))
+
+    def test_losing_the_link_drops_what_is_queued(self):
+        b = br.Bridge()
+        b.link_rx(br.IDLE, 0)
+        b.host_in(bytes([0x90, 60, 100]))
+        b.link_rx(0xFF, 10)
+        self.assertEqual(b.link_next()[0], br.IDLE)
+        self.assertEqual(len(b.to_gb), 0)
+
+    def test_stale_input_is_dropped_when_the_link_comes_back(self):
+        b = br.Bridge()
+        b.to_gb.extend([0x90, 60, 100])                           # arrived while the GB was away
+        b.link_rx(br.IDLE, 0)
+        self.assertEqual(len(b.to_gb), 0)
+
+    def test_replies_are_forwarded_to_the_host(self):
+        b = br.Bridge()
+        b.link_rx(br.IDLE, 0)
+        for t, byte in enumerate((0x90, 60, 100, br.IDLE)):
+            b.link_rx(byte, 1000 * t)
+        self.assertEqual(b.host_out_due(10_000), [0x90, 60, 100])
 
 
 class LinkTiming(unittest.TestCase):
@@ -140,18 +191,18 @@ class LinkTiming(unittest.TestCase):
 
     def test_throughput_covers_midi(self):
         times, end = br.link_schedule([0] * 1000)
-        rate = 1000 / end
+        rate = 1000 / (end / 1e6)
         self.assertGreater(rate, 1500)                    # bytes per second: plenty for the filtered stream
 
     def test_a_three_note_chord_arrives_quickly(self):
         times, end = br.link_schedule([0x90, 60, 100] * 3)
-        self.assertLess(end * 1000, 5.0)                  # ms
+        self.assertLess(end / 1000, 5.0)                  # ms
 
     def test_idle_polling_lets_the_gb_talk_within_a_couple_of_ms(self):
-        polls = br.poll_times(0.1)
+        polls = br.poll_times(100_000)
         self.assertEqual(len(polls), 50)
-        gaps = {round(y - x, 6) for x, y in zip(polls, polls[1:])}
-        self.assertEqual(gaps, {br.IDLE_POLL_US / 1e6})
+        gaps = {y - x for x, y in zip(polls, polls[1:])}
+        self.assertEqual(gaps, {br.IDLE_POLL_US})
 
     def test_clock_stream_is_a_small_part_of_the_link(self):
         # 240 BPM, one byte per tick: 48 bytes/s out and in, against ~1800 bytes/s capacity

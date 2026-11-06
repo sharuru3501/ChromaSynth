@@ -7,7 +7,7 @@ SRCS    := $(wildcard src/*.asm)
 OBJS    := $(patsubst src/%.asm,build/%.o,$(SRCS))
 INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 
-.PHONY: all clean run notetable gen
+.PHONY: all clean run notetable gen check-bridge
 
 all: $(TARGET)
 
@@ -34,6 +34,12 @@ gen:
 	python3 tools/gen_divs.py > src/divs.inc
 	python3 tools/gen_pattern.py > src/pattern.inc
 	python3 tools/gen_bend.py > src/bend.inc
+	python3 tools/gen_bridge_vectors.py
+
+# Bridge tests that need no emulator and no ESP32: the Python model, then the C core against its golden traces
+check-bridge:
+	python3 tools/test_bridge_ref.py
+	make -C firmware/test test asan syntax lib
 
 run: $(TARGET)
 	open -a SameBoy $(TARGET)

@@ -11,7 +11,7 @@ ChromaSynth ROM は MIDI を**リンクポート**で受け渡す。カートリ
 ```
 
 - **ブリッジ = リンクのクロックのマスター、GB = スレーブ**。GB は SC=$80(外部クロック)で待ち受ける。
-- ROM 側は実装済み・テスト済み。ブリッジ側は**仕様と参照実装(`tools/bridge_ref.py`)まで**。ファームウェアと基板は未着手(下の「次の工程」)。
+- ROM 側は実装済み・テスト済み。ブリッジ側は**仕様、参照実装(`tools/bridge_ref.py`)、C の中核とファームウェアのソース**(`firmware/`、[FIRMWARE.md](FIRMWARE.md))まで。ESP-IDF でのビルドと基板は未着手。
 - 状態: **実機・ブリッジでは一度も動かしていない**。ROM 側と参照実装の整合は、PyBoy 上で確認した(`tools/headless_midi_test.py`)。
 
 ## 1. 未確認事項(先に読むこと)
@@ -117,9 +117,9 @@ IN のとき、受信クロックは最大4個まで溜められ、1フレーム
 ESP32-S3 開発ボード、GBC 用リンクケーブル、74AHCT125(5V だった場合)、抵抗(330 Ω、必要なら分圧用)、
 DIN-5 MIDI IN を付けるなら 6N138(または高速フォトカプラ)+ 抵抗 + DIN-5 ソケット、USB-C ケーブル。
 
-## 5. ファームウェアの設計(未実装)
+## 5. ファームウェアの設計
 
-**中核ロジックは `tools/bridge_ref.py` と同じ**(状態機械はそのまま移植できる)。
+詳細は [FIRMWARE.md](FIRMWARE.md)。**中核ロジックは `tools/bridge_ref.py` と `firmware/core/bridge_core.c` が同じ動作**(正解トレースで突き合わせ済み)。以下は全体像。
 
 ```
 入力タスク      USB-MIDI / DIN UART / BLE MIDI のバイト列 → bridge.host_in(bytes)

@@ -16,6 +16,7 @@ import tempfile
 from pyboy import PyBoy
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import bridge_c  # noqa: E402  (the same logic in C, as it runs on the ESP32)
 import bridge_ref as br  # noqa: E402  (the bridge firmware's reference model)
 
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -491,71 +492,81 @@ pb.tick(3)
 # End to end with the bridge reference model (tools/bridge_ref.py)
 # host MIDI -> Bridge -> serial ISR -> ROM, and ROM TX queue -> ISR reply -> Bridge -> host MIDI
 # =====================================================================
-bridge = br.Bridge()
-reset_midi_block()
-reset_tx()
-mem[SYNC] = 2
+def end_to_end(label, make):
+    bridge = make()
+    reset_midi_block()
+    reset_tx()
+    mem[SYNC] = 2
 
 
-def to_rom(host_bytes):
-    bridge.host_in(bytes(host_bytes))
-    sent = list(bridge.to_gb)
-    bridge.to_gb.clear()
-    for b in sent:
-        serial_byte(b)
+    def to_rom(host_bytes):
+        bridge.host_in(bytes(host_bytes))
+        sent = bridge.take_to_gb()
+        for b in sent:
+            serial_byte(b)
+        pb.tick(3)
+        return sent
+
+
+    sent = to_rom([br.START] + [br.CLOCK] * 24)
+    check(f"[{label}] bridge: MIDI start + 24 host clocks (one beat) reach the GB as start + 12 ticks",
+          sent[0] == br.START and sent.count(br.CLOCK) == 12 and len(sent) == 13, sent[:6])
+    check(f"[{label}] ROM: it played 12 ticks (0..11)", (v("wSeqPlay"), v("wSeqCur")) == (1, 11), (v("wSeqPlay"), v("wSeqCur")))
+    sent = to_rom([0x90, 60, 100])
+    check(f"[{label}] bridge -> ROM: a note-on plays", sent == [0x90, 60, 100] and cur(0) == 60, (sent, cur(0)))
+    before = [v("wSeqCur"), v("wBend"), v("wMod")]
+    sent = to_rom([0xF0, 0x7E, 0x00, 0x09, 0x01, 0xF7, 0xA0, 60, 50, 0xD0, 40, 0xC0, 2, 0xB0, 7, 100, 0xFE])
+    check(f"[{label}] bridge: sysex, aftertouch, program change, CC7 and active sensing never reach the GB", sent == [], sent)
+    sent = to_rom([0xE0, 0, 127, 0xB0, 1, 127])
+    check(f"[{label}] bridge -> ROM: pitch bend and CC1 arrive", sent == [0xE0, 0, 127, 0xB0, 1, 127] and v("wBend") == 127 and v("wMod") == 7, (sent, v("wBend"), v("wMod")))
+    sent = to_rom([0xE0, 0, 64, 0xB0, 1, 0, 0xB0, 123, 0, br.STOP])
+    check(f"[{label}] bridge -> ROM: stop silences and halts", v("wSeqPlay") == 0 and cur(0) == 0 and v("wBend") == 64, (v("wSeqPlay"), cur(0), v("wBend")))
+
+    # ROM -> host: the unit is the master (SYNC_OUT); drain the TX queue the way the bridge does
+    bridge = make()
+    reset_midi_block()
+    reset_tx()
+    mem[SYNC] = 1
+    mem[sym["wBpm"]] = 60               # 12 ticks per second keeps the 1 byte/frame drain of this test ahead of the production
+    pb.button_press("select")
     pb.tick(3)
-    return sent
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_release("start")
+    pb.button_release("select")
+    FPS = 59.7275
+    host = []
+    for i in range(240):                # the firmware drains the host-bound queue every millisecond
+        reply = serial_byte(br.IDLE, frames=1)
+        t_us = int(i / FPS * 1_000_000)
+        bridge.gb_in(reply, t_us)
+        host.extend(bridge.host_out_due(t_us))
+    host.extend(bridge.host_out_due(10**9))
+    check(f"[{label}] ROM -> bridge -> host: starts with MIDI start", host[:1] == [br.START], host[:4])
+    ticks_played = v("wSeqCur") + 1
+    clocks = host.count(br.CLOCK)
+    check(f"[{label}] ROM -> host: two MIDI clocks per tick (24 per beat) after the first interval", 2 * (ticks_played - 8) <= clocks <= 2 * ticks_played + 2, (ticks_played, clocks))
+    triples = [host[i:i + 3] for i in range(len(host) - 2)]
+    check(f"[{label}] ROM -> host: the sequencer's notes arrive as complete messages", [0x90, 60, 100] in triples and [0x92, 48, 100] in triples)
+    pb.button_press("select")
+    pb.tick(3)
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_release("start")
+    pb.button_release("select")
+    pb.tick(3)
+    tail = []
+    for i in range(40):
+        tail.append(serial_byte(br.IDLE, frames=1))
+    check(f"[{label}] ROM -> bridge: the stop and its note-offs are flushed after the notes", br.STOP in tail, [hex(x) for x in tail if x != br.IDLE])
+    mem[SYNC] = 0
 
 
-sent = to_rom([br.START] + [br.CLOCK] * 24)
-check("bridge: MIDI start + 24 host clocks (one beat) reach the GB as start + 12 ticks",
-      sent[0] == br.START and sent.count(br.CLOCK) == 12 and len(sent) == 13, sent[:6])
-check("ROM: it played 12 ticks (0..11)", (v("wSeqPlay"), v("wSeqCur")) == (1, 11), (v("wSeqPlay"), v("wSeqCur")))
-sent = to_rom([0x90, 60, 100])
-check("bridge -> ROM: a note-on plays", sent == [0x90, 60, 100] and cur(0) == 60, (sent, cur(0)))
-before = [v("wSeqCur"), v("wBend"), v("wMod")]
-sent = to_rom([0xF0, 0x7E, 0x00, 0x09, 0x01, 0xF7, 0xA0, 60, 50, 0xD0, 40, 0xC0, 2, 0xB0, 7, 100, 0xFE])
-check("bridge: sysex, aftertouch, program change, CC7 and active sensing never reach the GB", sent == [], sent)
-sent = to_rom([0xE0, 0, 127, 0xB0, 1, 127])
-check("bridge -> ROM: pitch bend and CC1 arrive", sent == [0xE0, 0, 127, 0xB0, 1, 127] and v("wBend") == 127 and v("wMod") == 7, (sent, v("wBend"), v("wMod")))
-sent = to_rom([0xE0, 0, 64, 0xB0, 1, 0, 0xB0, 123, 0, br.STOP])
-check("bridge -> ROM: stop silences and halts", v("wSeqPlay") == 0 and cur(0) == 0 and v("wBend") == 64, (v("wSeqPlay"), cur(0), v("wBend")))
-
-# ROM -> host: the unit is the master (SYNC_OUT); drain the TX queue the way the bridge does
-bridge = br.Bridge()
-reset_midi_block()
-reset_tx()
-mem[SYNC] = 1
-mem[sym["wBpm"]] = 60               # 12 ticks per second keeps the 1 byte/frame drain of this test ahead of the production
-pb.button_press("select")
-pb.tick(3)
-pb.button_press("start")
-pb.tick(3)
-pb.button_release("start")
-pb.button_release("select")
-FPS = 59.7275
-for i in range(240):
-    reply = serial_byte(br.IDLE, frames=1)
-    bridge.gb_in(reply, i / FPS)
-host = bridge.host_out_due(1e9)
-check("ROM -> bridge -> host: starts with MIDI start", host[:1] == [br.START], host[:4])
-ticks_played = v("wSeqCur") + 1
-clocks = host.count(br.CLOCK)
-check("ROM -> host: two MIDI clocks per tick (24 per beat) after the first interval", 2 * (ticks_played - 8) <= clocks <= 2 * ticks_played + 2, (ticks_played, clocks))
-triples = [host[i:i + 3] for i in range(len(host) - 2)]
-check("ROM -> host: the sequencer's notes arrive as complete messages", [0x90, 60, 100] in triples and [0x92, 48, 100] in triples)
-pb.button_press("select")
-pb.tick(3)
-pb.button_press("start")
-pb.tick(3)
-pb.button_release("start")
-pb.button_release("select")
-pb.tick(3)
-tail = []
-for i in range(40):
-    tail.append(serial_byte(br.IDLE, frames=1))
-check("ROM -> bridge: the stop and its note-offs are flushed after the notes", br.STOP in tail, [hex(x) for x in tail if x != br.IDLE])
-mem[SYNC] = 0
+end_to_end("python model", br.Bridge)
+if bridge_c.available():
+    end_to_end("C core", bridge_c.CBridge)
+else:
+    print("SKIP C core end-to-end (run `make -C firmware/test lib` first)")
 
 pb.stop(save=False)
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")

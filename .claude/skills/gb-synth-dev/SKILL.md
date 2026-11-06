@@ -78,6 +78,12 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - PyBoy はシリアルを模擬できない(SB は常に `$FF` と読める)。ISR のテストは、`SerialISR+5`(`ldh a,[rSB]` の直後)に A を注入するフックと、`SerialISR.send` で B を読むフックで行う。
 - 状態を壊さない: ISR 以外で呼ぶルーチンは、呼び出し元が使うレジスタ(特に `HandleJoy` の `d` = 今フレームの新規押下)を保存する(`RollChannelChanged` が `d` を壊してパターンに音が置かれた実例)。
 
+## ファームウェア(ESP32-S3)メモ
+- 判断・計算は `firmware/core/`(純粋な C)に集め、ESP-IDF との境界(`main/`)は薄くする。そうすればホストの gcc で全部テストできる。
+- 参照実装(Python)→正解トレース→C の差分ファジング。Python 側の算術を整数µsにして、丸めまで一致させる。
+- ESP-IDF の API は推測で書かず、公式ヘッダ(GitHub の esp-idf)で宣言を確認する。確認できなかった名前は `TODO(verify)` を付ける。
+- USB-MIDI は `esp_tinyusb`。SPI は `mode = 3`、`spics_io_num = -1`、`SPI_TRANS_USE_TXDATA/RXDATA`、`spi_device_polling_transmit`。実周波数は `spi_device_get_actual_freq`(kHz)。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

@@ -1,0 +1,4 @@
+## IDF Component Manager manifest. Same dependency as ESP-IDF's examples/peripherals/usb/device/tusb_midi.
+dependencies:
+  espressif/esp_tinyusb:
+    version: "~3.0.0"

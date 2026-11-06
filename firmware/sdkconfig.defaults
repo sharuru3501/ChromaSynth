@@ -1,0 +1,4 @@
+# One MIDI interface on the TinyUSB device (same setting as ESP-IDF's tusb_midi example)
+CONFIG_TINYUSB_MIDI_COUNT=1
+# 1 ms scheduler tick: the host-facing task polls every tick
+CONFIG_FREERTOS_HZ=1000
