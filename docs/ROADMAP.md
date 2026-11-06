@@ -16,7 +16,7 @@
 | M6 | **ブリッジ**: 設計・リンクプロトコル、ROM側の MIDI アウト/外部同期(SYNC)、参照実装、**C の中核 + ESP32-S3 ファームウェアのソース**。仕様: [BRIDGE.md](BRIDGE.md)、ファームウェア: [FIRMWARE.md](FIRMWARE.md) | ROM側・参照実装・C中核は done(PyBoyとの往復テスト通過、C中核は正解トレース一致)。ESP-IDF v5.5.6 でビルド成功(SPI版・ビットバン版)。**基板・リンクの実測・実機は todo** |
 | M7 | 実機(Chromatic+フラッシュカート)検証 | todo |
 | M6b | **ケーブルなしのリンク**(本体内蔵 ESP32 と、仮想ボタン+パレット RAM で通信)。調査: [CHROMATIC_INTERNALS.md](CHROMATIC_INTERNALS.md)、ROM 側の設計: [CHROMATIC_LINK.md](CHROMATIC_LINK.md) | ROM 側は done(`src/clink.asm`、キーボード画面方式、PyBoy テスト通過)。実機で確認済み: 仮想ボタンが届く、`gpd` が返る、**MCU のコンソール(`link on`、`note 60 500`)から ROM が鳴った(下り)、ROM のスロットが `gpd` に見えた(上り)**。MCU 側: 符号化・通信タスク・コンソールコマンドは done(v4 を本体に書いて確認)。**未確認: 遅延・連打・ほかのチャンネル。**BLE MIDI は実機で動いた**([BLE_MIDI.md](BLE_MIDI.md) §8.5。Mac の CoreMIDI から送ったノートで ChromaSynth が鳴った、MTU 256・間隔 15 ms、枠の空き約 14 KB、空きヒープ 77 KB)。未確認: Ableton Live からの演奏、遅延、連打、長時間の安定** |
-| M8 | BLE MIDI(ESP32ブリッジ) | todo |
+| M8 | BLE MIDI(**本体内蔵 ESP32**。外付けブリッジ方式は M6 のまま) | **実機で動いた**(2026-11-07)。Mac の Audio MIDI Setup で接続し、Ableton Live のコンピュータ MIDI キーボードから弾ける(単音、ChromaSynth のキーボード画面で、選んだチャンネルが鳴る)。330 音で再送・再同期・中断 0。単発の音で MCU の中が約 150 ms、耳に届くまで約 200 ms の見込み。詳細: [BLE_MIDI.md](BLE_MIDI.md)。未確認: 長時間の安定、切断・再接続、ベロシティの聴感、ROM→DAW の MIDI 出力・同期(上り)、電池の持ち(ライトスリープを切っている) |
 
 ## 操作(M4)
 START=画面切替(プレイ → 音色編集 → シーケンサ → プレイ…) / **SELECT+START=シーケンサ再生/停止(どの画面でも)**
