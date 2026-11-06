@@ -1,8 +1,8 @@
 ; Text UI on the BG layer. Tile index = ASCII - 32 (see tools/gen_font.py).
 ;
-;   row 0   CHROMASYNTH
-;   row 2   header
-;   row 3-6 one line per channel:  > 1  PUL1  C-4  D2
+; Play screen:                         Edit screen:
+;   row 0   CHROMASYNTH                  row 0   PATCH    CH1 PUL1
+;   row 3-6 > 1  PUL1  C-4               row 2-9 > DUTY   2   (one param per row)
 ;   row 9   PAD C-4   RX 90
 ;
 ; VRAM is only writable in VBlank, so UpdateUI redraws at most one dirty row
@@ -10,16 +10,12 @@
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF ROW_TITLE  EQU _SCRN0 + 0 * 32 + 4
-DEF ROW_HEADER EQU _SCRN0 + 2 * 32
 DEF ROW_CH0    EQU 3
 DEF ROW_STATUS EQU _SCRN0 + 9 * 32
-DEF ROW_HELP1  EQU _SCRN0 + 15 * 32
-DEF ROW_HELP2  EQU _SCRN0 + 16 * 32
 
 SECTION "UI", ROM0
 
-; Call with the LCD off. Loads the font, clears the map, draws static text.
+; Call with the LCD off. Loads the font and draws the play screen.
 InitUI:
     ld hl, _VRAM
     ld de, Font
@@ -32,15 +28,20 @@ InitUI:
     ld a, b
     or c
     jr nz, .font
+    jr BuildScreen
 
+; LCD must be off (or we must be in VBlank with a tiny update).
+BuildScreen:
     ld hl, _SCRN0
     ld bc, 32 * 32
     call MemClear           ; tile 0 = space
-
-    ld hl, ROW_TITLE
+    ld a, [wScreen]
+    and a
+    jr nz, .edit
+    ld hl, _SCRN0 + 4
     ld de, sTitle
     call DrawString
-    ld hl, ROW_HEADER
+    ld hl, _SCRN0 + 2 * 32
     ld de, sHeader
     call DrawString
     ld hl, ROW_STATUS
@@ -49,15 +50,32 @@ InitUI:
     ld hl, ROW_STATUS + 9
     ld de, sRx
     call DrawString
-    ld hl, ROW_HELP1
+    ld hl, _SCRN0 + 15 * 32
     ld de, sHelp1
     call DrawString
-    ld hl, ROW_HELP2
+    ld hl, _SCRN0 + 16 * 32
     ld de, sHelp2
     call DrawString
-
     ld a, DIRTY_ALL
     ld [wDirty], a
+    ret
+.edit:
+    ld hl, _SCRN0
+    ld de, sPatch
+    call DrawString
+    ld hl, _SCRN0 + 14 * 32
+    ld de, sEditHelp1
+    call DrawString
+    ld hl, _SCRN0 + 15 * 32
+    ld de, sEditHelp2
+    call DrawString
+    ld hl, _SCRN0 + 16 * 32
+    ld de, sEditHelp3
+    call DrawString
+    ld a, DIRTY_HEADER
+    ld [wDirty], a
+    ld a, $FF
+    ld [wDirtyEdit], a
     ret
 
 ; de = zero-terminated ASCII, hl = dest. Returns hl past the last tile.
@@ -70,10 +88,28 @@ DrawString:
     ld [hl+], a
     jr DrawString
 
-; Redraw one dirty row (lowest bit first).
+; Called once per frame right after VBlank starts.
 UpdateUI:
-    ld a, [wDirty]
+    ld a, [wScreenReq]
     and a
+    jr z, .noReq
+    dec a
+    ld [wScreen], a
+    xor a
+    ld [wScreenReq], a
+    ; Rebuild the other screen. We are at the start of VBlank, LCD off is legal.
+    xor a
+    ldh [rLCDC], a
+    call BuildScreen
+    ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01
+    ldh [rLCDC], a
+    ret
+.noReq:
+    ld a, [wScreen]
+    and a
+    jp nz, UpdateEdit
+    ld a, [wDirty]
+    and DIRTY_ALL
     ret z
     ld c, 0
 .find:
@@ -112,18 +148,7 @@ DrawChannel:
 
     ld a, 5                 ; col 5: type name
     call RowPtr
-    ld a, c
-    add a
-    add a
-    add c                   ; c * 5
-    ld e, a
-    ld d, 0
-    push hl
-    ld hl, TypeNames
-    add hl, de
-    ld d, h
-    ld e, l
-    pop hl
+    call TypeNamePtr
     call DrawString
 
     ld a, 11                ; col 11: note name or ---
@@ -135,30 +160,12 @@ DrawChannel:
     pop hl
     and a
     jr z, .silent
-    call DrawNoteName
-    jr .param
+    jp DrawNoteName
 .silent:
     ld a, '-' - 32
     ld [hl+], a
     ld [hl+], a
     ld [hl+], a
-.param:
-    ld a, 16                ; col 16: param letter + value
-    call RowPtr
-    push hl
-    ld hl, ParamLetters
-    call HLplusC
-    ld a, [hl]
-    sub 32
-    pop hl
-    ld [hl+], a
-    push hl
-    ld hl, wParam
-    call HLplusC
-    ld a, [hl]
-    pop hl
-    add '0' - 32
-    ld [hl], a
     ret
 
 DrawStatus:
@@ -168,6 +175,22 @@ DrawStatus:
     ld a, [wLastRx]
     ld hl, ROW_STATUS + 12
     jp DrawHex
+
+; c = channel -> de = TypeNames + c * 5. Keeps hl, c.
+TypeNamePtr:
+    push hl
+    ld a, c
+    add a
+    add a
+    add c
+    ld e, a
+    ld d, 0
+    ld hl, TypeNames
+    add hl, de
+    ld d, h
+    ld e, l
+    pop hl
+    ret
 
 ; c = channel, a = column -> hl = BG map address of that cell. Clobbers a.
 RowPtr:
@@ -181,6 +204,139 @@ RowPtr:
     ld h, HIGH(_SCRN0)
     ret
 
+; ---------------------------------------------------------------- edit screen
+UpdateEdit:
+    ld a, [wDirty]
+    bit 5, a
+    jr z, .rows
+    res 5, a
+    ld [wDirty], a
+    jr DrawEditHeader
+.rows:
+    ld a, [wDirtyEdit]
+    and a
+    ret z
+    ld c, 0
+.find:
+    rra
+    jr c, .found
+    inc c
+    jr .find
+.found:
+    ld hl, DirtyBits
+    call HLplusC
+    ld a, [hl]
+    cpl
+    ld hl, wDirtyEdit
+    and [hl]
+    ld [hl], a
+    ld b, c
+    jr DrawEditRow
+
+DrawEditHeader:
+    ld hl, _SCRN0 + 8
+    ld de, sCh
+    call DrawString
+    ld a, [wSelCh]
+    ld c, a
+    add '1' - 32
+    ld [hl+], a
+    inc hl
+    call TypeNamePtr
+    jp DrawString
+
+; b = parameter row 0..7 for channel wSelCh
+DrawEditRow:
+    call EntryPtr           ; hl = entry
+    ld a, [hl+]
+    ld c, a                 ; c = max ($FF = hidden)
+    push hl                 ; -> name string
+    ld a, b
+    swap a
+    ld l, a
+    ld h, 0
+    add hl, hl              ; row * 32
+    ld de, _SCRN0 + 2 * 32
+    add hl, de              ; hl = start of this row on the map
+    ld a, c
+    inc a
+    jr nz, .visible
+    pop de                  ; hidden: blank the row
+    ld b, 12
+    xor a
+.blank:
+    ld [hl+], a
+    dec b
+    jr nz, .blank
+    ret
+.visible:
+    ld a, [wEditRow]
+    cp b
+    ld a, 0
+    jr nz, .mark
+    ld a, '>' - 32
+.mark:
+    ld [hl+], a
+    inc hl
+    pop de
+    call DrawString         ; name, cols 2..5
+    inc hl
+    inc hl                  ; value at col 8
+    push hl
+    call PatchRowHL
+    ld a, [hl]
+    pop hl
+    cp 10
+    jr c, .ones
+    sub 10
+    ld c, a
+    ld a, '1' - 32
+    jr .tens
+.ones:
+    ld c, a
+    ld a, 0
+.tens:
+    ld [hl+], a
+    ld a, c
+    add '0' - 32
+    ld [hl], a
+    ret
+
+; b = row -> hl = parameter table entry [max, name(4), 0] of channel wSelCh.
+; Keeps b. Clobbers a, de.
+EntryPtr:
+    ld a, [wSelCh]
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, ParamTables
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    ld a, b
+    add a
+    ld e, a
+    add a
+    add e                   ; row * 6
+    ld e, a
+    ld d, 0
+    add hl, de
+    ret
+
+; b = row -> hl = address of that patch byte for channel wSelCh. Keeps b. Clobbers a.
+PatchRowHL:
+    ld a, [wSelCh]
+    add a
+    add a
+    add a
+    add b
+    add LOW(wPatch)         ; wPatch is 32-byte aligned: no carry
+    ld l, a
+    ld h, HIGH(wPatch)
+    ret
+
+; ---------------------------------------------------------------- shared
 ; a = MIDI note, hl = dest -> three tiles, e.g. "C-4". Clobbers a, b, de.
 DrawNoteName:
     ld b, 0
@@ -231,14 +387,65 @@ DrawHex:
     ld [hl+], a
     ret
 
+; ---------------------------------------------------------------- data
 sTitle:       db "CHROMASYNTH", 0
-sHeader:      db " CH  TYPE  NOTE PRM", 0
+sHeader:      db " CH  TYPE  NOTE", 0
 sPad:         db "PAD", 0
 sRx:          db "RX", 0
-sHelp1:       db "A:PLAY  B:PARAM", 0
+sHelp1:       db "A:PLAY  START:EDIT", 0
 sHelp2:       db "SEL:CH  PAD:NOTE", 0
+sPatch:       db "PATCH", 0
+sCh:          db "CH", 0
+sEditHelp1:   db "UD:ROW  LR:VALUE", 0
+sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
+sEditHelp3:   db "SEL:CH  START:BACK", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0
-ParamLetters: db "DDWL"
 NoteNames:    db "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
+
+; Parameter tables: 8 rows per channel, [max, 4-char name, 0]. max $FF = hidden.
+; Row order must match the patch byte layout in synth.inc.
+MACRO PARAM
+    db \1
+    db \2, 0
+ENDM
+
+ParamTables:  dw PT_Pulse1, PT_Pulse2, PT_Wave, PT_Noise
+
+PT_Pulse1:
+    PARAM 3, "DUTY"
+    PARAM 15, "VOL "
+    PARAM 15, "ENV "
+    PARAM 7, "SWT "
+    PARAM 1, "SWD "
+    PARAM 7, "SWS "
+    PARAM 7, "VIBD"
+    PARAM 7, "VIBS"
+PT_Pulse2:
+    PARAM 3, "DUTY"
+    PARAM 15, "VOL "
+    PARAM 15, "ENV "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM 7, "VIBD"
+    PARAM 7, "VIBS"
+PT_Wave:
+    PARAM 3, "WAVE"
+    PARAM 2, "LVL "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM 7, "VIBD"
+    PARAM 7, "VIBS"
+PT_Noise:
+    PARAM 1, "WDTH"
+    PARAM 15, "VOL "
+    PARAM 15, "ENV "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
+    PARAM $FF, "    "
 
 INCLUDE "font.inc"

@@ -23,8 +23,12 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
 | `ui.asm` | 画面描画(BG タイルのテキスト)、画面遷移(Patch / Sequencer / Song) |
 | `sram.asm` | パッチ・パターンの保存(MBC5+SRAM) |
 
-## データ構造(案)
-- Patch(16B 程度): ch種別, duty, 初期音量, エンベロープ, sweep, ビブラート深さ/速度, アルペジオ, wave番号, noise設定
+## データ構造
+- Patch(実装済み, `wPatch`): 1chあたり8バイト×4ch。レイアウトは `inc/synth.inc` と `src/ui.asm` のパラメータ表(`PT_*`)が定義元。
+  - CH1: duty vol env swt swd sws vibd vibs / CH2: duty vol env - - - vibd vibs / CH3: wave level - - - - vibd vibs / CH4: width vol env - - - - -
+  - `wPatch` は32バイト境界に置き、オフセット加算が桁上げしない前提でコードを書いている。
+- ビブラート: 毎フレーム(VoiceTick)、発音中の CH1-3 の period を三角波で ±off。off は (2048-period) に比例させて音程に依存せず一定のセント幅になるよう近似。
+- 画面: Play/Edit の2画面。画面切替は VBlank 直後に LCD を一瞬オフにして BG マップを作り直す。
 - Pattern: 64 step × (note, patch, vol/cmd) × 4ch
 - Song: パターン番号の並び
 

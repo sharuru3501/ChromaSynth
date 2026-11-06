@@ -35,6 +35,12 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - MIDI OUT(DAW同期): マイコンがクロックを刻むたびに GB が SB に載せた送信バイトが返る。送信キューを SB にロードしておく。
 - BLE MIDI: GBカート側からは無線を扱えないため、**ESP32 等のブリッジ**が BLE MIDI ⇄ リンクポートを変換する。最後に実装。
 
+## パッチ/UI メモ
+- パッチ値は NR12 などにほぼ直接対応(env は bit3=方向, 下位3bit=ペース)。CH3 の level は 0/1/2 → NR32 $20/$40/$60。
+- 非トリガで NRx4 を書くとき bit7 を立てない(再トリガすると音が頭から鳴り直す)。
+- `jr` が届かないとアセンブルエラーになる。遠い分岐は `jp`。
+- 新しい文字を画面に出すときは `tools/gen_font.py` にグリフを足して `make gen`。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

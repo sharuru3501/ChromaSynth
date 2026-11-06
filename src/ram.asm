@@ -5,6 +5,14 @@ INCLUDE "synth.inc"
 SECTION "MIDI ring", WRAM0, ALIGN[8]
 wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 
+; Aligned so that "base + small offset" never carries into the high byte.
+SECTION "Patch", WRAM0, ALIGN[5]
+wPatch:         ds NUM_CH * PATCH_SIZE
+
+SECTION "Synth state", WRAM0, ALIGN[3]
+wBase:          ds NUM_CH * 2   ; base period of the sounding note (lo, hi)
+wOut:           ds NUM_CH * 2   ; last period written by the vibrato (debug/test)
+
 SECTION "Vars", WRAM0
 wRingHead:      db          ; written by ISR
 wRingTail:      db          ; written by main loop
@@ -19,7 +27,13 @@ wBootTimer:     db          ; frames left of the boot beep
 wSelCh:         db          ; channel the pad plays/edits (0..3)
 wPadCh:         db          ; channel the A button was pressed on
 wJoyNote:       db          ; note played by the A button
-wDirty:         db          ; UI rows needing redraw (see synth.inc)
+wScreen:        db          ; SCREEN_PLAY / SCREEN_EDIT
+wScreenReq:     db          ; 0 = none, else requested screen + 1
+wEditRow:       db          ; selected parameter row on the edit screen
+wDirty:         db          ; play-screen rows needing redraw (see synth.inc)
+wDirtyEdit:     db          ; edit-screen parameter rows needing redraw
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
-wParam:         ds NUM_CH   ; per-channel param: duty / duty / wave / lfsr width
+wVibPh:         ds NUM_CH   ; vibrato phase per channel
+wVibM:          db          ; scratch for the vibrato tick
+wVibSign:       db
 wClearEnd:      db

@@ -28,9 +28,10 @@ EntryPoint:
     call MemClear
     ld a, 60
     ld [wJoyNote], a
-    ld a, 2                 ; 50% duty on both pulse channels
-    ld [wParam + 0], a
-    ld [wParam + 1], a
+    ld hl, DefaultPatch
+    ld de, wPatch
+    ld bc, NUM_CH * PATCH_SIZE
+    call MemCopy
 
     ; --- LCD off (only legal during VBlank), build the screen
 .waitVBlank:
@@ -82,6 +83,7 @@ MainLoop:
     xor a
     ld [wVBlank], a
     call UpdateUI           ; VRAM is only writable now, so do this first
+    call VoiceTick
     ld a, [wBootTimer]
     and a
     jr z, .noBoot
@@ -131,6 +133,17 @@ MemClear:
     ld a, b
     or c
     ld a, 0
+    jr nz, .l
+    ret
+
+; hl = src, de = dest, bc = length (>0)
+MemCopy:
+.l: ld a, [hl+]
+    ld [de], a
+    inc de
+    dec bc
+    ld a, b
+    or c
     jr nz, .l
     ret
 
