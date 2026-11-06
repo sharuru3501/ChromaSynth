@@ -1,3 +1,7 @@
 #pragma once
+#include <stdbool.h>
 // BLE MIDI peripheral (docs/BLE_MIDI.md): Mac -> MIDI notes -> ChLinkLink_Note().
-void ChLinkBle_Start(void);   // never aborts: if the BLE stack cannot start it only prints why
+void ChLinkBle_Start(void);   // registers the `ble` and `heap` commands; does NOT start the stack (see ChLinkBle_Enable)
+// Starts / fully stops the BLE stack (stopping frees its memory and lets the ESP32 light-sleep). Returns false if it failed;
+// the rest of the firmware is unaffected. Not from the NimBLE host task; use a task with a big stack.
+bool ChLinkBle_Enable(bool on);

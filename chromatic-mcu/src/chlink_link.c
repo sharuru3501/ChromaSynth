@@ -43,7 +43,7 @@ typedef enum { MODE_OFF, MODE_AUTO, MODE_FORCE } Mode;
 typedef enum { RS_UNKNOWN, RS_KBD, RS_LEFT, RS_OTHER } RomState;
 
 static QueueHandle_t s_q;
-static volatile Mode s_mode = MODE_AUTO;
+static volatile Mode s_mode = MODE_OFF;   // the MIDI mode (src/chlink_mode.c) turns it on: nothing is sent or polled until then
 static volatile uint16_t s_hold_ms = 36;   // 20 ms loses symbols, 30 ms works; 36 keeps a margin (about 2 ROM frames + 3 ms)
 static uint8_t s_cur_note = 0xFF;          // the note the ROM is sounding (the last note-on not yet released); 0xFF = none
 static volatile uint32_t s_retries = 0, s_resyncs = 0, s_stale_off = 0;
@@ -398,6 +398,27 @@ static bool queue_cmd(uint8_t kind, uint8_t a, uint8_t b, uint8_t c)
     }
     const chl_cmd_t cmd = {kind, a, b, c, (uint32_t)esp_timer_get_time()};
     return xQueueSend(s_q, &cmd, 0) == pdTRUE;
+}
+
+void ChLinkLink_SetEnabled(bool on)
+{
+    if (s_q == NULL)
+    {
+        return;
+    }
+    if (on)
+    {
+        if (s_mode == MODE_OFF)
+        {
+            s_mode = MODE_AUTO;
+        }
+        return;
+    }
+    s_mode = MODE_OFF;
+    xQueueReset(s_q);
+    FPGA_Tx_RawPoke(0);
+    s_armed = false;
+    s_cur_note = 0xFF;
 }
 
 bool ChLinkLink_Note(bool on, uint8_t note, uint8_t vel127)

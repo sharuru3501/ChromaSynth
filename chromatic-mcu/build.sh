@@ -23,6 +23,7 @@ fi
 . "${IDF_V53:-$HOME/esp/esp-idf-v5.3}/export.sh" >/dev/null 2>&1
 rm -f sdkconfig   # generated from sdkconfig.defaults (the patches add BLE and -Os there); a stale one would win
 idf.py set-target esp32 >/dev/null 2>&1 || true
-idf.py build 2>&1 | tail -4
+idf.py build > build.log 2>&1 || { grep -E "error|Error|undefined|FAILED" -A3 build.log | head -30; echo "BUILD FAILED (full log: $WORK/build.log)"; exit 1; }
+tail -4 build.log
 ls -l build/mcu_fw.bin
 shasum -a 256 build/mcu_fw.bin

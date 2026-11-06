@@ -21,6 +21,7 @@ python3 tools/headless_midi_test.py   # MIDI入力・DAW同期・シリアルISR
 python3 tools/headless_clink_test.py  # 本体内蔵 ESP32 とのケーブルなしリンク(キーボード画面+パレット)のテスト
 python3 tools/headless_mcu_proto_test.py  # MCU 側の C の符号化器(chromatic-mcu/)で ROM を鳴らす結合テスト(要 cc)
 make check-mcu                        # MCU 側プロトコル中核の C を Python 参照実装と突き合わせる(ESP32 不要)
+make check-usb-bridge                 # Mac の有線 MIDI 中継(tools/chromasynth_usb_bridge.swift)の変換の自己試験(要 swiftc)
 python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
 make firmware                         # ESP32-S3 ファームウェアのビルド(要 ESP-IDF)
 make check-bridge                     # 上記 + firmware の C 中核テスト(正解トレース照合・ASan・構文検査)。ESP32 不要

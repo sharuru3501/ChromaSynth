@@ -1,0 +1,134 @@
+diff --git a/components/osd/osd_default.c b/components/osd/osd_default.c
+index 52557c0..f909f8d 100644
+--- a/components/osd/osd_default.c
++++ b/components/osd/osd_default.c
+@@ -35,6 +35,11 @@ LV_IMG_DECLARE(menu_palette);
+ LV_IMG_DECLARE(menu_palette_gbc);
+ LV_IMG_DECLARE(menu_system);
+ 
++// chlink: MIDI MODE (OFF / BLE / USB), implemented in main/chlink_mode.c
++extern OSD_Result_t ChMode_Draw(void *arg);
++extern OSD_Result_t ChMode_OnButton(const Button_t Button, const ButtonState_t State, void *arg);
++extern OSD_Result_t ChMode_OnTransition(void *arg);
++
+ static void CreateMenuStatus(lv_obj_t *const pScreen);
+ static void CreateMenuDisplay(lv_obj_t *const pScreen);
+ static void CreateMenuControls(lv_obj_t *const pScreen);
+@@ -482,6 +487,21 @@ static void CreateMenuSystem(lv_obj_t *const pScreen)
+         return;
+     }
+ 
++    static TabItem_t MidiMode = {
++        .Widget = {
++            .Name = "MIDI MODE",
++            .fnDraw = ChMode_Draw,
++            .fnOnButton = ChMode_OnButton,
++            .fnOnTransition = ChMode_OnTransition,
++        },
++    };
++
++    if ((eResult = Tab_AddItem(pList, &MidiMode, pScreen)) != kOSD_Result_Ok)
++    {
++        ESP_LOGE(TAG, "%s tab item init failed %d", MidiMode.Widget.Name, eResult);
++        return;
++    }
++
+     static TabItem_t PlayerNum = {
+         .Widget = {
+             .Name = "PLAYER #",
+diff --git a/main/CMakeLists.txt b/main/CMakeLists.txt
+index 8e883ce..3aa1896 100644
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
+ 
+ idf_component_register(
+     SRCS
+-        "main.c" "chlink.c" "chlink_proto.c" "chlink_link.c" "chlink_ble.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
++        "main.c" "chlink.c" "chlink_proto.c" "chlink_link.c" "chlink_ble.c" "chlink_mode.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
+     INCLUDE_DIRS "."
+     REQUIRES
+         images esp_driver_uart esp_driver_spi esp_driver_gpio nvs_flash fatfs
+diff --git a/main/chlink.c b/main/chlink.c
+index 1bd3ea6..bea8091 100644
+--- a/main/chlink.c
++++ b/main/chlink.c
+@@ -7,6 +7,7 @@
+ #include "chlink.h"
+ #include "chlink_ble.h"
+ #include "chlink_link.h"
++#include "chlink_mode.h"
+ 
+ #include "esp_console.h"
+ #include "esp_rom_sys.h"
+@@ -49,7 +50,7 @@ static int cmd_chver(int argc, char **argv)
+ {
+     (void)argc;
+     (void)argv;
+-    printf("chlink firmware v5 (stock v4.6 + sym/gpd + auto link/note/midi + BLE MIDI, -Os, no selftest, no light sleep, console on USB)\n");
++    printf("chlink firmware v9 (stock v4.6 + sym/gpd + link/note/midi + BLE MIDI + MIDI MODE menu OFF/BLE/USB, -Os, light sleep only in OFF, console on USB)\n");
+     return 0;
+ }
+ 
+@@ -191,5 +192,6 @@ void ChLink_RegisterCommands(void)
+     // The boot-time selftest (a virtual START press and a gpd every 3 s) is no longer started: it changed
+     // the ROM screen on every MCU boot. Use `gpd`, `sym` and `link stat` from the console instead.
+     ChLinkLink_Start();
+-    ChLinkBle_Start();   // BLE MIDI; prints why and carries on if the stack cannot start
++    ChLinkBle_Start();   // registers the `ble` and `heap` commands; the BLE stack starts only in the BLE MIDI mode
++    ChMode_Init();       // MIDI mode OFF / BLE / USB (always OFF at boot): `mode`, `m`, and the OSD menu item
+ }
+diff --git a/main/pwrmgr.c b/main/pwrmgr.c
+index 9f90604..fe79589 100644
+--- a/main/pwrmgr.c
++++ b/main/pwrmgr.c
+@@ -1,4 +1,5 @@
+ #include "pwrmgr.h"
++#include "esp_timer.h"
+ 
+ #include "board.h"
+ #include "button.h"
+@@ -43,6 +44,13 @@ static const gpio_config_t WakeUpPin = {
+ };
+ 
+ static void IdleTimerCB( TimerHandle_t xTimer );
++static volatile bool s_ChlinkKeepAwake = false;
++
++void PwrMgr_ChlinkKeepAwake(const bool KeepAwake)
++{
++    s_ChlinkKeepAwake = KeepAwake;
++    PwrMgr_IdleTimerPet();   // (re)start the idle timer so that the stock light sleep resumes after the idle time
++}
+ 
+ void PwrMgr_Task(void *arg)
+ {
+@@ -104,10 +112,14 @@ void PwrMgr_Task(void *arg)
+ 
+ void PwrMgr_TriggerLightSleep(void)
+ {
+-    // chlink: stay awake. In light sleep the CPU is stopped (no timers, no tasks, no console input);
+-    // only a message from the FPGA wakes it, so the MCU could neither poll the game's palette data
+-    // nor send virtual buttons while a game runs. Costs battery life; make it conditional later.
+-    return;
++    // chlink: stay awake while the MIDI mode is BLE or USB, and for the first 20 s after boot (time for the Mac helper to open
++    // the serial port, which resets the ESP32, and to send `mode usb`). In light sleep the CPU is stopped (no timers, no
++    // tasks, no console input, no BLE); only a message from the FPGA wakes it. In the OFF mode this is the stock behaviour.
++    if (s_ChlinkKeepAwake || esp_timer_get_time() < 20LL * 1000000LL)
++    {
++        PwrMgr_IdleTimerPet();   // look again in a moment (the idle timer is one-shot)
++        return;
++    }
+ 
+     // Wait for the sleep task to start
+     while(PwrMgrTaskHandle == NULL)
+diff --git a/main/pwrmgr.h b/main/pwrmgr.h
+index 937e196..5d556a3 100644
+--- a/main/pwrmgr.h
++++ b/main/pwrmgr.h
+@@ -5,5 +5,6 @@
+ void PwrMgr_Task(void *arg);
+ void PwrMgr_TriggerLightSleep(void);
+ void PwrMgr_IdleTimerPet(void);
++void PwrMgr_ChlinkKeepAwake(const bool KeepAwake);   // chlink: true = never light-sleep (MIDI mode BLE/USB)
+ bool PwrMgr_IsLPMActive(void);
+ void PwrMgr_SetLPM(const bool Active);

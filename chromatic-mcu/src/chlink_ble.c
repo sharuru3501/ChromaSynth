@@ -247,11 +247,34 @@ void ChLinkBle_Start(void)
         (void)esp_console_cmd_register(&cmds[i]);
     }
     (void)nvs_flash_init();   // the stock firmware has already done this; it is harmless then
+}
+
+// Starts (on) or fully stops (off) the BLE stack. Off frees its memory and lets the ESP32 light-sleep again: the BLE
+// controller must be shut down for that. Call it from a task with a big enough stack (the mode task), never from the
+// NimBLE host task itself.
+bool ChLinkBle_Enable(bool on)
+{
+    if (on == s_started)
+    {
+        return true;
+    }
+    if (!on)
+    {
+        s_connected = false;
+        (void)ble_gap_adv_stop();
+        const int rc = nimble_port_stop();   // waits until the host task has ended
+        if (rc == 0)
+        {
+            nimble_port_deinit();
+        }
+        s_started = false;
+        return rc == 0;
+    }
     s_start_rc = nimble_port_init();
     if (s_start_rc != 0)
     {
         printf("BLE MIDI: nimble_port_init failed (%d); the rest of the firmware is unaffected\n", s_start_rc);
-        return;
+        return false;
     }
     ble_hs_cfg.sync_cb = on_sync;
     ble_svc_gap_init();
@@ -259,11 +282,12 @@ void ChLinkBle_Start(void)
     if (ble_gatts_count_cfg(kSvcs) != 0 || ble_gatts_add_svcs(kSvcs) != 0)
     {
         printf("BLE MIDI: GATT setup failed\n");
-        return;
+        return false;
     }
     (void)ble_svc_gap_device_name_set("ChromaSynth");
     nimble_port_freertos_init(host_task);
     s_started = true;
+    return true;
 }
 #else
 void ChLinkBle_Start(void)
@@ -271,5 +295,10 @@ void ChLinkBle_Start(void)
     const esp_console_cmd_t heap = {.command = "heap", .help = "free heap memory", .func = &cmd_heap};
     (void)esp_console_cmd_register(&heap);
     printf("BLE MIDI: not built into this firmware (CHLINK_BLE=0)\n");
+}
+
+bool ChLinkBle_Enable(bool on)
+{
+    return !on;
 }
 #endif
