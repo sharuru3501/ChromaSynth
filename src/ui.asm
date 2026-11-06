@@ -37,7 +37,11 @@ BuildScreen:
     call MemClear           ; tile 0 = space
     ld a, [wScreen]
     and a
-    jr nz, .edit
+    jr z, .play
+    cp SCREEN_SEQ
+    jp z, BuildSeq
+    jr .edit
+.play:
     ld hl, _SCRN0 + 4
     ld de, sTitle
     call DrawString
@@ -107,7 +111,11 @@ UpdateUI:
 .noReq:
     ld a, [wScreen]
     and a
-    jp nz, UpdateEdit
+    jr z, .play
+    cp SCREEN_SEQ
+    jp z, UpdateSeq
+    jp UpdateEdit
+.play:
     ld a, [wDirty]
     and DIRTY_ALL
     ret z
@@ -373,17 +381,225 @@ DrawNoteName:
 DrawHex:
     ld b, a
     swap a
-    call .nibble
+    call NibbleTile
+    ld [hl+], a
     ld a, b
-.nibble:
+    call NibbleTile
+    ld [hl+], a
+    ret
+
+; a = 0..15 -> tile of its hex digit
+NibbleTile:
     and $0F
     cp 10
     jr c, .digit
     add 'A' - 10 - 32
-    jr .out
+    ret
 .digit:
     add '0' - 32
-.out:
+    ret
+
+; ---------------------------------------------------------------- sequencer screen
+;   row 0      header        row 1-16  one step per row      row 17  status
+;   ">" playhead, step digit, then per channel a 3-char cell with the cursor
+;   shown as [ ] around it.
+BuildSeq:
+    ld hl, _SCRN0
+    ld de, sSeqHeader
+    call DrawString
+    ld hl, _SCRN0 + 17 * 32 + 5
+    ld de, sBpm
+    call DrawString
+    ld b, 0
+.row:
+    push bc
+    call DrawSeqRow
+    pop bc
+    inc b
+    ld a, b
+    cp SEQ_STEPS
+    jr c, .row
+    call DrawSeqStatus
+    xor a
+    ld [wDirty], a
+    ld [wDirtySeq], a
+    ld [wDirtySeq + 1], a
+    ret
+
+UpdateSeq:
+    ld a, [wDirty]
+    bit 4, a
+    jr z, .rows
+    res 4, a
+    ld [wDirty], a
+    jp DrawSeqStatus
+.rows:
+    ld c, 0
+.scan:
+    ld a, c
+    cp SEQ_STEPS
+    ret nc
+    and 7
+    ld e, a
+    ld d, 0
+    ld hl, DirtyBits
+    add hl, de
+    ld b, [hl]              ; bit mask of this row
+    ld hl, wDirtySeq
+    bit 3, c
+    jr z, .lo
+    inc hl
+.lo:
+    ld a, [hl]
+    and b
+    jr nz, .found
+    inc c
+    jr .scan
+.found:
+    ld a, b
+    cpl
+    and [hl]
+    ld [hl], a              ; clear the bit
+    ld b, c
+    ; fall through
+
+; b = step row 0..15
+DrawSeqRow:
+    ld a, b
+    swap a
+    ld l, a
+    ld h, 0
+    add hl, hl              ; row * 32
+    ld de, _SCRN0 + 32
+    add hl, de
+    ld a, [wSeqPlay]        ; col 0: playhead
+    and a
+    jr z, .nohead
+    ld a, [wSeqCur]
+    cp b
+    jr nz, .nohead
+    ld a, '>' - 32
+    jr .head
+.nohead:
+    xor a
+.head:
+    ld [hl+], a
+    ld a, b                 ; col 1: step number
+    call NibbleTile
+    ld [hl+], a
+    ld c, 0
+.cell:
+    ld a, c
+    call SeqGap
+    ld a, c
+    swap a
+    add b
+    add LOW(wPattern)
+    ld e, a
+    ld d, HIGH(wPattern)
+    ld a, [de]
+    and a
+    jr z, .empty
+    cp CELL_OFF
+    jr z, .off
+    push bc
+    call DrawNoteName
+    pop bc
+    jr .next
+.empty:
+    ld a, '.' - 32
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    jr .next
+.off:
+    ld a, 'O' - 32
+    ld [hl+], a
+    ld a, 'F' - 32
+    ld [hl+], a
+    ld [hl+], a
+.next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .cell
+    ld a, NUM_CH            ; trailing gap
+    ; fall through
+
+; a = gap index 0..4 (the column left of cell a), b = row, hl = dest.
+; Draws "[" / "]" around the cursor cell, otherwise a space. Clobbers a, e.
+SeqGap:
+    ld e, a
+    ld a, [wSeqRow]
+    cp b
+    jr nz, .none
+    ld a, [wSeqCh]
+    cp e
+    jr z, .open
+    inc a
+    cp e
+    jr z, .close
+.none:
+    xor a
+    jr .put
+.open:
+    ld a, '[' - 32
+    jr .put
+.close:
+    ld a, ']' - 32
+.put:
+    ld [hl+], a
+    ret
+
+DrawSeqStatus:
+    ld hl, _SCRN0 + 17 * 32
+    ld de, sStop
+    ld a, [wSeqPlay]
+    and a
+    jr z, .state
+    ld de, sPlay
+.state:
+    call DrawString
+    ld hl, _SCRN0 + 17 * 32 + 9
+    ld a, [wBpm]
+    call DrawDec3
+    ld a, [wSeqNote]
+    ld hl, _SCRN0 + 17 * 32 + 14
+    jp DrawNoteName
+
+; a = 0..255, hl = dest -> three tiles, leading zero blanked. Clobbers a, b, c.
+DrawDec3:
+    ld b, 0
+.h: cp 100
+    jr c, .hd
+    sub 100
+    inc b
+    jr .h
+.hd:
+    ld c, a
+    ld a, b
+    and a
+    jr z, .blank
+    add '0' - 32
+    jr .wh
+.blank:
+    xor a
+.wh:
+    ld [hl+], a
+    ld a, c
+    ld b, 0
+.t: cp 10
+    jr c, .td
+    sub 10
+    inc b
+    jr .t
+.td:
+    ld c, a
+    ld a, b
+    add '0' - 32
+    ld [hl+], a
+    ld a, c
+    add '0' - 32
     ld [hl+], a
     ret
 
@@ -392,13 +608,17 @@ sTitle:       db "CHROMASYNTH", 0
 sHeader:      db " CH  TYPE  NOTE", 0
 sPad:         db "PAD", 0
 sRx:          db "RX", 0
-sHelp1:       db "A:PLAY  START:EDIT", 0
+sHelp1:       db "A:PLAY  START:SCREEN", 0
 sHelp2:       db "SEL:CH  PAD:NOTE", 0
 sPatch:       db "PATCH", 0
 sCh:          db "CH", 0
 sEditHelp1:   db "UD:ROW  LR:VALUE", 0
 sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
-sEditHelp3:   db "SEL:CH  START:BACK", 0
+sEditHelp3:   db "SEL:CH  START:SCREEN", 0
+sSeqHeader:   db "    P1  P2  WV  NS", 0
+sBpm:         db "BPM", 0
+sStop:        db "STOP", 0
+sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0
 NoteNames:    db "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 

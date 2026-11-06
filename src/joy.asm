@@ -1,5 +1,8 @@
 ; Joypad handling.
-;  Both screens: A = gate, SELECT = next channel, START = toggle play/edit screen.
+;  All screens: START = next screen (play -> edit -> sequencer),
+;               SELECT+START = sequencer play/stop,
+;               SELECT tap = next channel (play/edit screens).
+;  Play/edit:   A = gate on the selected channel.
 ;  Play screen : d-pad = note (+-1 / +-octave).
 ;  Edit screen : UP/DOWN = parameter row, LEFT/RIGHT = value,
 ;                hold B + d-pad = change the audition note.
@@ -41,14 +44,44 @@ HandleJoy:
     and b
     ld d, a                 ; d = newly pressed
 
+    bit PADB_SELECT, d
+    jr z, .noSelPress
+    xor a
+    ld [wSelUsed], a
+.noSelPress:
     bit PADB_START, d
     jr z, .noStart
+    ld a, [wJoy]
+    bit PADB_SELECT, a
+    jr z, .cycle
+    ld a, 1                 ; SELECT+START: sequencer play/stop
+    ld [wSelUsed], a
+    push de
+    call SeqToggle
+    pop de
+    jr .noStart
+.cycle:
     ld a, [wScreen]
-    xor 1
+    inc a
+    cp 3
+    jr c, .reqOk
+    xor a
+.reqOk:
     inc a                   ; request: target screen + 1
     ld [wScreenReq], a
 .noStart:
-    bit PADB_SELECT, d
+    ; SELECT released without being used as a modifier: next channel
+    ld a, [wJoyPrev]
+    bit PADB_SELECT, a
+    jr z, .noSel
+    ld a, [wJoy]
+    bit PADB_SELECT, a
+    jr nz, .noSel
+    ld a, [wSelUsed]
+    and a
+    jr nz, .noSel
+    ld a, [wScreen]
+    cp SCREEN_SEQ
     jr z, .noSel
     ld a, [wSelCh]
     inc a
@@ -65,6 +98,8 @@ HandleJoy:
     ld a, [wScreen]
     and a
     jr z, .play
+    cp SCREEN_SEQ
+    jp z, SeqInput
     call EditInput
     ld a, [wJoy]
     bit PADB_B, a

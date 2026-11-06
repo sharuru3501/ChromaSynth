@@ -20,7 +20,7 @@ make clean
 ```
 
 ## ディレクトリ
-- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`。シンボルは `-E` で全export
+- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(シーケンサ)。シンボルは `-E` で全export
 - `inc/` 共有 include(`hardware.inc` は必要なレジスタだけ定義した自前版)
 - `tools/` コード/データ生成スクリプト
 - `docs/` 設計・ロードマップ

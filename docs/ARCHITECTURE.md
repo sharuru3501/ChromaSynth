@@ -20,7 +20,7 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
 | `apu.asm` | チャンネル抽象化、パッチ適用、エンベロープ/ビブラート/アルペジオのフレーム更新 |
 | `midi.asm` | 受信パーサ、チャンネル→ボイスのアロケート、MIDI OUT キュー |
 | `seq.asm` | パターン/ソング、再生位置、テンポ(VBlank 基準 or Timer)、MIDI clock 同期 |
-| `ui.asm` | 画面描画(BG タイルのテキスト)、画面遷移(Patch / Sequencer / Song) |
+| `ui.asm` | 画面描画(BG タイルのテキスト)、画面遷移(Play / Patch / Sequencer。Song は将来) |
 | `sram.asm` | パッチ・パターンの保存(MBC5+SRAM) |
 
 ## データ構造
@@ -29,7 +29,9 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
   - `wPatch` は32バイト境界に置き、オフセット加算が桁上げしない前提でコードを書いている。
 - ビブラート: 毎フレーム(VoiceTick)、発音中の CH1-3 の period を三角波で ±off。off は (2048-period) に比例させて音程に依存せず一定のセント幅になるよう近似。
 - 画面: Play/Edit の2画面。画面切替は VBlank 直後に LCD を一瞬オフにして BG マップを作り直す。
-- Pattern: 64 step × (note, patch, vol/cmd) × 4ch
+- Pattern(実装済み, `wPattern`): 16ステップ × 4ch の1バイトセル。0=空, $FF=ノートオフ, それ以外=MIDIノート。`wPattern[ch*16+step]`(64バイト境界)。
+- シーケンサのタイミング: 毎フレーム 8.8固定小数のアキュムレータに +1.0。BPMごとの「16分音符=何フレーム」を `TempoTable`(`tools/gen_tempo.py` 生成)から引き、超えたら1ステップ進める。GBのフレーム周波数は59.7275Hz。最短でも3.7フレームなので1フレームに複数ステップは来ない。
+- 将来 MIDI clock 同期(M6)をする時は、このアキュムレータの代わりに 24ppqn のクロック数でステップを進める。
 - Song: パターン番号の並び
 
 ## 操作系(案)

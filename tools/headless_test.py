@@ -65,7 +65,10 @@ for _ in range(2000):
     pb.tick(1)
     if pb.register_file.PC >= 0x100:
         break
-pb.tick(3)
+for _ in range(30):  # init takes a few frames; wait for the beep to start
+    pb.tick(1)
+    if cur(0) == 72:
+        break
 check("boot beep on CH1", cur(0) == 72, cur(0))
 pb.tick(60)
 check("boot beep released", cur(0) == 0, cur(0))
@@ -178,11 +181,112 @@ after = mem[sym["wOut"] + 2] | (mem[sym["wOut"] + 3] << 8)
 check("depth 0 -> no vibrato updates", before == after)
 midi(0x81, 69, 0)
 
+# --- sequencer screen
+def hold(*btns, frames=3):
+    for b in btns:
+        pb.button_press(b)
+    pb.tick(frames)
+
+
+def release(*btns, frames=2):
+    for b in btns:
+        pb.button_release(b)
+    pb.tick(frames)
+
+
+def tap_while(held, btn):
+    """Press btn while `held` is down (a combo)."""
+    pb.button_press(held)
+    pb.tick(3)
+    pb.button_press(btn)
+    pb.tick(3)
+    pb.button_release(btn)
+    pb.tick(2)
+    pb.button_release(held)
+    pb.tick(3)
+
+
+P = sym["wPattern"]
 press("start")
 pb.tick(4)
-check("START -> back to play screen", mem[sym["wScreen"]] == 0)
+check("START -> sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
+shot("09_seq")
+check("default pattern: CH1 step0 = C4, CH3 step0 = C3",
+      mem[P] == 60 and mem[P + 32] == 48 and mem[P + 2] == 0xFF)
+press("down")
+check("DOWN moves cursor row", mem[sym["wSeqRow"]] == 1)
+press("right")
+check("RIGHT moves cursor channel", mem[sym["wSeqCh"]] == 1)
+cell = P + 16 * 1 + 1
+press("b")
+check("B: empty -> OFF", mem[cell] == 0xFF, mem[cell])
+press("b")
+check("B: OFF -> empty", mem[cell] == 0, mem[cell])
+hold("a", frames=4)
+check("A inserts the current note", mem[cell] == 60, mem[cell])
+check("A auditions on the cursor channel", cur(1) == 60, cur(1))
+hold("up")
+release("up")
+check("A+UP: +1 semitone", mem[cell] == 61 and mem[sym["wSeqNote"]] == 61, mem[cell])
+hold("left")
+release("left")
+check("A+LEFT: -1 octave", mem[cell] == 49, mem[cell])
+release("a", frames=4)
+check("A release stops the audition", cur(1) == 0, cur(1))
+pb.tick(2)
+shot("10_seq_edit")
+press("b")
+check("B on a note clears it", mem[cell] == 0, mem[cell])
+
+tap_while("select", "up")
+check("SELECT+UP: BPM 121", mem[sym["wBpm"]] == 121, mem[sym["wBpm"]])
+tap_while("select", "left")
+check("SELECT+LEFT: BPM 111", mem[sym["wBpm"]] == 111, mem[sym["wBpm"]])
+check("SELECT combo did not change screen/channel", mem[sym["wScreen"]] == 2 and mem[sym["wSelCh"]] == 0)
+mem[sym["wBpm"]] = 120
+
+# playback: SELECT held, tap START
+tap_while("select", "start")
+check("SELECT+START starts playback", mem[sym["wSeqPlay"]] == 1)
+check("still on the sequencer screen", mem[sym["wScreen"]] == 2)
+steps = 0
+last = mem[sym["wSeqStep"]]
+bass = set()
+for i in range(120):
+    pb.tick(1)
+    s_ = mem[sym["wSeqStep"]]
+    if s_ != last:
+        steps += 1
+        last = s_
+    bass.add(cur(2))
+    if i == 30:
+        shot("11_seq_playing")
+check("tempo: 16 steps in 2 s at 120 BPM", 15 <= steps <= 17, steps)
+check("bass notes triggered by the pattern", {48, 43} <= bass, sorted(bass))
+check("hi-hat (CH4) triggered", cur(3) in (90, 100), cur(3))
+tap_while("select", "start")
+check("SELECT+START stops playback", mem[sym["wSeqPlay"]] == 0)
+check("stop silences all channels", [cur(c) for c in range(4)] == [0, 0, 0, 0], [cur(c) for c in range(4)])
+
+# tempo scales: 240 BPM -> twice as many steps
+mem[sym["wBpm"]] = 240
+tap_while("select", "start")
+steps = 0
+last = mem[sym["wSeqStep"]]
+for _ in range(60):
+    pb.tick(1)
+    s_ = mem[sym["wSeqStep"]]
+    if s_ != last:
+        steps += 1
+        last = s_
+check("tempo: 16 steps in 1 s at 240 BPM", 15 <= steps <= 17, steps)
+tap_while("select", "start")
+
+press("start")
+pb.tick(4)
+check("START -> back to play screen", mem[sym["wScreen"]] == 0, mem[sym["wScreen"]])
 pb.tick(20)
-shot("09_play_again")
+shot("12_play_again")
 
 pb.stop(save=False)
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")

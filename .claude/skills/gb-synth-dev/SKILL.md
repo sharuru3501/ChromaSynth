@@ -41,6 +41,11 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - `jr` が届かないとアセンブルエラーになる。遠い分岐は `jp`。
 - 新しい文字を画面に出すときは `tools/gen_font.py` にグリフを足して `make gen`。
 
+## シーケンサ/入力メモ
+- 1ステップ=16分音符。frames = 15*59.7275/BPM。8.8固定小数で積算(`SeqTick`)。
+- SELECT は「単押し=ch切替」「押しながら=修飾キー」の二役。`wSelUsed` で修飾に使われたかを覚え、離した時に判定する。
+- 画面ごとの入力ハンドラ(`EditInput`/`SeqInput`)は d=今フレームの新規押下ビット、`wJoy`=押下中、`wJoyPrev`=前フレーム を使う。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

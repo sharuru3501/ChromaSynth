@@ -9,6 +9,10 @@ wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 SECTION "Patch", WRAM0, ALIGN[5]
 wPatch:         ds NUM_CH * PATCH_SIZE
 
+; Pattern: wPattern[channel * 16 + step]. 64-byte aligned for carry-free indexing.
+SECTION "Pattern", WRAM0, ALIGN[6]
+wPattern:       ds NUM_CH * SEQ_STEPS
+
 SECTION "Synth state", WRAM0, ALIGN[3]
 wBase:          ds NUM_CH * 2   ; base period of the sounding note (lo, hi)
 wOut:           ds NUM_CH * 2   ; last period written by the vibrato (debug/test)
@@ -34,6 +38,16 @@ wDirty:         db          ; play-screen rows needing redraw (see synth.inc)
 wDirtyEdit:     db          ; edit-screen parameter rows needing redraw
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
+wSeqPlay:       db          ; 1 = sequencer running
+wSeqStep:       db          ; next step to play (0..15)
+wSeqCur:        db          ; step that was played last (playhead)
+wSeqAcc:        dw          ; 8.8 frame accumulator
+wBpm:           db
+wSeqRow:        db          ; cursor on the sequencer screen
+wSeqCh:         db
+wSeqNote:       db          ; note inserted by A on the sequencer screen
+wSelUsed:       db          ; SELECT was used as a modifier while held
+wDirtySeq:      dw          ; sequencer rows needing redraw (bit per row)
 wVibM:          db          ; scratch for the vibrato tick
 wVibSign:       db
 wClearEnd:      db

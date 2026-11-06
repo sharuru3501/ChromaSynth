@@ -32,6 +32,14 @@ EntryPoint:
     ld de, wPatch
     ld bc, NUM_CH * PATCH_SIZE
     call MemCopy
+    ld hl, DefaultPattern
+    ld de, wPattern
+    ld bc, NUM_CH * SEQ_STEPS
+    call MemCopy
+    ld a, 120
+    ld [wBpm], a
+    ld a, 60
+    ld [wSeqNote], a
 
     ; --- LCD off (only legal during VBlank), build the screen
 .waitVBlank:
@@ -85,6 +93,7 @@ MainLoop:
     ld [wVBlank], a
     call UpdateUI           ; VRAM is only writable now, so do this first
     call VoiceTick
+    call SeqTick
     ld a, [wBootTimer]
     and a
     jr z, .noBoot
