@@ -1,0 +1,33 @@
+diff --git a/main/fpga_rx.c b/main/fpga_rx.c
+index 5347d99..01693b8 100644
+--- a/main/fpga_rx.c
++++ b/main/fpga_rx.c
+@@ -105,7 +105,27 @@ void FPGA_RxTask(void *arg)
+             portMAX_DELAY
+         );
+ 
+-        const int32_t ByteCount = uart_read_bytes(UART_NUM_1, pRxBuffer, sizeof(RxBuffer), pdMS_TO_TICKS(10));
++        // chlink: wake on the FIRST byte. Asking for the whole buffer made every reply (a few bytes) wait for the
++        // 10 ms timeout, which is what a `gpd` request cost. The parser below is a byte-wise state machine, so it
++        // does not care how the bytes are chunked.
++        int32_t ByteCount = uart_read_bytes(UART_NUM_1, pRxBuffer, 1, pdMS_TO_TICKS(10));
++        if (ByteCount > 0)
++        {
++            size_t Avail = 0;
++            (void) uart_get_buffered_data_len(UART_NUM_1, &Avail);
++            if (Avail > sizeof(RxBuffer) - 1)
++            {
++                Avail = sizeof(RxBuffer) - 1;
++            }
++            if (Avail > 0)
++            {
++                const int32_t More = uart_read_bytes(UART_NUM_1, pRxBuffer + 1, Avail, 0);
++                if (More > 0)
++                {
++                    ByteCount += More;
++                }
++            }
++        }
+ 
+         if (ByteCount > 0)
+         {

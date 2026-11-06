@@ -9,6 +9,7 @@ ModRetro の MCU ファームウェア([oss-chromatic-console-mcu](https://githu
 | `patches/0003-chlink-priorities-and-rom-printf.patch` | 試験用 v2: 試験タスク(優先度 18)とコンソール(17)を、純正の通信・電源管理タスク(15・16)より上にする。出力を標準出力と ROM の直接出力の両方に出す |
 | `patches/0004-chlink-no-light-sleep.patch` | 試験用 v3: ライトスリープに入らないようにする(電池の持ちは悪くなる) |
 | `patches/0005-chlink-link-task.patch` | v4: 起動時の自己試験(START を押す・`gpd` の定期出力)をやめ、`link` / `note` / `midi` コマンドを足す(中身は `src/`)。`ChLink_ReadGpd` を公開 |
+| `patches/0007-fpga-rx-wake-on-first-byte.patch` | v6: 純正の受信タスクが、バッファ全体の長さで `uart_read_bytes` を呼んでいたため、少しのバイトの応答が 10 ms のタイムアウトまで待たされていた(`gpd` 1 回が約 10 ms)。最初の 1 バイトで起きるようにした(受信の解析はバイト単位の状態機械なので、区切りに依存しない) |
 | `patches/0006-chlink-ble-midi.patch` | v5: BLE MIDI(NimBLE)、`-Os`、`gpd` の読み取りの排他(`ChLink_ReadGpdTimeout`)。`build.sh` は `sdkconfig` を作り直す(defaults に BLE と `-Os` を足したため) |
 | `src/chlink_ble.[ch]` | BLE MIDI の受信(GATT、広告、接続パラメータ)。`ble`・`heap` コマンド |
 | `src/chlink_proto.[ch]` | 通信プロトコルの中核(符号化、スロットの解釈)。ESP-IDF に依存しない純粋な C。`build.sh` が `main/` にコピーする。ホストでテストできる(`make check-mcu`) |
