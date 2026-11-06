@@ -39,6 +39,18 @@ void chl_encode_play(int on, int note, int vel127, uint8_t out[CHL_PLAY_SYMBOLS]
     out[3] = check(out, 3);
 }
 
+void chl_encode_release(int ping, uint8_t out[CHL_RELEASE_SYMBOLS])
+{
+    const uint8_t x = ping ? 1 : 0;
+    out[0] = (uint8_t)(8 | x);
+    out[1] = (uint8_t)(7 ^ x);
+}
+
+int chl_verify_ack(const chl_slot_t *slot, int last_phase)
+{
+    return slot->nack == 0 && slot->ack == (last_phase ? 1 : 0);
+}
+
 void chl_encode_general(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t out[CHL_GENERAL_SYMBOLS])
 {
     out[0] = (uint8_t)(8 | (b0 >> 5));

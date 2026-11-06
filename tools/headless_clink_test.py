@@ -186,6 +186,7 @@ loud = mem[sym["wVoiceVol"]]
 play(0, 60)
 check("velocity scales the volume", soft < loud, (soft, loud))
 
+# release / ping before HELLO (unlinked) are ignored: tested at the end with the timeout case
 # the selection can change between note-on and note-off: the off still goes to the first channel
 mem[sym["wSelCh"]] = 1
 play(1, 64)
@@ -193,6 +194,67 @@ mem[sym["wSelCh"]] = 3
 play(0, 64)
 check("note-off follows the channel the note went to", cur(1) == 0, cur(1))
 mem[sym["wSelCh"]] = 0
+
+# ---------------------------------------------------------------- release / ping (2 symbols, the pair is its own check)
+def release(ping=False, **kw):
+    send(cl.with_phases(cl.encode_release(ping), next_phase()), **kw)
+
+
+def raw_pair(s0, s1, **kw):
+    send(cl.with_phases([s0, s1], next_phase()), **kw)
+
+
+mem[sym["wSelCh"]] = 0
+play(1, 60)
+ph0 = next_phase()
+release()
+check("release stops the note of the last note-on", cur(0) == 0, cur(0))
+check("a 2-symbol packet keeps the phase in step", next_phase() == ph0, (ph0, next_phase()))
+play(1, 62)
+v_before = v("wClLinked")
+mem[sym["wClTimer"]] = 100
+release(ping=True)
+check("a ping does not touch the note", cur(0) == 62, cur(0))
+check("... but counts as a packet (the link timer restarts)", v("wClTimer") < 20 and v("wClLinked") == 1, v("wClTimer"))
+# the selection moved to another channel after the note-on: the release still goes to the channel the note went to
+mem[sym["wSelCh"]] = 2
+release()
+check("release goes to the channel of the note-on, not the selected one", cur(0) == 0, cur(0))
+mem[sym["wSelCh"]] = 0
+# every pair that is not (8, 7) / (9, 6) is rejected: the note keeps sounding and the ROM says nack
+play(1, 64)
+all_rejected = True
+detail = []
+n_pairs = 0
+for s0 in (8, 9, 10, 11, 12, 15):
+    for s1 in range(16):
+        if (s0, s1) in ((8, 7), (9, 6)):
+            continue
+        if s0 >= 12:
+            continue   # type %11 is a general packet (a different, 8-symbol packet): not a 2-symbol case
+        raw_pair(s0, s1, hold_frames=3)
+        pb.tick(1)
+        n_pairs += 1
+        if n_pairs % 8 == 0:
+            pb.tick(35)             # let a half packet (if any) time out, then keep the link up with a valid ping
+            release(ping=True)
+        if cur(0) != 64:
+            all_rejected = False
+            detail.append((s0, s1))
+            play(1, 64)
+check("every other pair is rejected and cannot cut the note (s0 = 8..11, s1 = 0..15)", all_rejected, detail[:4])
+pb.tick(35)   # a half packet left by the rejected pairs times out
+raw_pair(8, 5)
+check("... and the ROM reports it (nack)", v("wClNack") == 1, v("wClNack"))
+release()
+check("a valid release after the rejected ones still works", cur(0) == 0, cur(0))
+# a real LEFT pressed during a release (data bit 3 flips): rejected
+play(1, 66)
+send(cl.with_phases(cl.encode_release(False), next_phase()), extra=["left"], extra_at=1)
+check("a real LEFT during a release corrupts it: rejected, the note keeps sounding", cur(0) == 66 and v("wClNack") == 1, (cur(0), v("wClNack")))
+pb.tick(35)
+release()
+check("... and the resent release works", cur(0) == 0, cur(0))
 
 # ---------------------------------------------------------------- general packets (MIDI)
 general(0x90, 0x3C, 0x64)  # note on, MIDI channel 1 -> GB CH1 (default routing)
@@ -248,6 +310,21 @@ pb.tick(35)
 play(1, 66)
 check("a symbol lost to a physical SELECT: after the idle timeout the resent packet works", cur(0) == 66, cur(0))
 play(0, 66)
+
+# a symbol lost in the middle leaves a half packet: the header shows nack (the ESP32 reads it after the packet)
+syms4 = cl.with_phases(cl.encode_play(1, 70, 100), next_phase())
+lost = [syms4[0], syms4[1], syms4[3]]           # the third symbol never arrives (phases A B . B)
+before = cur(0)
+send(lost)
+pb.tick(2)
+check("a symbol lost in the middle: nothing plays, and the header says nack (a half packet is pending)",
+      cur(0) == before and slot()[3] & 1 == 1, (cur(0), slot()))
+pb.tick(35)
+check("... the half packet times out by itself", slot()[3] & 1 == 0, slot())
+play(1, 70)
+check("... and the resent packet then works", cur(0) == 70, cur(0))
+play(0, 70)
+check("a complete packet leaves nack = 0 (nothing pending)", slot()[3] & 1 == 0, slot())
 
 # a half packet is dropped after a while
 send(cl.with_phases(cl.encode_play(1, 67, 127)[:2], next_phase()))
@@ -401,6 +478,9 @@ mem[0xFF0F] = mem[0xFF0F] | 0x08
 pb.tick(1)
 check("after the timeout the cable bridge gets its bytes again", isr_reply and isr_reply[0] == 0xF8, isr_reply)
 check("after the timeout play packets are ignored again", (play(1, 60), cur(0) == 0)[1])
+mem[sym["wClTimer"]] = 0
+release(ping=True)
+check("... and so are release and ping (they do not link, and do not restart the timer)", v("wClLinked") == 0 and v("wClTimer") == 0, (v("wClLinked"), v("wClTimer")))
 mem[sym["wTxHead"]] = 0
 mem[sym["wTxTail"]] = 0
 

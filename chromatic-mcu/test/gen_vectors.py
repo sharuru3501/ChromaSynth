@@ -24,6 +24,15 @@ for h in range(0, 128, 3):
         s = cl.decode_slot(b0, b1, b2, h)
         out.append("slot %s %d %d %d %d %d %d %d" % (" ".join(map(str, g)), s.length, s.seq, s.ack, s.nack, *s.data))
 
+# release / ping, and the ack check
+for ping in (0, 1):
+    s = cl.encode_release(bool(ping))
+    out.append("rel %d %d %d" % (ping, s[0], s[1]))
+for nack in (0, 1):
+    for ack in (0, 1):
+        for last in (0, 1):
+            sl = cl.Slot(length=0, seq=0, ack=ack, nack=nack, data=(0, 0, 0))
+            out.append("ack %d %d %d %d" % (nack, ack, last, 1 if cl.verify_ack(sl, last) else 0))
 # beacons
 for ln in (0, 1, 2, 3):
     for b0 in (0x00, 0x90, 0xF4, 0xF5, 0xFE):

@@ -27,6 +27,19 @@ def encode_play(on, note, vel127):
     return [s0, s1, s2, _check([s0, s1, s2])]
 
 
+def encode_release(ping=False):
+    """2 symbols, type %10: (8 | x, 7 xor x). x = 0 releases the note of the last note-on, x = 1 only pings (keeps the link
+    up). The pair is its own check: any single changed bit gives an invalid pair. Neither can start a note."""
+    x = 1 if ping else 0
+    return [8 | x, 7 ^ x]
+
+
+def verify_ack(slot, last_phase):
+    """After a packet (read once the ROM has had 2+ frames): did the ROM accept the last symbol (its ack = the phase of the last
+    accepted symbol) and is nothing wrong (nack = the last packet failed its check, or a half packet is pending)?"""
+    return slot.nack == 0 and slot.ack == last_phase
+
+
 def encode_general(b0, b1, b2):
     """3 MIDI bytes: 8 symbols. s0 = type 1 | b0 7..5; the 24 bits run through s0..s6, s6's low 3 bits are 0,
     s7 = check."""

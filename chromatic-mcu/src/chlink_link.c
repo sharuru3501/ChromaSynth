@@ -11,7 +11,7 @@
 //   link auto            (default) send only while the ROM shows it is on the keyboard screen
 //   link on              FORCE: send without checking the ROM (the ROM must be on its KEYBOARD screen!)
 //   link off             send nothing
-//   link hold <ms>       how long each symbol is held (default 30 ms, about 2 ROM frames; 20 ms loses symbols)
+//   link hold <ms>       how long each symbol is held (default 36 ms, about 2 ROM frames + a margin; 20 ms loses symbols)
 //   link hello|sync      queue a HELLO / a phase sync
 //   link stat            mode, armed, what the ROM shows (gpd), counters
 //   link lat             latency statistics measured inside the MCU (queue wait, packet time, gpd check time)
@@ -44,7 +44,9 @@ typedef enum { RS_UNKNOWN, RS_KBD, RS_LEFT, RS_OTHER } RomState;
 
 static QueueHandle_t s_q;
 static volatile Mode s_mode = MODE_AUTO;
-static volatile uint16_t s_hold_ms = 30;   // measured on the console: 30 ms works, 20 ms loses symbols
+static volatile uint16_t s_hold_ms = 36;   // 20 ms loses symbols, 30 ms works; 36 keeps a margin (about 2 ROM frames + 3 ms)
+static uint8_t s_cur_note = 0xFF;          // the note the ROM is sounding (the last note-on not yet released); 0xFF = none
+static volatile uint32_t s_retries = 0, s_resyncs = 0, s_stale_off = 0;
 static int s_phase = 0;                 // phase of the next symbol; kept equal to the ROM's (sync)
 static bool s_armed = false;            // HELLO sent and the ROM is on the keyboard screen
 static volatile uint32_t s_sent = 0, s_aborted = 0, s_dropped = 0, s_handshakes = 0;
@@ -162,19 +164,113 @@ static bool send_symbols(const uint8_t *syms, int n, bool handshake)
     return true;
 }
 
-static bool do_play(bool on, uint8_t note, uint8_t vel)
+// What the ROM says about the packet that was just sent (read after its last symbol: the ROM writes its ack in the next VBlank,
+// and the last symbol has been held for 2+ frames and released for GAP_MS since).
+typedef enum { V_OK, V_BAD, V_GONE } Verdict;
+
+static Verdict verify_last(void)
 {
-    uint8_t s[CHL_PLAY_SYMBOLS];
-    chl_encode_play(on, note, vel, s);
-    return send_symbols(s, CHL_PLAY_SYMBOLS, false);
+    uint8_t g[8];
+    const int64_t t0 = esp_timer_get_time();
+    const bool got = ChLink_ReadGpdTimeout(g, GPD_TIMEOUT_MS);
+    stat_add(&s_check, (uint32_t)(esp_timer_get_time() - t0));
+    if (!got)
+    {
+        return V_OK;               // unknown: do not retransmit on a hunch (a duplicate note-on is worse than a gap)
+    }
+    chl_slot_t slot;
+    chl_slot_from_gpd(g, &slot);
+    if (chl_classify(&slot) != CHL_ROM_OTHER)
+    {
+        return V_GONE;             // the ROM unlinked itself, or left the keyboard screen
+    }
+    if (chl_verify_ack(&slot, s_phase ^ 1))
+    {
+        return V_OK;
+    }
+    return V_BAD;                  // a symbol was lost (a half packet is pending, or the phase is behind) or the check failed
 }
 
-// A queued note: records how long it waited and how long the packet took (note-ons only).
+static bool do_sync(void);
+
+// Sends a packet and checks that the ROM took it; if not, realigns (only after a lost symbol) and sends it once more.
+// A packet the ROM rejected can only have been a note the player pressed: sending it again is what they asked for.
+static bool send_packet(const uint8_t *syms, int n, bool verify)
+{
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        if (!send_symbols(syms, n, false))
+        {
+            return false;
+        }
+        if (!verify || s_mode == MODE_FORCE)
+        {
+            return true;
+        }
+        const Verdict v = verify_last();
+        if (v == V_OK)
+        {
+            return true;
+        }
+        if (v == V_GONE)
+        {
+            s_armed = false;
+            return false;
+        }
+        // Not taken. Whatever went wrong, the ROM may hold a half packet and the phases may be off by one: the stray symbol
+        // plus the pause (longer than the ROM's 30-frame timeout for a half packet) clears both, then the packet is sent again.
+        s_retries++;
+        s_resyncs++;
+        if (!do_sync())
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
+// Note-on: 4 symbols, never shortened (a wrong pitch must not be possible).
+static bool do_note_on(uint8_t note, uint8_t vel)
+{
+    uint8_t s[CHL_PLAY_SYMBOLS];
+    chl_encode_play(1, note, vel, s);
+    if (!send_packet(s, CHL_PLAY_SYMBOLS, true))
+    {
+        return false;
+    }
+    s_cur_note = note;
+    return true;
+}
+
+// Release the note that is sounding (2 symbols), or ping (the same length: only keeps the link up).
+static bool do_release(bool ping)
+{
+    uint8_t s[CHL_RELEASE_SYMBOLS];
+    chl_encode_release(ping, s);
+    return send_packet(s, CHL_RELEASE_SYMBOLS, true);
+}
+
+// A queued note: records how long it waited and how long the packet took (note-ons only). The ROM is mono: a note-off
+// for a note that is no longer the sounding one is stale (a newer note replaced it) and is not sent.
 static bool do_play_timed(const chl_cmd_t *c)
 {
+    if (c->a == 0)
+    {
+        if (c->b != s_cur_note)
+        {
+            s_stale_off++;
+            return true;
+        }
+        const bool ok = do_release(false);
+        if (ok)
+        {
+            s_cur_note = 0xFF;
+        }
+        return ok;
+    }
     const int64_t t0 = esp_timer_get_time();
-    const bool ok = do_play(c->a != 0, c->b, c->c);
-    if (c->a != 0 && ok && c->t_us != 0)
+    const bool ok = do_note_on(c->b, c->c);
+    if (ok && c->t_us != 0)
     {
         stat_add(&s_wait, (uint32_t)((uint32_t)t0 - c->t_us));
         stat_add(&s_packet, (uint32_t)(esp_timer_get_time() - t0));
@@ -186,7 +282,7 @@ static bool do_midi(uint8_t b0, uint8_t b1, uint8_t b2, bool handshake)
 {
     uint8_t s[CHL_GENERAL_SYMBOLS];
     chl_encode_general(b0, b1, b2, s);
-    return send_symbols(s, CHL_GENERAL_SYMBOLS, handshake);
+    return handshake ? send_symbols(s, CHL_GENERAL_SYMBOLS, true) : send_packet(s, CHL_GENERAL_SYMBOLS, true);
 }
 
 // A stray one-symbol "packet": if the ROM expects this phase it accepts it (and drops the half packet
@@ -212,7 +308,10 @@ static bool handshake(void)
         delay_ms(100);
         if (s_mode == MODE_FORCE || rom_state() == RS_OTHER)
         {
-            return s_armed = true;
+            s_armed = true;
+            s_cur_note = 0xFF;
+            (void)do_release(false);   // a note left sounding by an earlier session (or before an MCU restart) must not hang
+            return s_armed;
         }
     }
     return s_armed = false;
@@ -285,7 +384,7 @@ static void link_task(void *arg)
         }
         if (s_armed && (xTaskGetTickCount() - last_tx) >= pdMS_TO_TICKS(KEEPALIVE_MS))
         {
-            (void)do_play(false, 0, 0);   // note 0 off: does nothing in a linked ROM, but counts as a packet
+            (void)do_release(true);   // a ping: counts as a packet, does not touch the note
             last_tx = xTaskGetTickCount();
         }
     }
@@ -373,6 +472,8 @@ static int cmd_link(int argc, char **argv)
                s_armed ? "yes" : "no", (unsigned)s_hold_ms, s_phase ? 'B' : 'A');
         printf("packets sent %u, aborted %u, dropped %u, handshakes %u, queued %u\n", (unsigned)s_sent, (unsigned)s_aborted,
                (unsigned)s_dropped, (unsigned)s_handshakes, (unsigned)uxQueueMessagesWaiting(s_q));
+        printf("retransmitted %u (after a nack or a lost symbol), re-synced %u, stale note-offs not sent %u, sounding note %d\n",
+               (unsigned)s_retries, (unsigned)s_resyncs, (unsigned)s_stale_off, s_cur_note == 0xFF ? -1 : (int)s_cur_note);
         uint8_t g[8];
         if (ChLink_ReadGpdTimeout(g, 500))
         {

@@ -119,6 +119,40 @@ for vel in (0, 16, 127):
     if vel == 127:
         check("velocity: 127 is louder than 0", vol > soft, (soft, vol))
 
+def mcu_verdict(last_phase):
+    """The link task's check after a packet, from the slot the ROM wrote (the C code in chl_cli): ok / bad."""
+    b = slot_bytes()
+    return subprocess.run([CLI, "verify", *map(str, b), str(last_phase)], capture_output=True, text=True, check=True).stdout.strip()
+
+
+# release and ping from the C encoder
+mcu_send(cli("play", 1, 64, 100, v("wClNextPh")))
+check("the link task's check says ok after a complete note-on", (pb.tick(3), mcu_verdict(v("wClNextPh") ^ 1))[1] == "ok", slot_bytes())
+mcu_send(cli("release", 1, v("wClNextPh")))
+check("a ping from the C encoder leaves the note sounding", cur(0) == 64, cur(0))
+check("... and the check says ok", (pb.tick(3), mcu_verdict(v("wClNextPh") ^ 1))[1] == "ok", slot_bytes())
+mcu_send(cli("release", 0, v("wClNextPh")))
+check("a release from the C encoder stops the note", cur(0) == 0, cur(0))
+check("... and the check says ok", (pb.tick(3), mcu_verdict(v("wClNextPh") ^ 1))[1] == "ok", slot_bytes())
+# a symbol lost in the middle of a note-on: the ROM keeps a half packet, the check says bad
+masks = cli("play", 1, 70, 100, v("wClNextPh"))
+first_phase = v("wClNextPh")
+mcu_send([masks[0], masks[1], masks[3]])       # the third symbol never arrives
+pb.tick(3)
+check("a lost symbol: nothing plays", cur(0) == 0, cur(0))
+check("... and the link task's check says bad (so it re-syncs and sends the note again)", mcu_verdict(first_phase ^ 1) == "bad", slot_bytes())
+pb.tick(40)
+# what the link task then does: a stray symbol with ITS phase (it believes it sent all 4), a pause, then the packet again
+mcu_phase = first_phase                          # after 4 symbols the MCU is where it started
+mcu_send(cli("sync", mcu_phase))
+mcu_phase ^= 1
+pb.tick(45)
+check("after the stray symbol and the pause the phases agree", mcu_phase == v("wClNextPh"), (mcu_phase, v("wClNextPh")))
+mcu_send(cli("play", 1, 70, 100, mcu_phase))
+check("... and the note is played when it is sent again", cur(0) == 70, cur(0))
+check("... and the check says ok", (pb.tick(3), mcu_verdict(v("wClNextPh") ^ 1))[1] == "ok", slot_bytes())
+mcu_send(cli("release", 0, v("wClNextPh")))
+
 mem[sym["wSelCh"]] = 2
 mcu_send(cli("play", 1, 70, 100, v("wClNextPh")))
 check("a note goes to the channel selected on the ROM (CH3)", cur(2) == 70 and cur(0) == 0, (cur(2), cur(0)))

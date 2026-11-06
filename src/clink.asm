@@ -9,10 +9,13 @@
 ;     symbol still being held and is ignored.
 ;     Packets: the first symbol's bit 3 is the type; checks are sums mod 15.
 ;       play packet    (4 symbols): on(1) note(7) vel(3) check(4), mono, on the selected channel
+;       release / ping (2 symbols): type %10, the pair (8 | x, 7 xor x); x = 0 releases the last note, x = 1 pings
 ;       general packet (8 symbols): 3 MIDI bytes (24 bits), 3 zero bits, check(4); HELLO = $FE $43 $53
 ;   up (ROM -> ESP32): on the keyboard screen 4 bytes are written to OBJ palette 1 colours 1-2
 ;     (the FPGA hands them to the MCU as "game palette data"): status, data1, data2 and a
 ;     header len(2) seq(3) ack(1) nack(1). Pad MIDI messages shorter than 3 bytes with $FE.
+;     nack = the last packet failed its check OR a packet is half received: after a complete packet the ESP32
+;     sees nack = 0 only if the ROM took it all (a lost symbol in the middle leaves a half packet).
 ;     Not linked yet: the beacon {$F4, 0, 0, len 3} (the ESP32 may send HELLO). Leaving the keyboard
 ;     screen unlinks and writes {$F5, 0, 0, len 3} once (the ESP32 must stop). See docs/BLE_MIDI.md.
 INCLUDE "hardware.inc"
@@ -76,8 +79,11 @@ CLinkRx:
     xor a
     ld [wClNack], a
     bit 3, c
-    jr z, .type
+    jr z, .type             ; 0 = play packet
     inc a
+    bit 2, c
+    jr nz, .type            ; 1 = general packet (its first symbol carries a status byte: bit 7 -> bit 2 set)
+    inc a                   ; 2 = release / ping packet (type bits %10)
 .type:
     ld [wClMode], a
     ld a, c
@@ -97,16 +103,23 @@ CLinkRx:
     ld b, a
     ld a, [wClMode]
     and a
-    jr nz, .general
+    jr nz, .notPlay
     ld a, b
     cp 4
     ret c
-    jr ClPlayDone
-.general:
+    jp ClPlayDone
+.notPlay:
+    cp 1
+    jr nz, .release
     ld a, b
     cp 8
     ret c
-    jr ClGenDone
+    jp ClGenDone
+.release:
+    ld a, b
+    cp 2
+    ret c
+    jp ClRelDone
 
 ; A packet failed its check (a real button was pressed while it was sent, or a symbol
 ; was lost): tell the ESP32, which then sends it again.
@@ -114,6 +127,36 @@ ClBad:
     ld a, 1
     ld [wClNack], a
     ret
+
+; Release / ping packet (2 symbols): s0 = %10 00 000x, s1 = $7 xor x, where x = 0 releases and x = 1 pings.
+; The pair is its own check: any single changed bit gives a pair that is not valid. A release stops the note that
+; went to the channel of the last note-on (wClCh) whatever the selected channel is now; a ping only counts as a
+; packet (it keeps the link up). Neither can start a note, so a misread can at worst cut a note short.
+ClRelDone:
+    xor a
+    ld [wClN], a
+    ld a, [wClBuf]
+    ld b, a                 ; b = s0' = x (the reserved bits must be 0)
+    cp 2
+    jp nc, ClBad
+    xor 7
+    ld c, a
+    ld a, [wClBuf + 1]
+    cp c
+    jp nz, ClBad
+    ld a, [wClLinked]
+    and a
+    ret z                   ; release / ping count only after HELLO
+    xor a
+    ld [wClTimer], a
+    ld a, b
+    and a
+    ret nz                  ; a ping
+    ld a, [wClCh]
+    cp NUM_CH
+    ret nc
+    ld c, a
+    jp NoteOff
 
 ; Play packet: wClBuf = s0' (on, note 6..5), s1 (note 4..1), s2 (note 0, vel 2..0), s3 = check.
 ClPlayDone:
@@ -411,7 +454,12 @@ CLinkUp:
     add a, a
     or b
     ld b, a
+    ld a, [wClN]
+    and a
     ld a, [wClNack]
+    jr z, .nackSet
+    ld a, 1                 ; a half packet is pending (a symbol was lost, or the packet is still being sent): nack
+.nackSet:
     or b
     ld [wClSlot + 3], a
 .write:

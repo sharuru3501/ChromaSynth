@@ -6,6 +6,7 @@
 
 #define CHL_PLAY_SYMBOLS 4
 #define CHL_GENERAL_SYMBOLS 8
+#define CHL_RELEASE_SYMBOLS 2
 #define CHL_PAD 0xFE   // pads MIDI messages shorter than 3 bytes
 
 // Phase of a symbol: 0 = A (UP held), 1 = B (DOWN held). Data bits: 0 A, 1 B, 2 START, 3 LEFT.
@@ -15,6 +16,9 @@ uint16_t chl_buttons(int phase, uint8_t data);
 
 // Mono keyboard note on the ROM's selected channel: 4 symbols. vel127 is MIDI 0..127.
 void chl_encode_play(int on, int note, int vel127, uint8_t out[CHL_PLAY_SYMBOLS]);
+// Release (ping = 0: stop the note of the last note-on) or ping (ping = 1: only keeps the link up): 2 symbols, the pair is
+// its own check, and neither can start a note.
+void chl_encode_release(int ping, uint8_t out[CHL_RELEASE_SYMBOLS]);
 // Three MIDI bytes: 8 symbols (use CHL_PAD for the missing bytes of short messages).
 void chl_encode_general(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t out[CHL_GENERAL_SYMBOLS]);
 
@@ -30,6 +34,8 @@ typedef struct
 } chl_slot_t;
 
 void chl_slot_from_gpd(const uint8_t gpd[8], chl_slot_t *out);
+// After a packet: 1 if the ROM accepted the last symbol sent (slot ack == its phase) and did not nack, else 0.
+int chl_verify_ack(const chl_slot_t *slot, int last_phase);
 
 // ---------------------------------------------------------------- ROM beacons (docs/BLE_MIDI.md section 3)
 // While the ROM is on its KEYBOARD screen and not linked it writes the slot {B0 = $F4, len = 3}; when it
