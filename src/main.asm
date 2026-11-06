@@ -28,6 +28,7 @@ wMidiData1:     db
 wCurNote:       db          ; currently sounding note (monophonic)
 wJoy:           db
 wJoyPrev:       db
+wBootTimer:     db          ; frames left of the boot beep
 wJoyNote:       db          ; note played by the A button
 
 ; ---------------------------------------------------------------- code
@@ -84,6 +85,12 @@ EntryPoint:
     ldh [rIE], a
     ei
 
+    ; boot beep (C5, ~0.5 s): proves audio works independent of input
+    ld a, 30
+    ld [wBootTimer], a
+    ld a, 72
+    call NoteOn
+
 MainLoop:
     halt
     nop
@@ -93,6 +100,13 @@ MainLoop:
     jr z, MainLoop
     xor a
     ld [wVBlank], a
+    ld a, [wBootTimer]
+    and a
+    jr z, .noBoot
+    dec a
+    ld [wBootTimer], a
+    call z, NoteOff
+.noBoot:
     call ReadJoy
     call HandleJoy
     jr MainLoop
