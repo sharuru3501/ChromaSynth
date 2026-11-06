@@ -333,8 +333,8 @@ MarkAllRender:
 ;   wColHead[c]   flags: bit 0 = a note starts in this column, bit 1 = beat line
 ;                 column, bit 3 = bar line column, bit 2 = unused column (the
 ;                 page has fewer than 16 columns; drawn blank)
-; and the ruler line (wRulerBuf): bar numbers over the bar lines, dots over the
-; other beats, nothing after the loop end. The page starts on a beat, so the
+; and the ruler line (wRulerBuf): bar numbers over the bar lines, ticks over the
+; other beat lines, nothing after the loop end. The page starts on a beat, so the
 ; bar/beat marks stay where they are when the grid division changes.
 ; Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
@@ -404,8 +404,8 @@ BuildCols:
     jr nc, .rulerSet        ; after the loop end: blank
     ld a, [wBCFlag]
     bit 3, a
-    ld a, '.' - 32
-    jr z, .rulerSet         ; ordinary beat: a dot
+    ld a, T_TICK
+    jr z, .rulerSet         ; ordinary beat: a tick on the beat line
     ld a, [wBCBeat]
     srl a
     srl a

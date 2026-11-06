@@ -278,8 +278,8 @@ check("grid: empty white-key cell", grid(12, 2) == T_EMP_W, grid(12, 2))
 check("grid: black-key row is shaded (+1)", grid(11, 2) == T_EMP_W + 1, grid(11, 2))
 check("grid: beat column marked (+2)", grid(10, 4) == T_EMP_W + 2, grid(10, 4))
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
-DOT = ord(".") - 32
-check("ruler: bar number over the bar line, dots over the other beats, page tab at the right",
+DOT = 75  # T_TICK: the ruler beat mark
+check("ruler: bar number over the bar line, ticks over the other beats, page tab at the right",
       ruler[2] == 17 and ruler[6] == DOT and ruler[10] == DOT and ruler[14] == DOT and ruler[3] == 0 and ruler[18] == 48 + 128 and ruler[19] == 17 + 128,
       ruler)
 check("grid: bar line on column 0 (navy), beat lines on columns 4, 8, 12",

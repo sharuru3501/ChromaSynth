@@ -68,6 +68,7 @@ NOTE_BODY = ["00000000"] + ["33333333"] * 6 + ["00000000"]
 NOTE_HEAD = ["00000000"] + ["03333333"] * 6 + ["00000000"]
 CUR_EMP = ["33333333"] + ["30000003"] * 6 + ["33333333"]
 CUR_NOTE = ["33333333"] + ["32222223"] * 6 + ["33333333"]
+TICK = ["00000000"] * 2 + ["20000000"] * 6              # ruler beat mark: the beat line continued into the ruler
 PLAYHEAD = ["11000000"] * 8                            # sprite: colour 1 = red, at the left edge of the cell (on the beat line)
 
 ROLL_TILES = {  # tile index -> pixels
@@ -82,6 +83,7 @@ ROLL_TILES = {  # tile index -> pixels
     72: PLAYHEAD,
     73: BAR(CELL_W),
     74: BAR(CELL_B),
+    75: TICK,
 }
 
 
