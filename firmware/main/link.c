@@ -2,7 +2,7 @@
  * The Game Boy link, master side. The Game Boy's "normal mode" serial port is SPI mode 3
  * (clock idles high, data changes on the falling edge and is sampled on the rising edge,
  * MSB first), and the Game Boy is the slave (external clock), so the SPI master peripheral
- * can drive it directly. NOT compiled against ESP-IDF yet -- see docs/FIRMWARE.md.
+ * can drive it directly. Builds with ESP-IDF v5.5.6; not run on hardware yet -- see docs/FIRMWARE.md.
  */
 #include "link.h"
 

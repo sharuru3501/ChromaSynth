@@ -8,10 +8,10 @@
 |------|------|
 | `core/bridge_core.c`(MIDI 振り分け、クロック変換、リンクの送出計画、キュー) | **ホストでテスト済み**。Python 参照実装の正解 6430 ステップと全て一致、AddressSanitizer/UBSan 通過、C 固有テスト(キュー溢れ、32bit 時刻の折り返し、チャンク分割非依存、リンク状態)通過 |
 | ROM ⇄ この C コード | **PyBoy 上で往復テスト通過**(`tools/headless_midi_test.py`: ホスト MIDI → C コア → シリアル ISR → ROM、ROM の送信キュー → ISR の返信 → C コア → ホスト MIDI) |
-| `main/main.c` `link.c` `usb_midi.c`(ESP-IDF との接続部) | **書いただけ。ESP-IDF ではコンパイルしていない**。ホストの C コンパイラ+手作りスタブヘッダで構文と型だけ検査(`make -C firmware/test syntax`)。これは自分のコードの誤りを見つけるだけで、**ESP-IDF/TinyUSB の関数が実在する証明にはならない** |
+| `main/main.c` `link.c` `usb_midi.c`(ESP-IDF との接続部) | **ESP-IDF v5.5.6 でビルド成功**(SPI 版・ビットバン版とも、警告なし。`esp_tinyusb 3.0.0`)。アプリは約 267 KB(1 MB のパーティションの 26%)。**実機では動かしていない**。ホストのスタブでの型検査(`make -C firmware/test syntax`)は ESP-IDF が無い環境向けの簡易版 |
 | 実機(ESP32-S3 基板、リンクケーブル、Chromatic) | **未検証**。Chromatic のリンクポートの電圧・ピン配置も未実測 |
 
-つまり「判断と計算を全部ホストでテストし、ESP-IDF との境界を薄くした」状態。境界の確認は `idf.py build`(ハード不要)が最初の一歩。
+つまり「判断と計算を全部ホストでテストし、ESP-IDF との境界を薄くして、そこもビルドで確認した」状態。残るのは**実機でしか分からないこと**(§5)。
 
 ## 2. 構成
 
@@ -47,7 +47,7 @@ firmware/
 | ロック | `xSemaphoreCreateMutex`(優先度継承)。`link_task` は 250〜2000 µs ごとに2回、数 µs だけ取る |
 | SPI | `spi_bus_initialize(SPI2_HOST, …, SPI_DMA_DISABLED)`、デバイスは `mode = 3`、`clock_speed_hz = 32000`、`spics_io_num = -1`。1バイト = `SPI_TRANS_USE_TXDATA/RXDATA`、`length = 8`、`spi_device_polling_transmit`。起動時に `spi_device_get_actual_freq` をログに出し、20〜40 kHz から外れたら警告 |
 | **SPI の最小クロック** | ESP-IDF の文書に**最小値の記載がない**。32 kHz が出るかは起動ログで確認する。出なければ `bridge_pins.h` の `LINK_USE_BITBANG` を 1 にする(GPIO のビットバン。SCK は立ち下がりで GB がビットを出し、立ち上がりで両者が取り込む) |
-| USB-MIDI | `espressif/esp_tinyusb ~3.0.0`、`CONFIG_TINYUSB_MIDI_COUNT=1`。ディスクリプタと呼び出し順は ESP-IDF の `examples/peripherals/usb/device/tusb_midi`(MIT)に従う。DAW に見えるポート名は `ChromaSynth MIDI` |
+| USB-MIDI | `espressif/esp_tinyusb ~3.0.0`(解決結果は 3.0.0、IDF 5.3 以上が必要)、`CONFIG_TINYUSB_MIDI_COUNT=1`。ディスクリプタと呼び出し順は ESP-IDF の `examples/peripherals/usb/device/tusb_midi`(MIT)に従う。DAW に見えるポート名は `ChromaSynth MIDI`。**TinyUSB のタスクは既定で core 1(`link_task` と同じ)なので、`cfg.task.xCoreID = 0` で core 0 に移した**(ビルド時に esp_tinyusb のヘッダで発見)。VID/PID は esp_tinyusb の既定(Espressif の VID と既定 PID)のまま。開発用としては問題ないが、他人に配るなら自分の PID を用意する |
 | 電源 | ブリッジは USB から給電。**リンクの VCC(ピン1)は接続しない** |
 
 ### ピン(ESP32-S3、`bridge_pins.h`)
@@ -60,17 +60,23 @@ firmware/
 
 電圧が 5V と分かった場合のレベル変換(74AHCT125 など)は [BRIDGE.md §4](BRIDGE.md)。**実測の前に接続しないこと。**
 
-## 3. ビルドと書き込み(ESP-IDF が入っている環境で。ここでは未実行)
+## 3. ビルドと書き込み
 ```bash
-# ESP-IDF の導入は公式の手順に従う(v5.x)。以降は export.sh を読み込んだシェルで
+# ESP-IDF v5.5.6 を ~/esp/esp-idf に導入済みの環境(導入は公式の get-started に従う: git clone → ./install.sh esp32s3)
+make firmware            # = . ~/esp/esp-idf/export.sh && cd firmware && idf.py build  (初回は esp_tinyusb を自動取得)
+# 手動なら
+. ~/esp/esp-idf/export.sh
 cd firmware
-idf.py set-target esp32s3
+idf.py set-target esp32s3      # 初回のみ
 idf.py build
-idf.py -p <シリアルポート> flash monitor
+idf.py -p <シリアルポート> flash monitor   # 実機があるとき
+# ビットバン版(SPI で 32 kHz が出ないとき)
+idf.py -B build_bitbang -DCMAKE_C_FLAGS=-DLINK_USE_BITBANG=1 build
 ```
-- `idf_component.yml` が `espressif/esp_tinyusb ~3.0.0` を自動取得する(ネットワークが必要)。
-- **ESP-IDF のバージョンと esp_tinyusb の組み合わせは、手元の IDF にある `tusb_midi` 例と合わせる。** この例は IDF の master を参照して書いたので、古い IDF では API 名が違う可能性がある。
+- `dependencies.lock` で `esp_tinyusb 3.0.0` を固定している(コミット対象)。`managed_components/` と `sdkconfig` と `build/` は生成物で、コミットしない。
+- `esp_tinyusb 3.0.0` は IDF 5.3 以上を要求する。
 - 起動後、2 秒ごとにログが出る: `link UP/DOWN, losses N, dropped to GB / to host, USB mounted/not mounted`。
+- **ビルドで確認したこと**: 上記の API 名とヘッダは全て実在した(`tud_midi_stream_read/write`、`TINYUSB_DEFAULT_CONFIG()`、`tinyusb_default_config.h`、`spi_device_get_actual_freq` ほか)。`CONFIG_FREERTOS_HZ=1000` と `CONFIG_TINYUSB_MIDI_COUNT=1` が `sdkconfig` に反映される。ウォッチドッグは既定で両コアのアイドルタスクを 5 秒で監視する。
 
 ## 4. テスト(ESP32 なしで走るもの)
 ```bash
@@ -82,23 +88,22 @@ python3 tools/headless_midi_test.py   # ROM との結合テスト(要 pip instal
 |--------|----------------|
 | 正解トレース 6430 ステップ | ランダムな MIDI(ゴミ・SysEx・ランニングステータス・クロック)、ランダムな GB 返信と時刻、ランダムなリンク結果で、C が Python モデルとバイト単位・µs 単位で一致する。**わざと壊した C(クロック位相、補間の上限、スタート時のリセット、ベンドの転送、CC の絞り込み、時刻順の挿入)6 通りを全て検出した** |
 | C 固有 | キュー満杯でメッセージが半端に入らない / ホスト向けが満杯でも静かに捨てる / 32bit カウンタの折り返し / 1 バイトずつ入れても同じ出力 / リンクの上下と古い入力の破棄 |
-| `make syntax` | `main/*.c` がスタブに対して型検査を通る(**API の実在は証明しない**) |
+| `make syntax` | `main/*.c` がスタブに対して型検査を通る(ESP-IDF が無い環境向けの簡易版。実在の確認は `idf.py build`) |
 | ROM との往復 | ROM のシリアル ISR(`$FD` の扱い、返信の順序)と C コアが噛み合う。24 回/拍 → 12 回/拍 → ROM のテンポ追従、ROM の送信 → 24 回/拍 → ホスト |
 
-## 5. 未確認事項とリスク
+## 5. 未確認事項とリスク(実機でしか分からないこと)
 | 項目 | 内容 | 確認方法 |
 |------|------|----------|
-| ESP-IDF でのビルド | 関数名・ヘッダ名の誤り(特に `tud_midi_stream_read`、`tinyusb_default_config.h`、`TINYUSB_DEFAULT_CONFIG()`) | `idf.py build`(ハード不要) |
-| SPI 32 kHz | 文書に最小クロックの記載なし | 起動ログの実周波数。ダメならビットバン |
-| TinyUSB タスクのコア | `link_task` を core 1 に固定したが、USB ドライバのタスクの割り当ては未確認 | sdkconfig の TinyUSB のタスク設定を確認。USB の遅れでリンクが乱れないか実機で確認 |
-| ウォッチドッグ | `link_task` はバースト時に 250 µs の busy-wait を最大約 0.26 秒(キュー 512 B 分)続ける。アイドルタスクが飢える | 実機で TWDT のログを確認。必要なら `taskYIELD()` を入れる |
+| SPI 32 kHz | ESP-IDF の文書に最小クロックの記載なし。ビルドは通るが、**実際に 32 kHz が出るかは実行しないと分からない** | 起動ログの実周波数。ダメならビットバン版(ビルド確認済み) |
+| ウォッチドッグ | `link_task` はバースト時に 250 µs の busy-wait を最大約 0.26 秒(キュー 512 B 分)続ける。既定のウォッチドッグは両コアのアイドルタスクを 5 秒で監視する(0.26 秒なら余裕) | 実機でログを確認。それでも出るなら `taskYIELD()` を入れる |
 | ISR 遅延 | ROM の ISR は約 100 µs、バイト間隔は 250 µs(2.5 倍) | BRIDGE.md §6 の段階 6 で間隔を詰めて限界を測る |
+| USB の安定性 | USB を core 0 に移したので `link_task`(core 1)の busy-wait の影響は受けないはず。DAW が繋がったまま連続運転して確認していない | 実機で長時間(数十分)動かす |
 | 起動直後の返信 | GB が待ち受ける前の最初の返信は `$FF` 以外のこともある(ROM が起動前など) | `bridge_link_rx` は `$FF` 以外ならリンクを上げる。誤ってリンクが上がっても `$FD` しか送らないので無害 |
-| 実装していないもの | DIN-5 MIDI IN(UART)、BLE MIDI(セントラル/ペリフェラル)、LED 表示、USB のシリアル番号(チップ ID から作る) | 次の工程 |
+| 実装していないもの | DIN-5 MIDI IN(UART)、BLE MIDI(セントラル/ペリフェラル)、LED 表示、USB のシリアル番号(チップ ID から作る)、自分の USB PID | 次の工程 |
 
 ## 6. 次の工程
-1. **ESP-IDF を導入し、`idf.py build` を通す**(ハード不要。API の誤りがここで分かる)。
-2. Chromatic のリンクを実測(BRIDGE.md §4)→ 配線と(必要なら)レベル変換を決める。
+1. ~~ESP-IDF を導入し、`idf.py build` を通す~~(完了)。
+2. Chromatic のリンクを実測(BRIDGE.md §4)→ 配線と(必要なら)レベル変換を決める。**基板の購入はこの結果次第。**
 3. 実機ブリングアップ(BRIDGE.md §6 の段階 1〜3: SCK の波形、`$FD` ポーリング、ノートオン)。
 4. DIN-5(M6b): UART1(31250 baud)+フォトカプラ。入力は `usb_midi_read` と同じ形で `bridge_host_in` に渡すだけ。
 5. BLE MIDI(M8)。

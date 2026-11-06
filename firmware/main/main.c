@@ -8,7 +8,7 @@
  *   link_task (core 1)  clocks one byte through the link at a time, with the timing the ROM needs
  *   midi_task (core 0)  USB-MIDI in/out, and the interpolated clock bytes at their due time
  * The core is not thread-safe: every call is wrapped in g_lock (a mutex: priority inheritance).
- * NOT compiled against ESP-IDF yet -- see docs/FIRMWARE.md.
+ * Builds with ESP-IDF v5.5.6; not run on hardware yet -- see docs/FIRMWARE.md.
  */
 #include <stdint.h>
 
@@ -114,8 +114,8 @@ void app_main(void)
     usb_midi_init();
     link_init();
 
-    /* The link task busy-waits for the 250 us gaps; keep it on its own core at a high priority so
-     * the USB stack (core 0) cannot delay a byte. TODO(verify): the TinyUSB task's core affinity. */
+    /* The link task busy-waits for the 250 us gaps; keep it on its own core (1) at a high priority so
+     * the USB stack cannot delay a byte. usb_midi_init() moves the TinyUSB task to core 0. */
     xTaskCreatePinnedToCore(link_task, "link", 4096, NULL, configMAX_PRIORITIES - 2, NULL, 1);
     xTaskCreatePinnedToCore(midi_task, "midi", 4096, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(stats_task, "stats", 3072, NULL, 1, NULL, 0);

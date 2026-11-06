@@ -81,7 +81,8 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 ## ファームウェア(ESP32-S3)メモ
 - 判断・計算は `firmware/core/`(純粋な C)に集め、ESP-IDF との境界(`main/`)は薄くする。そうすればホストの gcc で全部テストできる。
 - 参照実装(Python)→正解トレース→C の差分ファジング。Python 側の算術を整数µsにして、丸めまで一致させる。
-- ESP-IDF の API は推測で書かず、公式ヘッダ(GitHub の esp-idf)で宣言を確認する。確認できなかった名前は `TODO(verify)` を付ける。
+- ESP-IDF の API は推測で書かず、公式ヘッダ(GitHub の esp-idf)で宣言を確認する。確認できなかった名前は `TODO(verify)` を付ける。**実際にビルドすると、設定の既定値で気づけなかった問題が出る**(例: esp_tinyusb の既定では USB タスクが core 1 で、リンク駆動タスクと衝突する)。ビルド後は `managed_components/` のヘッダの既定値を読む。
+- ESP-IDF は `~/esp/esp-idf`(v5.5.6)。シェルごとに `. ~/esp/esp-idf/export.sh`。ESP-IDF 本体とツールで約 6 GB 使う(ディスクが逼迫しがちな環境)。
 - USB-MIDI は `esp_tinyusb`。SPI は `mode = 3`、`spics_io_num = -1`、`SPI_TRANS_USE_TXDATA/RXDATA`、`spi_device_polling_transmit`。実周波数は `spi_device_get_actual_freq`(kHz)。
 
 ## 検証

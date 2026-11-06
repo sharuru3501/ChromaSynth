@@ -12,7 +12,6 @@ firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/managed_components/
-firmware/dependencies.lock
 firmware/test/test_core
 firmware/test/test_core_asan
 firmware/test/*.dSYM

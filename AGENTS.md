@@ -19,6 +19,7 @@ python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install
 python3 tools/headless_save_test.py   # SRAM保存のテスト
 python3 tools/headless_midi_test.py   # MIDI入力・DAW同期・シリアルISR・ブリッジ参照実装との往復のテスト
 python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
+make firmware                         # ESP32-S3 ファームウェアのビルド(要 ESP-IDF)
 make check-bridge                     # 上記 + firmware の C 中核テスト(正解トレース照合・ASan・構文検査)。ESP32 不要
 make clean
 ```
@@ -27,7 +28,7 @@ make clean
 - `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`(MIDI解析とルーティング。仕様は `docs/MIDI.md`), `joy.asm`, `ui.asm`, `seq.asm`(ティック再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。ピアノロールの設計は `docs/ROLL_DESIGN.md`シンボルは `-E` で全export
 - `inc/` 共有 include(`hardware.inc` は必要なレジスタだけ定義した自前版)
 - `tools/` コード/データ生成スクリプト
-- `firmware/` ブリッジ(ESP32-S3)のファームウェア。`core/` は純粋な C(ホストでテスト可)、`main/` は ESP-IDF との接続部(**未ビルド**)。設計は `docs/FIRMWARE.md`
+- `firmware/` ブリッジ(ESP32-S3)のファームウェア。`core/` は純粋な C(ホストでテスト可)、`main/` は ESP-IDF との接続部(ESP-IDF v5.5.6 でビルド確認済み、実機は未確認)。設計は `docs/FIRMWARE.md`
 - `docs/` 設計・ロードマップ
 - `.claude/skills/gb-synth-dev/SKILL.md` GB音源/RGBDS/MIDIの作業メモ(エージェント向け)
 
@@ -46,5 +47,5 @@ make clean
 12. 時間の単位は**ティック(1拍=12)**。ステップ単位のコードを書かない。1フレームに2ティック以上処理しない前提(`gen_tempo.py` が検証する)。グリッド分割は表示/入力の単位であって、データはいつもティック。ページは必ず拍から始まり整数拍を表示する(分割を変えても小節が動かないこと)。ページ幅は `tools/gen_divs.py` の表で決める。
 13. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
 14. **リンクプロトコルを変えたら** `docs/BRIDGE.md`・`tools/bridge_ref.py`・ROM(`SerialISR`/`midi.asm`)を同時に直し、`headless_midi_test.py` の往復テストで確かめる。`$FD` はアイドル、`$FF` は「GBが待ち受けていない」の印なのでデータに使わない。
-15. **ブリッジの動作を変えたら** `tools/bridge_ref.py` と `firmware/core/bridge_core.c` を同じ算術(整数µs、切り捨て除算)で両方直し、`make -C firmware/test vectors` で正解を作り直して `make check-bridge` で突き合わせる。`main/` の ESP-IDF 部分は `idf.py build` していない間は「未ビルド」と書く(スタブでの型検査は API の実在を証明しない)。
+15. **ブリッジの動作を変えたら** `tools/bridge_ref.py` と `firmware/core/bridge_core.c` を同じ算術(整数µs、切り捨て除算)で両方直し、`make -C firmware/test vectors` で正解を作り直して `make check-bridge` で突き合わせる。`main/` を変えたら `make firmware` でビルドして確かめる(ESP-IDF は `~/esp/esp-idf`、v5.5.6。無い環境ではスタブでの型検査 `make -C firmware/test syntax` だけになり、API の実在は証明できない)。ESP32 の実機で動かしていないことは、動かすまで「未確認」と書く。
 16. 不明なハード仕様(Chromaticのリンクポートのピン配置・電圧等)は推測で断定せず、docs の「未確認事項」に記録する。ブリッジを配線する前に実測する(BRIDGE.md §4)。

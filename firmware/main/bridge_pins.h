@@ -19,7 +19,10 @@
 #define LINK_SCK_HZ 32000
 
 /* 1 = drive the link by bit-banging GPIOs instead of the SPI peripheral. Use this if the SPI
- * peripheral cannot make a clock this slow. */
+ * peripheral cannot make a clock this slow. Can be overridden from the build:
+ *   idf.py build -DCMAKE_C_FLAGS=-DLINK_USE_BITBANG=1 */
+#ifndef LINK_USE_BITBANG
 #define LINK_USE_BITBANG 0
+#endif
 
 #endif

@@ -13,7 +13,7 @@
 | M4c | **ティック分解能(1拍=12)とグリッド/サブグリッド**(1/4〜1/48、三連符対応、分割を変えても小節は固定)、方向キーのオートリピート、ティック単位で滑らかな再生ヘッド。設計: [ROLL_DESIGN.md](ROLL_DESIGN.md) | done(三連符入力・再生・小節固定の表示をSameBoy(Mac/iPhone)で確認。iPhoneでSTART/SELECT操作が安定動作することも確認) |
 | M5 | SRAM保存(パッチ/パターン/BPM、MBC5+RAM+BATTERY 8KB、起動時に自動復元) | untested(ヘッドレスで保存・再起動復元・破損検知・SRAM無しカート検知を確認。実カートのSRAMは未確認) |
 | M5b | ソング/チェイン(複数パターン) | todo |
-| M6 | **ブリッジ**: 設計・リンクプロトコル、ROM側の MIDI アウト/外部同期(SYNC)、参照実装、**C の中核 + ESP32-S3 ファームウェアのソース**。仕様: [BRIDGE.md](BRIDGE.md)、ファームウェア: [FIRMWARE.md](FIRMWARE.md) | ROM側・参照実装・C中核は done(PyBoyとの往復テスト通過、C中核は正解トレース一致)。**ESP-IDF 接続部は未ビルド。基板・リンクの実測・実機は todo** |
+| M6 | **ブリッジ**: 設計・リンクプロトコル、ROM側の MIDI アウト/外部同期(SYNC)、参照実装、**C の中核 + ESP32-S3 ファームウェアのソース**。仕様: [BRIDGE.md](BRIDGE.md)、ファームウェア: [FIRMWARE.md](FIRMWARE.md) | ROM側・参照実装・C中核は done(PyBoyとの往復テスト通過、C中核は正解トレース一致)。ESP-IDF v5.5.6 でビルド成功(SPI版・ビットバン版)。**基板・リンクの実測・実機は todo** |
 | M7 | 実機(Chromatic+フラッシュカート)検証 | todo |
 | M8 | BLE MIDI(ESP32ブリッジ) | todo |
 

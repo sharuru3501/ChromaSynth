@@ -7,7 +7,7 @@ SRCS    := $(wildcard src/*.asm)
 OBJS    := $(patsubst src/%.asm,build/%.o,$(SRCS))
 INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 
-.PHONY: all clean run notetable gen check-bridge
+.PHONY: all clean run notetable gen check-bridge firmware
 
 all: $(TARGET)
 
@@ -37,6 +37,10 @@ gen:
 	python3 tools/gen_bridge_vectors.py
 
 # Bridge tests that need no emulator and no ESP32: the Python model, then the C core against its golden traces
+# ESP32-S3 firmware (needs ESP-IDF in ~/esp/esp-idf, or IDF_PATH set)
+firmware:
+	cd firmware && . $${IDF_PATH:-$$HOME/esp/esp-idf}/export.sh > /dev/null && idf.py build
+
 check-bridge:
 	python3 tools/test_bridge_ref.py
 	make -C firmware/test test asan syntax lib

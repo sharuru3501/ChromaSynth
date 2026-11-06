@@ -1,7 +1,9 @@
 /*
  * USB-MIDI device on the ESP32-S3's native USB, through the esp_tinyusb component.
  * The descriptor setup and the call sequence follow ESP-IDF's examples/peripherals/usb/device/tusb_midi
- * (TinyUSB / Espressif, MIT license). NOT compiled against ESP-IDF yet -- see docs/FIRMWARE.md.
+ * (TinyUSB / Espressif, MIT license). Builds with ESP-IDF v5.5.6 + esp_tinyusb 3.0.0; not run on hardware yet.
+ * The device descriptor is left at esp_tinyusb's default (Espressif's USB VID and the default PID):
+ * fine for development; get a PID of your own before giving units to other people.
  */
 #include "usb_midi.h"
 
@@ -40,6 +42,9 @@ static const uint8_t s_cfg_desc[] = {
 void usb_midi_init(void)
 {
     tinyusb_config_t cfg = TINYUSB_DEFAULT_CONFIG();
+    /* esp_tinyusb runs its task on core 1 by default (TINYUSB_DEFAULT_TASK_AFFINITY). That is the core
+     * where link_task busy-waits for the link's 250 us gaps, so keep USB on core 0. */
+    cfg.task.xCoreID = 0;
     cfg.descriptor.string = s_str_desc;
     cfg.descriptor.string_count = sizeof(s_str_desc) / sizeof(s_str_desc[0]);
     cfg.descriptor.full_speed_config = s_cfg_desc;
@@ -54,8 +59,8 @@ bool usb_midi_mounted(void)
 size_t usb_midi_read(uint8_t *buf, size_t cap)
 {
     /* The MIDI interface always has an input jack: incoming data must be read (even if thrown
-     * away) or the host blocks. TODO(verify at build time): tud_midi_stream_read is the raw byte
-     * counterpart of tud_midi_stream_write; the example uses tud_midi_packet_read instead. */
+     * away) or the host blocks. tud_midi_stream_read is the raw byte counterpart of
+     * tud_midi_stream_write (the example uses tud_midi_packet_read instead). */
     if (!tud_midi_available()) {
         return 0;
     }

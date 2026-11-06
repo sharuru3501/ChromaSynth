@@ -2,6 +2,7 @@
 #ifndef STUB_TINYUSB_H
 #define STUB_TINYUSB_H
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #define CFG_TUD_MIDI 1
@@ -10,6 +11,7 @@
 #define TUD_CONFIG_DESCRIPTOR(...) 0x09, 0x02
 #define TUD_MIDI_DESCRIPTOR(...) 0x07, 0x24
 typedef struct {
+    struct { size_t size; uint8_t priority; int xCoreID; } task;
     struct {
         const char **string;
         int string_count;
