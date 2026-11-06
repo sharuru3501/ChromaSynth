@@ -51,8 +51,7 @@ check-mcu:
 
 # The Mac helper for wired MIDI (tools/chromasynth_usb_bridge.swift): compile and run its MIDI -> console line self test.
 check-usb-bridge:
-	swiftc -O tools/chromasynth_usb_bridge.swift -o build/chromasynth_usb_bridge
-	build/chromasynth_usb_bridge --selftest
+	tools/test_usb_bridge.sh
 
 run: $(TARGET)
 	open -a SameBoy $(TARGET)

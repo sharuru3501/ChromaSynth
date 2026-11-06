@@ -87,6 +87,7 @@ func selftest() -> Never {
 
 // ---------------------------------------------------------------- serial port
 var serialFD: Int32 = -1
+var usbConfirmed = false
 let writeLock = NSLock()
 
 func openSerial(_ path: String) -> Int32 {
@@ -125,6 +126,7 @@ func name(_ o: MIDIObjectRef) -> String {
 }
 
 // ---------------------------------------------------------------- main
+setvbuf(stdout, nil, _IOLBF, 0)   // lines appear at once, also when the output goes to a file or a pipe
 let args = CommandLine.arguments
 func option(_ flag: String) -> String? { if let i = args.firstIndex(of: flag), i + 1 < args.count { return args[i + 1] }; return nil }
 if args.contains("--selftest") { selftest() }
@@ -147,15 +149,29 @@ if !dry {
     serialFD = openSerial(path)
     if serialFD < 0 { print("Cannot open \(path)"); exit(1) }
     print("opened \(path); the ESP32 resets once: waiting for it to boot...")
-    // drain whatever the ESP32 prints, so that its buffer never fills
+    // Read what the ESP32 prints (also so that its buffer never fills); `mode usb` is confirmed by "applied USB".
     DispatchQueue.global().async {
         var buf = [UInt8](repeating: 0, count: 512)
-        while true { if read(serialFD, &buf, buf.count) <= 0 { usleep(20000) } }
+        var text = ""
+        while true {
+            let n = read(serialFD, &buf, buf.count)
+            if n > 0 {
+                text += String(decoding: buf[0..<n], as: UTF8.self)
+                if text.count > 4000 { text = String(text.suffix(2000)) }
+                if text.contains("applied USB") { usbConfirmed = true }
+            } else { usleep(20000) }
+        }
     }
-    sleep(5)
+    sleep(3)
+    // The console may not be up yet (and a command sent too early is lost): ask until the ESP32 says it is in USB mode.
+    for _ in 0..<12 {
+        send("mode usb", dry: false)
+        for _ in 0..<15 { if usbConfirmed { break }; usleep(100_000) }
+        if usbConfirmed { break }
+    }
+    if !usbConfirmed { print("WARNING: the ESP32 did not confirm USB mode (is the console on? is this the right port?). Notes will be ignored.") }
 }
-send("mode usb", dry: dry)
-if !dry { sleep(1) }
+if dry { send("mode usb", dry: true) }
 print("USB mode on. Put the ChromaSynth ROM on its KEYBOARD screen and play. Ctrl-C to stop (sends `mode off`).")
 
 var client = MIDIClientRef()
@@ -196,6 +212,7 @@ signal(SIGINT) { _ in
 }
 connectSources()
 while true {
-    sleep(2)
+    // CoreMIDI only refreshes this process's list of devices while a run loop is running, so wait in the run loop (not sleep()).
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 2))
     connectSources()      // a keyboard that is plugged in later
 }

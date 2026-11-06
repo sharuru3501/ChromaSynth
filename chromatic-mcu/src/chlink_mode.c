@@ -110,10 +110,10 @@ static int cmd_mode(int argc, char **argv)
 }
 
 // A MIDI message from the wired helper: m <status> <d1> [d2] in hex, e.g. m 90 3c 64. Prints nothing (it is called for every
-// note); only accepted while the link is on (BLE or USB mode).
+// note). Accepted only in the USB mode: BLE and wired input are never both live.
 static int cmd_m(int argc, char **argv)
 {
-    if (argc < 3 || argc > 4 || s_applied == CHM_OFF)
+    if (argc < 3 || argc > 4 || s_applied != CHM_USB)
     {
         return 0;
     }

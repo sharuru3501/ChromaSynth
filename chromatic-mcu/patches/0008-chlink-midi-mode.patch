@@ -79,7 +79,7 @@ index 1bd3ea6..bea8091 100644
 +    ChMode_Init();       // MIDI mode OFF / BLE / USB (always OFF at boot): `mode`, `m`, and the OSD menu item
  }
 diff --git a/main/pwrmgr.c b/main/pwrmgr.c
-index 9f90604..fe79589 100644
+index 9f90604..e582ca7 100644
 --- a/main/pwrmgr.c
 +++ b/main/pwrmgr.c
 @@ -1,4 +1,5 @@
@@ -102,7 +102,7 @@ index 9f90604..fe79589 100644
  
  void PwrMgr_Task(void *arg)
  {
-@@ -104,10 +112,14 @@ void PwrMgr_Task(void *arg)
+@@ -104,10 +112,19 @@ void PwrMgr_Task(void *arg)
  
  void PwrMgr_TriggerLightSleep(void)
  {
@@ -115,7 +115,12 @@ index 9f90604..fe79589 100644
 +    // tasks, no console input, no BLE); only a message from the FPGA wakes it. In the OFF mode this is the stock behaviour.
 +    if (s_ChlinkKeepAwake || esp_timer_get_time() < 20LL * 1000000LL)
 +    {
-+        PwrMgr_IdleTimerPet();   // look again in a moment (the idle timer is one-shot)
++        // Look again in a moment (the idle timer is one-shot). This runs in the timer service task: it must not block, so
++        // the block time is 0 (PwrMgr_IdleTimerPet waits forever, which a timer callback must never do).
++        if (IdleSystemTimer != NULL)
++        {
++            (void) xTimerReset(IdleSystemTimer, 0);
++        }
 +        return;
 +    }
  

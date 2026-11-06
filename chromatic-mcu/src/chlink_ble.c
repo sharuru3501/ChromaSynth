@@ -10,6 +10,8 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +30,8 @@ static volatile bool s_started = false, s_connected = false;
 static volatile uint32_t s_writes = 0, s_msgs = 0, s_notes = 0, s_queue_full = 0, s_connects = 0;
 static volatile uint8_t s_last_note = 0xFF;   // the note the keyboard is holding (for all-notes-off)
 static volatile int s_start_rc = -1;
+static volatile bool s_stopping = false;      // set while the stack is being stopped: no new advertising
+static volatile uint16_t s_conn_handle = 0;
 // Diagnostics for `ble`: where does a central stall?
 static volatile uint32_t s_acc_read = 0, s_acc_write = 0, s_acc_other = 0, s_disconnects = 0, s_subscribes = 0;
 static volatile int s_disc_reason = 0, s_conn_status = 0, s_enc_status = -1, s_upd_rc = -99, s_notify_on = 0;
@@ -123,6 +127,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         else
         {
             s_connected = true;
+            s_conn_handle = ev->connect.conn_handle;
             s_connects++;
             // 7.5..15 ms: Apple recommends a connection interval of 15 ms or less for BLE MIDI.
             struct ble_gap_upd_params p = {.itvl_min = 6, .itvl_max = 12, .latency = 0, .supervision_timeout = 400};
@@ -163,6 +168,10 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
 
 static void advertise(void)
 {
+    if (s_stopping)
+    {
+        return;
+    }
     // The 128-bit service UUID fills the advertisement (3 + 18 of 31 bytes); the name goes into the scan response.
     struct ble_hs_adv_fields f;
     memset(&f, 0, sizeof f);
@@ -260,16 +269,27 @@ bool ChLinkBle_Enable(bool on)
     }
     if (!on)
     {
-        s_connected = false;
+        s_stopping = true;
+        if (s_connected)
+        {
+            // Tell the Mac that we are going away (otherwise it keeps showing "connected" until a timeout).
+            (void)ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            for (int i = 0; i < 25 && s_connected; i++)
+            {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+        }
         (void)ble_gap_adv_stop();
         const int rc = nimble_port_stop();   // waits until the host task has ended
         if (rc == 0)
         {
             nimble_port_deinit();
         }
+        s_connected = false;
         s_started = false;
         return rc == 0;
     }
+    s_stopping = false;
     s_start_rc = nimble_port_init();
     if (s_start_rc != 0)
     {
