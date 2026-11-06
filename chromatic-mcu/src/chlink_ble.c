@@ -27,6 +27,12 @@ static volatile bool s_started = false, s_connected = false;
 static volatile uint32_t s_writes = 0, s_msgs = 0, s_notes = 0, s_queue_full = 0, s_connects = 0;
 static volatile uint8_t s_last_note = 0xFF;   // the note the keyboard is holding (for all-notes-off)
 static volatile int s_start_rc = -1;
+// Diagnostics for `ble`: where does a central stall?
+static volatile uint32_t s_acc_read = 0, s_acc_write = 0, s_acc_other = 0, s_disconnects = 0, s_subscribes = 0;
+static volatile int s_disc_reason = 0, s_conn_status = 0, s_enc_status = -1, s_upd_rc = -99, s_notify_on = 0;
+static volatile uint16_t s_mtu = 0, s_conn_itvl = 0;
+static uint8_t s_last_pkt[16];
+static volatile uint16_t s_last_pkt_len = 0;
 
 static void advertise(void);
 
@@ -62,8 +68,11 @@ static int midi_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
     (void)conn;
     (void)attr;
     (void)arg;
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) s_acc_read++;
+    else if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) s_acc_other++;
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR)
     {
+        s_acc_write++;
         uint8_t buf[128];
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         if (len > sizeof buf) len = sizeof buf;
@@ -71,6 +80,8 @@ static int midi_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
         if (ble_hs_mbuf_to_flat(ctxt->om, buf, len, &got) == 0)
         {
             s_writes++;
+            s_last_pkt_len = got;
+            memcpy(s_last_pkt, buf, got < sizeof s_last_pkt ? got : sizeof s_last_pkt);
             (void)chl_blemidi_parse(buf, got, on_midi, NULL);
         }
     }
@@ -97,6 +108,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     switch (ev->type)
     {
     case BLE_GAP_EVENT_CONNECT:
+        s_conn_status = ev->connect.status;
         if (ev->connect.status != 0)
         {
             s_connected = false;
@@ -108,13 +120,35 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             s_connects++;
             // 7.5..15 ms: Apple recommends a connection interval of 15 ms or less for BLE MIDI.
             struct ble_gap_upd_params p = {.itvl_min = 6, .itvl_max = 12, .latency = 0, .supervision_timeout = 400};
-            (void)ble_gap_update_params(ev->connect.conn_handle, &p);
+            s_upd_rc = ble_gap_update_params(ev->connect.conn_handle, &p);
         }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
+        s_disconnects++;
+        s_disc_reason = ev->disconnect.reason;   // 0x13 remote user terminated, 0x08 supervision timeout, ...
+        s_connected = false;
+        s_notify_on = 0;
+        advertise();
+        break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
         s_connected = false;
         advertise();
+        break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        s_subscribes++;
+        s_notify_on = ev->subscribe.cur_notify;
+        break;
+    case BLE_GAP_EVENT_MTU:
+        s_mtu = ev->mtu.value;
+        break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        s_enc_status = ev->enc_change.status;
+        break;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        {
+            struct ble_gap_conn_desc d;
+            if (ble_gap_conn_find(ev->conn_update.conn_handle, &d) == 0) s_conn_itvl = d.conn_itvl;
+        }
         break;
     default: break;
     }
@@ -166,6 +200,14 @@ static int cmd_ble(int argc, char **argv)
            s_connected ? "connected" : "not connected", (unsigned)s_connects);
     printf("writes %u, MIDI messages %u, note-ons %u, queue full %u\n", (unsigned)s_writes, (unsigned)s_msgs,
            (unsigned)s_notes, (unsigned)s_queue_full);
+    printf("GATT callbacks: read %u, write %u, other %u; subscribed %u (notify %d); MTU %u; interval %u x1.25 ms\n",
+           (unsigned)s_acc_read, (unsigned)s_acc_write, (unsigned)s_acc_other, (unsigned)s_subscribes, s_notify_on,
+           (unsigned)s_mtu, (unsigned)s_conn_itvl);
+    printf("disconnects %u (last reason 0x%02X), connect status %d, encryption status %d, conn-param request rc %d\n",
+           (unsigned)s_disconnects, s_disc_reason & 0xFF, s_conn_status, s_enc_status, s_upd_rc);
+    printf("last write: %u bytes:", (unsigned)s_last_pkt_len);
+    for (unsigned i = 0; i < s_last_pkt_len && i < sizeof s_last_pkt; i++) printf(" %02X", s_last_pkt[i]);
+    printf("\n");
     return 0;
 }
 
