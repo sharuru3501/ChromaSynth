@@ -1,7 +1,8 @@
 ; Joypad handling.
 ;  All screens: START = next screen (play -> edit -> sequencer),
 ;               SELECT+START = sequencer play/stop,
-;               SELECT tap = next channel (play/edit screens).
+;               SELECT tap = next channel (play/edit screens),
+;               SELECT+A = save to SRAM, SELECT+B = load.
 ;  Play/edit:   A = gate on the selected channel.
 ;  Play screen : d-pad = note (+-1 / +-octave).
 ;  Edit screen : UP/DOWN = parameter row, LEFT/RIGHT = value,
@@ -49,6 +50,21 @@ HandleJoy:
     xor a
     ld [wSelUsed], a
 .noSelPress:
+    ld a, [wJoy]
+    bit PADB_SELECT, a
+    jr z, .noCombo
+    bit PADB_A, d
+    jr z, .noSave
+    ld a, 1
+    ld [wSelUsed], a
+    jp DoSave               ; SELECT+A: save
+.noSave:
+    bit PADB_B, d
+    jr z, .noCombo
+    ld a, 1
+    ld [wSelUsed], a
+    jp DoLoad               ; SELECT+B: load
+.noCombo:
     bit PADB_START, d
     jr z, .noStart
     ld a, [wJoy]

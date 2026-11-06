@@ -48,6 +48,8 @@ wSeqCh:         db
 wSeqNote:       db          ; note inserted by A on the sequencer screen
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wDirtySeq:      dw          ; sequencer rows needing redraw (bit per row)
+wMsg:           db          ; message code shown on row 17 (0 = none)
+wMsgTimer:      db
 wVibM:          db          ; scratch for the vibrato tick
 wVibSign:       db
 wClearEnd:      db

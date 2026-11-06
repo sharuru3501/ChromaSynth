@@ -32,7 +32,8 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
 - Pattern(実装済み, `wPattern`): 16ステップ × 4ch の1バイトセル。0=空, $FF=ノートオフ, それ以外=MIDIノート。`wPattern[ch*16+step]`(64バイト境界)。
 - シーケンサのタイミング: 毎フレーム 8.8固定小数のアキュムレータに +1.0。BPMごとの「16分音符=何フレーム」を `TempoTable`(`tools/gen_tempo.py` 生成)から引き、超えたら1ステップ進める。GBのフレーム周波数は59.7275Hz。最短でも3.7フレームなので1フレームに複数ステップは来ない。
 - 将来 MIDI clock 同期(M6)をする時は、このアキュムレータの代わりに 24ppqn のクロック数でステップを進める。
-- Song: パターン番号の並び
+- Song: パターン番号の並び(未実装)
+- 保存(実装済み, `src/sram.asm`): SRAM $A000 に `"CSYN"`+版数+パッチ+パターン+BPM+チェックサム(合計 xor $A5)。保存後に読み戻して検証。レイアウトを変えたら `SAVE_VERSION` を上げる。ヘッダは `MBC5+RAM+BATTERY`, RAM 8KB。
 
 ## 操作系(案)
 D-pad/A/B/Start/Select のみ。Patch画面: 項目選択+値増減。Sequencer画面: LSDj/ tracker 風グリッド。

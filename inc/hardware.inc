@@ -40,6 +40,12 @@ DEF rBCPS EQU $FF68 ; CGB background palette index
 DEF rBCPD EQU $FF69 ; CGB background palette data
 DEF rIE   EQU $FFFF
 
+; MBC5
+DEF rRAMG EQU $0000 ; write $0A to enable cartridge SRAM, $00 to disable
+DEF rRAMB EQU $4000 ; SRAM bank
+DEF CART_SRAM_ENABLE EQU $0A
+DEF _SRAM EQU $A000
+
 DEF _VRAM   EQU $8000
 DEF _SCRN0  EQU $9800
 

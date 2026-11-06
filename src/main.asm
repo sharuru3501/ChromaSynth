@@ -40,6 +40,7 @@ EntryPoint:
     ld [wBpm], a
     ld a, 60
     ld [wSeqNote], a
+    call LoadAll            ; restore the last save if there is one (else keep defaults)
 
     ; --- LCD off (only legal during VBlank), build the screen
 .waitVBlank:
@@ -94,6 +95,7 @@ MainLoop:
     call UpdateUI           ; VRAM is only writable now, so do this first
     call VoiceTick
     call SeqTick
+    call MsgTick
     ld a, [wBootTimer]
     and a
     jr z, .noBoot

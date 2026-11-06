@@ -6,3 +6,4 @@ build/
 *.sym
 *.o
 .DS_Store
+*.ram

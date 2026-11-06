@@ -60,6 +60,9 @@ BuildScreen:
     ld hl, _SCRN0 + 16 * 32
     ld de, sHelp2
     call DrawString
+    ld hl, _SCRN0 + 14 * 32
+    ld de, sHelp3
+    call DrawString
     ld a, DIRTY_ALL
     ld [wDirty], a
     ret
@@ -109,6 +112,13 @@ UpdateUI:
     ldh [rLCDC], a
     ret
 .noReq:
+    ld a, [wDirty]
+    bit 6, a
+    jr z, .noMsg
+    res 6, a
+    ld [wDirty], a
+    jp DrawMsg
+.noMsg:
     ld a, [wScreen]
     and a
     jr z, .play
@@ -343,6 +353,35 @@ PatchRowHL:
     ld l, a
     ld h, HIGH(wPatch)
     ret
+
+; Row 17 message line: wMsg = 0 clears it (and restores the sequencer status).
+DrawMsg:
+    ld hl, _SCRN0 + 17 * 32
+    ld b, 20
+    xor a
+.clear:
+    ld [hl+], a
+    dec b
+    jr nz, .clear
+    ld a, [wMsg]
+    and a
+    jr z, .restore
+    dec a
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, MsgTable
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld d, [hl]
+    ld hl, _SCRN0 + 17 * 32
+    jp DrawString
+.restore:
+    ld a, [wScreen]
+    cp SCREEN_SEQ
+    ret nz
+    jp MarkSeqStatus
 
 ; ---------------------------------------------------------------- shared
 ; a = MIDI note, hl = dest -> three tiles, e.g. "C-4". Clobbers a, b, de.
@@ -610,6 +649,7 @@ sPad:         db "PAD", 0
 sRx:          db "RX", 0
 sHelp1:       db "A:PLAY  START:SCREEN", 0
 sHelp2:       db "SEL:CH  PAD:NOTE", 0
+sHelp3:       db "SEL+A:SAVE +B:LOAD", 0
 sPatch:       db "PATCH", 0
 sCh:          db "CH", 0
 sEditHelp1:   db "UD:ROW  LR:VALUE", 0
@@ -617,6 +657,11 @@ sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
 sEditHelp3:   db "SEL:CH  START:SCREEN", 0
 sSeqHeader:   db "    P1  P2  WV  NS", 0
 sBpm:         db "BPM", 0
+sMsgSaved:    db "SAVED", 0
+sMsgLoaded:   db "LOADED", 0
+sMsgNoData:   db "NO SAVE DATA", 0
+sMsgFail:     db "SAVE FAILED", 0
+MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail
 sStop:        db "STOP", 0
 sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0

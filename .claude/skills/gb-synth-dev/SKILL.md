@@ -46,6 +46,11 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - SELECT は「単押し=ch切替」「押しながら=修飾キー」の二役。`wSelUsed` で修飾に使われたかを覚え、離した時に判定する。
 - 画面ごとの入力ハンドラ(`EditInput`/`SeqInput`)は d=今フレームの新規押下ビット、`wJoy`=押下中、`wJoyPrev`=前フレーム を使う。
 
+## SRAM メモ
+- MBC5: $0000-1FFF に $0A で有効、$00 で無効。使う時だけ開く(誤書込み防止)。バンクは $4000-5FFF。
+- 保存は必ず読み戻して検証する(SRAM無しカートは $FF が返る)。
+- PyBoy は `stop(save=True)` で `<rom>.ram` を書く。テストは一時ディレクトリにROMをコピーして使う。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

@@ -16,7 +16,7 @@ build/%.o: src/%.asm $(INCS) | build
 
 $(TARGET): $(OBJS)
 	$(RGBLINK) -p 0xFF -m $(TARGET:.gb=.map) -n $(TARGET:.gb=.sym) -o $@ $(OBJS)
-	$(RGBFIX) -v -p 0xFF -c -t CHROMASYNTH -m ROM -l 0x33 -n 0 $@
+	$(RGBFIX) -v -p 0xFF -c -t CHROMASYNTH -m MBC5+RAM+BATTERY -r 2 -l 0x33 -n 0 $@
 
 build:
 	mkdir -p build
