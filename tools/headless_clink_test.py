@@ -47,7 +47,7 @@ pb.tick(100)  # boot beep over
 
 ui_entry_ly = []
 up_write_ly = []
-pb.hook_register(0, sym["CLinkUp.compose"], lambda ctx: up_write_ly.append(mem[0xFF44]), None)
+pb.hook_register(0, sym["CLinkUp.write"], lambda ctx: up_write_ly.append(mem[0xFF44]), None)
 pb.hook_register(0, sym["UpdateUI"], lambda ctx: ui_entry_ly.append(mem[0xFF44]), None)
 
 
@@ -273,8 +273,52 @@ pb.tick(10)
 check("leaving did not start the sequencer or save", v("wSeqPlay") == 0)
 enter_kbd()
 check("re-entered the keyboard screen", v("wScreen") == 3)
+# ---------------------------------------------------------------- beacons (docs/BLE_MIDI.md section 3)
+pb.tick(3)
+check("keyboard screen, not linked: the slot is the beacon {$F4, len 3}",
+      cl.classify(cl.decode_slot(*slot())) == "kbd" and slot()[3] == 0x60, slot())
 general(*cl.HELLO)
 check("HELLO again after the screen change", v("wClLinked") == 1)
+pb.tick(2)
+check("linked: the slot is an ordinary slot, not a beacon", cl.classify(cl.decode_slot(*slot())) == "other", slot())
+pb.tick(255)
+check("the link timed out", v("wClLinked") == 0)
+pb.tick(3)
+check("... and the beacon is back (the ESP32 may say HELLO again)", cl.classify(cl.decode_slot(*slot())) == "kbd", slot())
+general(*cl.HELLO)
+check("relinked", v("wClLinked") == 1)
+# a 3-byte message in the slot, then leave and come back: the stale length and data must not look like a beacon
+txq = sym["wTx"]
+head = mem[sym["wTxHead"]]
+for i, bt in enumerate((0x90, 60, 100)):
+    mem[txq + ((head + i) & 0xFF)] = bt
+mem[sym["wTxHead"]] = (head + 3) & 0xFF
+pb.tick(3)
+check("a MIDI message (len 3) is in the slot", cl.decode_slot(*slot()).length == 3 and cl.classify(cl.decode_slot(*slot())) == "other", slot())
+# leave the keyboard screen while linked
+pb.button_press("select")
+pb.button_press("start")
+pb.tick(70)
+pb.button_release("select")
+pb.button_release("start")
+pb.tick(4)
+check("leaving the keyboard screen unlinks", v("wScreen") == 0 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
+check("... and leaves the end beacon {$F5, len 3} in the slot", cl.classify(cl.decode_slot(*slot())) == "left" and slot()[3] == 0x60, slot())
+writes_before = len(up_write_ly)
+pb.tick(60)
+check("... which is written once: no more palette writes while away from the keyboard screen", len(up_write_ly) == writes_before,
+      (writes_before, len(up_write_ly)))
+for _ in range(8):
+    if v("wScreen") == 3:
+        break
+    press("start")
+pb.tick(3)
+check("back on the keyboard screen: the beacon returns", v("wScreen") == 3 and cl.classify(cl.decode_slot(*slot())) == "kbd", slot())
+general(*cl.HELLO)
+check("HELLO links again", v("wClLinked") == 1)
+pb.tick(3)
+check("... and the slot is NOT mistaken for the beacon although the old length was 3 (a stale $F4 in B0)",
+      cl.classify(cl.decode_slot(*slot())) == "other", slot())
 
 # ---------------------------------------------------------------- up: slots
 TX = sym["wTx"]

@@ -10,9 +10,11 @@
 ;     Packets: the first symbol's bit 3 is the type; checks are sums mod 15.
 ;       play packet    (4 symbols): on(1) note(7) vel(3) check(4), mono, on the selected channel
 ;       general packet (8 symbols): 3 MIDI bytes (24 bits), 3 zero bits, check(4); HELLO = $FE $43 $53
-;   up (ROM -> ESP32): once linked, 4 bytes are written to OBJ palette 1 colours 1-2
+;   up (ROM -> ESP32): on the keyboard screen 4 bytes are written to OBJ palette 1 colours 1-2
 ;     (the FPGA hands them to the MCU as "game palette data"): status, data1, data2 and a
 ;     header len(2) seq(3) ack(1) nack(1). Pad MIDI messages shorter than 3 bytes with $FE.
+;     Not linked yet: the beacon {$F4, 0, 0, len 3} (the ESP32 may send HELLO). Leaving the keyboard
+;     screen unlinks and writes {$F5, 0, 0, len 3} once (the ESP32 must stop). See docs/BLE_MIDI.md.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -21,6 +23,8 @@ DEF CL_PKT_IDLE EQU 30      ; frames without a symbol before a half packet is dr
 DEF CL_HELLO0   EQU $FE
 DEF CL_HELLO1   EQU $43
 DEF CL_HELLO2   EQU $53
+DEF CL_BEACON_KBD  EQU $F4  ; slot {B0 = $F4, len 3}: on the keyboard screen, not linked
+DEF CL_BEACON_LEFT EQU $F5  ; slot {B0 = $F5, len 3}: just left the keyboard screen (written once)
 
 SECTION "Chromatic link", ROM0
 
@@ -273,14 +277,52 @@ ClFeed:
 ; carries the ack for the symbols received. The slot (data AND length) stays the same until
 ; a new message replaces it; the seq counter tells the reader that this happened.
 CLinkUp:
-    ld a, [wClLinked]
-    and a
-    ret z
     ldh a, [rLY]
     cp 144
     ret c                   ; not in VBlank (the frame ran late): try again next frame
     cp 152
     ret nc
+    ld a, [wScreen]
+    cp SCREEN_KBD
+    jr z, .kbd
+    ; Not on the keyboard screen. Leaving it unlinks (the ESP32 must stop sending symbols: here they
+    ; would be real button presses) and owes one end beacon, $F5, so that the ESP32 learns it.
+    ld a, [wClLinked]
+    and a
+    jr z, .away
+    xor a
+    ld [wClLinked], a
+    ld [wClN], a
+    ld [wClHave], a
+    inc a
+    ld [wClBeacon], a
+.away:
+    ld a, [wClBeacon]
+    and a
+    ret z
+    xor a
+    ld [wClBeacon], a
+    ld b, CL_BEACON_LEFT
+    jr .beacon
+.kbd:
+    ld a, 1
+    ld [wClBeacon], a
+    ld a, [wClLinked]
+    and a
+    jr nz, .linked
+    ld b, CL_BEACON_KBD     ; on the keyboard screen, not linked: tell the ESP32 it may send HELLO
+.beacon:
+    ld a, b
+    ld [wClSlot], a
+    xor a
+    ld [wClSlot + 1], a
+    ld [wClSlot + 2], a
+    ld a, 3 << 5            ; len = 3
+    ld [wClSlot + 3], a
+    xor a
+    ld [wClLen], a          ; the message length that persists must not outlive the beacon: a linked slot
+    jp .write               ; with the old length 3 and this $F4 in B0 would look like a beacon
+.linked:
     ld e, 0                 ; e = message length (0 = nothing new)
     ld a, [wTxHead]
     ld b, a
@@ -372,6 +414,7 @@ CLinkUp:
     ld a, [wClNack]
     or b
     ld [wClSlot + 3], a
+.write:
     ld a, $80 | 10          ; OBJ palette 1, colour 1 (byte 10), auto-increment
     ldh [rOCPS], a
     ld a, [wClSlot]

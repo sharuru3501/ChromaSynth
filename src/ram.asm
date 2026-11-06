@@ -135,4 +135,5 @@ wClCh:          db          ; GB channel the keyboard note went to
 wClSlot:        ds 4        ; the 4 bytes last written to OBJ palette 1 (also read by the tests)
 wClLen:         db          ; length of the message in the slot (kept until the next message replaces it)
 wKbdExit:       db          ; frames SELECT+START have been held on the keyboard screen
+wClBeacon:      db          ; 1 = the slot shows the keyboard screen (beacon or link): an end beacon is owed when we leave
 wClearEnd:      db

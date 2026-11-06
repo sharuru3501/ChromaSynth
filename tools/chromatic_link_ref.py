@@ -69,6 +69,39 @@ def mask(phase, data):
     return m
 
 
+BEACON_KBD = 0xF4   # ROM on the keyboard screen, not linked: the slot is {B0 = $F4, len 3}
+BEACON_LEFT = 0xF5  # ROM left the keyboard screen (written once)
+
+
+def classify(slot):
+    """'kbd' / 'left' / 'other' for a decoded slot (what the MCU may do: send only on 'kbd' or a linked slot)."""
+    if slot.length == 3 and slot.data[0] == BEACON_KBD:
+        return "kbd"
+    if slot.length == 3 and slot.data[0] == BEACON_LEFT:
+        return "left"
+    return "other"
+
+
+def ble_packet(messages, ts=0x1234, running=False, sysex_between=False):
+    """A BLE MIDI packet: header (bit 7 set, timestamp bits 12..7), then [timestamp low][message]...
+    messages = [(status, d1, d2 or None)]. running=True drops the status byte of a message that repeats the
+    previous status (the timestamp byte stays). Returns (bytes, expected_messages)."""
+    out = [0x80 | ((ts >> 7) & 0x3F)]
+    last = None
+    for i, (st, d1, d2) in enumerate(messages):
+        out.append(0x80 | ((ts + i) & 0x7F))
+        if not (running and st == last and st < 0xF0):
+            out.append(st)
+        out.append(d1)
+        if d2 is not None:
+            out.append(d2)
+        last = st
+        if sysex_between and i == 0:
+            out += [0x80 | 5, 0xF0, 0x7E, 0x00, 0x80 | 6, 0xF7]
+    exp = [(st, d1, d2 or 0) for st, d1, d2 in messages]
+    return bytes(out), exp
+
+
 Slot = namedtuple("Slot", "length seq ack nack data")
 
 

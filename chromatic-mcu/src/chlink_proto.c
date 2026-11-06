@@ -65,3 +65,117 @@ void chl_slot_from_gpd(const uint8_t gpd[8], chl_slot_t *out)
     out->data[1] = gpd[2];
     out->data[2] = gpd[1];
 }
+
+chl_rom_state_t chl_classify(const chl_slot_t *slot)
+{
+    if (slot->len == 3)
+    {
+        if (slot->data[0] == 0xF4) return CHL_ROM_KBD;
+        if (slot->data[0] == 0xF5) return CHL_ROM_LEFT;
+    }
+    return CHL_ROM_OTHER;
+}
+
+static int data_bytes(uint8_t status)
+{
+    if (status >= 0xF8) return 0;
+    if (status >= 0xF0) return -1;           // system common / SysEx: not handled
+    const uint8_t hi = status & 0xF0;
+    return (hi == 0xC0 || hi == 0xD0) ? 1 : 2;
+}
+
+int chl_blemidi_parse(const uint8_t *p, unsigned len, chl_midi_cb_t cb, void *ctx)
+{
+    if (len < 1 || !(p[0] & 0x80)) return 0;   // the header has bit 7 set
+    int count = 0;
+    int expect_ts = 1;       // a timestamp byte comes before every message
+    uint8_t status = 0;      // running status (cleared by the end of the packet and by system messages)
+    uint8_t data[2] = {0, 0};
+    int have = 0, need = 0;  // data bytes of the message in progress
+    int in_sysex = 0;
+    for (unsigned i = 1; i < len; i++)
+    {
+        const uint8_t b = p[i];
+        if (in_sysex)
+        {
+            if (b & 0x80)
+            {
+                if (b == 0xF7) { in_sysex = 0; expect_ts = 1; }
+                else if (b < 0xF8) { in_sysex = 0; expect_ts = 1; i--; continue; }   // aborted by a new message
+            }
+            continue;
+        }
+        if (expect_ts)
+        {
+            if (b & 0x80) { expect_ts = 0; continue; }    // the timestamp
+            // a data byte with no timestamp: running status
+            if (!status) continue;
+        }
+        else if (b & 0x80)
+        {
+            // a status byte
+            if (b == 0xF0) { in_sysex = 1; status = 0; continue; }
+            const int d = data_bytes(b);
+            if (d < 0) { status = 0; expect_ts = 1; continue; }
+            if (d == 0)
+            {
+                if (cb) cb(ctx, b, 0, 0);
+                count++;
+                expect_ts = 1;
+                continue;
+            }
+            status = b;
+            need = d;
+            have = 0;
+            continue;
+        }
+        // a data byte for `status`
+        if (!status) continue;
+        if (have == 0 && need == 0) need = data_bytes(status);   // running status: a new message
+        data[have++] = b;
+        if (have == need)
+        {
+            if (cb) cb(ctx, status, data[0], need > 1 ? data[1] : 0);
+            count++;
+            have = 0;
+            need = 0;
+            expect_ts = 1;
+        }
+    }
+    return count;
+}
+
+chl_action_t chl_midi_action(uint8_t status, uint8_t d1, uint8_t d2, uint8_t *note, uint8_t *vel)
+{
+    const uint8_t hi = status & 0xF0;
+    if (hi == 0x90 && d2 > 0)
+    {
+        *note = d1;
+        *vel = d2;
+        return CHL_ACT_NOTE_ON;
+    }
+    if (hi == 0x80 || hi == 0x90)
+    {
+        *note = d1;
+        *vel = 0;
+        return CHL_ACT_NOTE_OFF;
+    }
+    if (hi == 0xB0 && (d1 == 123 || d1 == 120)) return CHL_ACT_ALL_OFF;
+    return CHL_ACT_IGNORE;
+}
+
+int chl_coalesce(chl_cmd_t *cmds, int n)
+{
+    int out = 0;
+    for (int i = 0; i < n; i++)
+    {
+        int drop = 0;
+        if (cmds[i].kind == CHL_CMD_PLAY && cmds[i].a == 0)
+        {
+            for (int j = i + 1; j < n; j++)
+                if (cmds[j].kind == CHL_CMD_PLAY && cmds[j].a != 0) { drop = 1; break; }
+        }
+        if (!drop) cmds[out++] = cmds[i];
+    }
+    return out;
+}

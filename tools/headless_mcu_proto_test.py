@@ -61,6 +61,16 @@ def cli(*args):
     return [int(x, 16) for x in subprocess.run([CLI, *map(str, args)], capture_output=True, text=True, check=True).stdout.split()]
 
 
+def slot_bytes():
+    return [mem[sym["wClSlot"] + i] for i in range(4)]
+
+
+def mcu_view():
+    """What the MCU's link task decides from the slot the ROM wrote (the C classifier in chl_cli)."""
+    b = slot_bytes()
+    return subprocess.run([CLI, "slot", *map(str, b)], capture_output=True, text=True, check=True).stdout.strip()
+
+
 def mcu_send(masks, hold_frames=3):
     """What the MCU's link task does: hold each symbol's mask, then release."""
     for m in masks:
@@ -84,11 +94,14 @@ check("the ROM is on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 phase = v("wClNextPh")   # the MCU assumes 0 at boot; the ROM starts with 0 too
 check("ROM and MCU start with the same phase", phase == 0, phase)
 
+check("the MCU's classifier sees the ROM's beacon on the keyboard screen", mcu_view() == "kbd", slot_bytes())
 mem[sym["wSelCh"]] = 0
 mcu_send(cli("play", 1, 60, 100, phase))
 check("not linked: a play packet from the C encoder does nothing", cur(0) == 0 and v("wClLinked") == 0, cur(0))
 mcu_send(cli("midi", 0xFE, 0x43, 0x53, v("wClNextPh")))
 check("HELLO from the C encoder links", v("wClLinked") == 1)
+pb.tick(2)
+check("... and the MCU's classifier then sees an ordinary slot (armed)", mcu_view() == "other", slot_bytes())
 check("... and the phase is still in step after an 8-symbol packet", v("wClNextPh") == phase, v("wClNextPh"))
 
 for note in (36, 37, 60, 61, 72, 96, 107):   # the ROM's range is 36..107 (inc/synth.inc)
@@ -144,6 +157,18 @@ for rom_ahead in (False, True):
     mcu_send(cli("play", 1, 60, 100, mcu_phase))
     check("... and the next packet works", cur(0) == 60, cur(0))
     mcu_send(cli("play", 0, 60, 0, v("wClNextPh")))
+
+# leaving the keyboard screen: the MCU must see the end beacon and stop
+pb.button_press("select")
+pb.button_press("start")
+pb.tick(70)
+pb.button_release("select")
+pb.button_release("start")
+pb.tick(4)
+check("the ROM left the keyboard screen and unlinked", v("wScreen") == 0 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
+check("the MCU's classifier sees the end beacon (stop sending)", mcu_view() == "left", slot_bytes())
+pb.tick(30)
+check("... and it stays that way while the ROM is elsewhere", mcu_view() == "left", slot_bytes())
 
 print()
 print("ALL PASSED" if not fails else f"{fails} FAILED")

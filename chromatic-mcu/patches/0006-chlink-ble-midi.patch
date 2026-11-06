@@ -1,0 +1,156 @@
+diff --git a/main/CMakeLists.txt b/main/CMakeLists.txt
+index 6cc80ef..8e883ce 100644
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.22)
+ 
+ idf_component_register(
+     SRCS
+-        "main.c" "chlink.c" "chlink_proto.c" "chlink_link.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
++        "main.c" "chlink.c" "chlink_proto.c" "chlink_link.c" "chlink_ble.c" "gfx.c" "fpga_tx.c" "fpga_rx.c" "fpga_common.c" "pwrmgr.c"
+     INCLUDE_DIRS "."
+     REQUIRES
+         images esp_driver_uart esp_driver_spi esp_driver_gpio nvs_flash fatfs
+         common battery button osd menu_mgr settings mutex
+-        console crc
++        console crc bt
+ )
+diff --git a/main/chlink.c b/main/chlink.c
+index b6b0ca7..1bd3ea6 100644
+--- a/main/chlink.c
++++ b/main/chlink.c
+@@ -5,6 +5,7 @@
+ //   gpd [count [ms]]      ask the FPGA for the game palette data and print it (raw bytes as received
+ //                         and the same bytes as OBJ palette 1 bytes 10..13 / BG palette 0 bytes 2..5)
+ #include "chlink.h"
++#include "chlink_ble.h"
+ #include "chlink_link.h"
+ 
+ #include "esp_console.h"
+@@ -48,7 +49,7 @@ static int cmd_chver(int argc, char **argv)
+ {
+     (void)argc;
+     (void)argv;
+-    printf("chlink firmware v4 (stock v4.6 + sym/gpd + link/note/midi, no selftest, no light sleep, console on USB)\n");
++    printf("chlink firmware v5 (stock v4.6 + sym/gpd + auto link/note/midi + BLE MIDI, -Os, no selftest, no light sleep, console on USB)\n");
+     return 0;
+ }
+ 
+@@ -70,22 +71,36 @@ static int cmd_sym(int argc, char **argv)
+     return 0;
+ }
+ 
+-bool ChLink_ReadGpd(uint8_t out[8])
++// One request at a time: the link task polls the ROM every 100 ms while the console may also ask.
++static SemaphoreHandle_t s_gpd_mutex = NULL;
++
++bool ChLink_ReadGpdTimeout(uint8_t out[8], int timeout_ms)
+ {
+-    if (s_sem == NULL)
++    if (s_sem == NULL || s_gpd_mutex == NULL)
+     {
+-        s_sem = xSemaphoreCreateBinary();
++        return false;   // ChLink_RegisterCommands creates them before any task can ask
+     }
++    (void)xSemaphoreTake(s_gpd_mutex, portMAX_DELAY);
+     s_want = true;
+     (void)xSemaphoreTake(s_sem, 0);
+     FPGA_Tx_RequestBGPD();
+-    if (xSemaphoreTake(s_sem, pdMS_TO_TICKS(500)) == pdTRUE)
++    bool ok = false;
++    if (xSemaphoreTake(s_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+     {
+         memcpy(out, s_gpd, 8);
+-        return true;
++        ok = true;
+     }
+-    s_want = false;
+-    return false;
++    else
++    {
++        s_want = false;
++    }
++    (void)xSemaphoreGive(s_gpd_mutex);
++    return ok;
++}
++
++bool ChLink_ReadGpd(uint8_t out[8])
++{
++    return ChLink_ReadGpdTimeout(out, 500);
+ }
+ 
+ static void print_gpd(const char *tag)
+@@ -144,23 +159,15 @@ static int cmd_gpd(int argc, char **argv)
+         printf("usage: gpd [count 1..1000 [ms 5..5000]]\n");
+         return -1;
+     }
+-    if (s_sem == NULL)
+-    {
+-        s_sem = xSemaphoreCreateBinary();
+-    }
+     for (int i = 0; i < count; i++)
+     {
+-        s_want = true;
+-        (void)xSemaphoreTake(s_sem, 0);
+-        FPGA_Tx_RequestBGPD();
+-        if (xSemaphoreTake(s_sem, pdMS_TO_TICKS(500)) == pdTRUE)
++        uint8_t g[8];
++        if (ChLink_ReadGpdTimeout(g, 500))
+         {
+-            printf("gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", s_gpd[0], s_gpd[1], s_gpd[2], s_gpd[3],
+-                   s_gpd[4], s_gpd[5], s_gpd[6], s_gpd[7]);
++            printf("gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+         }
+         else
+         {
+-            s_want = false;
+             printf("gpd timeout\n");
+         }
+         vTaskDelay(pdMS_TO_TICKS(ms));
+@@ -170,6 +177,8 @@ static int cmd_gpd(int argc, char **argv)
+ 
+ void ChLink_RegisterCommands(void)
+ {
++    s_sem = xSemaphoreCreateBinary();
++    s_gpd_mutex = xSemaphoreCreateMutex();
+     const esp_console_cmd_t cmds[] = {
+         {.command = "chver", .help = "chlink test firmware version", .func = &cmd_chver},
+         {.command = "sym", .help = "write the FPGA button register: sym <hex>", .func = &cmd_sym},
+@@ -182,4 +191,5 @@ void ChLink_RegisterCommands(void)
+     // The boot-time selftest (a virtual START press and a gpd every 3 s) is no longer started: it changed
+     // the ROM screen on every MCU boot. Use `gpd`, `sym` and `link stat` from the console instead.
+     ChLinkLink_Start();
++    ChLinkBle_Start();   // BLE MIDI; prints why and carries on if the stack cannot start
+ }
+diff --git a/main/chlink.h b/main/chlink.h
+index 00a9fb5..4572352 100644
+--- a/main/chlink.h
++++ b/main/chlink.h
+@@ -7,6 +7,7 @@
+ void ChLink_RegisterCommands(void);
+ // Asks the FPGA for the game palette data and waits for the reply (up to 500 ms). Not for use in the FPGA RX task.
+ bool ChLink_ReadGpd(uint8_t out[8]);
++bool ChLink_ReadGpdTimeout(uint8_t out[8], int timeout_ms);
+ // Called by the FPGA RX task with the 8 bytes of the game palette data reply.
+ // Returns true when a test command asked for it (the stock palette handling is then skipped).
+ bool ChLink_OnGpd(const uint8_t *Payload, size_t Len);
+diff --git a/sdkconfig.defaults b/sdkconfig.defaults
+index 7a4e1bd..3e8e345 100644
+--- a/sdkconfig.defaults
++++ b/sdkconfig.defaults
+@@ -13,3 +13,15 @@ CONFIG_LV_USE_ASSERT_STYLE=y
+ CONFIG_LV_SPRINTF_USE_FLOAT=y
+ CONFIG_LV_FONT_MONTSERRAT_26=y
+ CONFIG_LV_FONT_MONTSERRAT_28=y
++# chlink: BLE MIDI needs NimBLE (peripheral only, one connection, BLE only) and the size-optimized build,
++# otherwise the app does not fit the 1 MB factory slot.
++CONFIG_COMPILER_OPTIMIZATION_SIZE=y
++CONFIG_BT_ENABLED=y
++CONFIG_BT_NIMBLE_ENABLED=y
++CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
++CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
++CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
++CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
++CONFIG_BTDM_CTRL_BLE_MAX_CONN=1
++CONFIG_BT_NIMBLE_NVS_PERSIST=n
++CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y

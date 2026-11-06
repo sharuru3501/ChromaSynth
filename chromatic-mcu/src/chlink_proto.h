@@ -30,3 +30,48 @@ typedef struct
 } chl_slot_t;
 
 void chl_slot_from_gpd(const uint8_t gpd[8], chl_slot_t *out);
+
+// ---------------------------------------------------------------- ROM beacons (docs/BLE_MIDI.md section 3)
+// While the ROM is on its KEYBOARD screen and not linked it writes the slot {B0 = $F4, len = 3}; when it
+// leaves that screen it writes {B0 = $F5, len = 3} once. Nothing else ever puts these statuses in the slot.
+// The MCU only sends symbols while it sees the first, or a linked slot.
+typedef enum
+{
+    CHL_ROM_OTHER = 0,    // a normal slot (linked) or anything the ROM did not write as a beacon
+    CHL_ROM_KBD = 1,      // keyboard screen, not linked yet: send sync + HELLO
+    CHL_ROM_LEFT = 2      // the ROM left the keyboard screen: stop sending
+} chl_rom_state_t;
+
+chl_rom_state_t chl_classify(const chl_slot_t *slot);
+
+// ---------------------------------------------------------------- BLE MIDI packets (docs/BLE_MIDI.md section 2)
+typedef void (*chl_midi_cb_t)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);
+// Parses one BLE MIDI packet (header, timestamps, messages, running status inside the packet,
+// SysEx skipped) and calls cb for every complete channel/system message. Timestamps are ignored.
+// Returns the number of messages. Garbage never crashes; it is skipped.
+int chl_blemidi_parse(const uint8_t *pkt, unsigned len, chl_midi_cb_t cb, void *ctx);
+
+typedef enum
+{
+    CHL_ACT_IGNORE = 0,
+    CHL_ACT_NOTE_ON = 1,
+    CHL_ACT_NOTE_OFF = 2,
+    CHL_ACT_ALL_OFF = 3
+} chl_action_t;
+
+// MIDI message -> what the keyboard link does with it. The MIDI channel is ignored (omni).
+chl_action_t chl_midi_action(uint8_t status, uint8_t d1, uint8_t d2, uint8_t *note, uint8_t *vel);
+
+// ---------------------------------------------------------------- queue coalescing
+typedef struct
+{
+    uint8_t kind;   // CHL_CMD_*
+    uint8_t a, b, c;
+} chl_cmd_t;
+
+enum { CHL_CMD_PLAY = 0, CHL_CMD_MIDI = 1, CHL_CMD_HELLO = 2, CHL_CMD_SYNC = 3 };
+
+// The ROM is mono: a note-off is ignored when a newer note has replaced the note it names, and a later
+// note-on makes an earlier note-off pointless. Drops every PLAY note-off (a == 0) that has a later PLAY
+// note-on in the list, keeping the order of the rest. Returns the new length.
+int chl_coalesce(chl_cmd_t *cmds, int n);

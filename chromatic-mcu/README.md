@@ -9,6 +9,8 @@ ModRetro の MCU ファームウェア([oss-chromatic-console-mcu](https://githu
 | `patches/0003-chlink-priorities-and-rom-printf.patch` | 試験用 v2: 試験タスク(優先度 18)とコンソール(17)を、純正の通信・電源管理タスク(15・16)より上にする。出力を標準出力と ROM の直接出力の両方に出す |
 | `patches/0004-chlink-no-light-sleep.patch` | 試験用 v3: ライトスリープに入らないようにする(電池の持ちは悪くなる) |
 | `patches/0005-chlink-link-task.patch` | v4: 起動時の自己試験(START を押す・`gpd` の定期出力)をやめ、`link` / `note` / `midi` コマンドを足す(中身は `src/`)。`ChLink_ReadGpd` を公開 |
+| `patches/0006-chlink-ble-midi.patch` | v5: BLE MIDI(NimBLE)、`-Os`、`gpd` の読み取りの排他(`ChLink_ReadGpdTimeout`)。`build.sh` は `sdkconfig` を作り直す(defaults に BLE と `-Os` を足したため) |
+| `src/chlink_ble.[ch]` | BLE MIDI の受信(GATT、広告、接続パラメータ)。`ble`・`heap` コマンド |
 | `src/chlink_proto.[ch]` | 通信プロトコルの中核(符号化、スロットの解釈)。ESP-IDF に依存しない純粋な C。`build.sh` が `main/` にコピーする。ホストでテストできる(`make check-mcu`) |
 | `src/chlink_link.[ch]` | 通信タスクとコンソールコマンド(`link on/off/hello/sync/stat/hold`、`note`、`midi`)。**ROM がキーボード画面にいるときだけ送る**(`link on` を打つまで何も送らない) |
 | `test/` | ホストのテスト(Python 参照実装のベクトルとの照合)。`make -C chromatic-mcu/test check asan` |
