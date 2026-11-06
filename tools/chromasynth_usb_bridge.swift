@@ -2,7 +2,8 @@
 // USB-C serial port, where the ESP32's console takes them as `m 90 3c 64` (see docs/BLE_MIDI.md, "USB mode").
 //
 //   swiftc -O tools/chromasynth_usb_bridge.swift -o chromasynth_usb_bridge
-//   ./chromasynth_usb_bridge                      all MIDI inputs (except IAC and ChromaSynth itself), first /dev/cu.usbmodem*
+//   ./chromasynth_usb_bridge                      all MIDI inputs (except the IAC buses and the Bluetooth ChromaSynth), first /dev/cu.usbmodem*
+//   ./chromasynth_usb_bridge --input IAC          play from Ableton Live: set a Live track's MIDI To to an IAC bus, and listen to the IAC buses
 //   ./chromasynth_usb_bridge --list               list the MIDI inputs and serial ports, then exit
 //   ./chromasynth_usb_bridge --input MPK          only inputs whose name contains "MPK"
 //   ./chromasynth_usb_bridge --port /dev/cu.usbmodemXXXX
@@ -196,8 +197,9 @@ func connectSources() {
         let src = MIDIGetSource(i)
         let n = name(src)
         if connected.contains(src) { continue }
-        if n.contains("IAC") || n.contains("ChromaSynth") { continue }     // not the virtual buses, and never ourselves
-        if let f = inputFilter, !n.contains(f) { continue }
+        if n.contains("ChromaSynth") { continue }                          // never the Bluetooth ChromaSynth (that is the BLE path)
+        if let f = inputFilter { if !n.contains(f) { continue } }          // an explicit --input picks exactly what matches, IAC buses included
+        else if n.contains("IAC") { continue }                            // by default not the virtual IAC buses: use --input IAC to play from Live
         MIDIPortConnectSource(port, src, nil)
         connected.insert(src)
         print("listening to: \(n)")

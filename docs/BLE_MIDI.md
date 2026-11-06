@@ -253,3 +253,9 @@ MIDI キーボード →(USB)→ Mac →(tools/chromasynth_usb_bridge.swift)→ 
 4. **メニュー**: MENU → System タブ → MIDI MODE(A / B で OFF / BLE / USB)。表示の位置と、純正の項目の動作が変わらないことを確認。
 5. **BLE**: メニューで BLE → Mac の Bluetooth 構成で接続 → Live で弾く。OFF に戻すと、Mac 側の接続が切れる。
 6. **USB**: Mac に MIDI キーボードを繋ぎ、`chromasynth_usb_bridge` を起動(ESP32 が再起動して、USB モードに入る)→ 弾く。Ctrl-C で OFF。
+
+### 9.6 有線(USB)を Live から使う(2026-11-07、実機の最初の試みで分かったこと)
+- ユーザーは、Live の出力先を IAC ドライバにして、さらに MIDI スタジオで「新しい外部装置」(空の汎用 MIDI 機器)を作って鳴らそうとしたが、鳴らなかった。**Chromatic は MIDI 機器としては見えない**(USB-C はシリアル)ので、**中継プログラムを動かさない限り、何も届かない**。案内が足りなかった。
+- 中継は、既定で IAC のバスを聴かない作りだった(Live から IAC へ送る使い方に合わない)ので、**`--input` で明示したときは IAC も聴く**ように直した(`./chromasynth_usb_bridge --input IAC`)。ChromaSynth の Bluetooth(BLE の経路)は、常に除く。
+- **Live の注意**: 出力先を IAC にしたトラックの **MIDI From を `No Input`** にする。`All Ins` のままだと、IAC の入力ポート(「トラック」がオン)から、自分の出力を受け取って、ノートがぐるぐる回る恐れがある。コンピュータ MIDI キーボードは、MIDI From に関係なく、録音待機のトラックに入る。
+- 起動の順: 中継を起動 → ESP32 が再起動 → `mode usb`(返事が来るまで繰り返す)→ ROM がキーボード画面なら、自動で武装して鳴る。メニューで USB を選ぶ必要はない。
