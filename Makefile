@@ -7,7 +7,7 @@ SRCS    := $(wildcard src/*.asm)
 OBJS    := $(patsubst src/%.asm,build/%.o,$(SRCS))
 INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 
-.PHONY: all clean run notetable gen check-bridge firmware
+.PHONY: all clean run notetable gen check-bridge check-mcu firmware
 
 all: $(TARGET)
 
@@ -44,6 +44,10 @@ firmware:
 check-bridge:
 	python3 tools/test_bridge_ref.py
 	make -C firmware/test test asan syntax lib
+
+# The MCU-side link protocol core (chromatic-mcu/src/chlink_proto.c) against the Python reference. No ESP32 needed.
+check-mcu:
+	make -C chromatic-mcu/test check asan
 
 run: $(TARGET)
 	open -a SameBoy $(TARGET)

@@ -18,7 +18,9 @@ make gen      # notetable/font/waves/tempo/divs/pattern/bend の include を再�
 python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install pyboy pillow、先に make)
 python3 tools/headless_save_test.py   # SRAM保存のテスト
 python3 tools/headless_midi_test.py   # MIDI入力・DAW同期・シリアルISR・ブリッジ参照実装との往復のテスト
-python3 tools/headless_clink_test.py  # 本体内蔵 ESP32 とのケーブルなしリンク(仮想ボタン+パレット)のテスト
+python3 tools/headless_clink_test.py  # 本体内蔵 ESP32 とのケーブルなしリンク(キーボード画面+パレット)のテスト
+python3 tools/headless_mcu_proto_test.py  # MCU 側の C の符号化器(chromatic-mcu/)で ROM を鳴らす結合テスト(要 cc)
+make check-mcu                        # MCU 側プロトコル中核の C を Python 参照実装と突き合わせる(ESP32 不要)
 python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
 make firmware                         # ESP32-S3 ファームウェアのビルド(要 ESP-IDF)
 make check-bridge                     # 上記 + firmware の C 中核テスト(正解トレース照合・ASan・構文検査)。ESP32 不要

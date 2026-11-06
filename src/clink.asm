@@ -16,7 +16,7 @@
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF CL_TIMEOUT  EQU 120     ; frames without a valid packet before the link is dropped
+DEF CL_TIMEOUT  EQU 250     ; frames (4.2 s, the counter is 8 bits) without a valid packet before the link is dropped
 DEF CL_PKT_IDLE EQU 30      ; frames without a symbol before a half packet is dropped
 DEF CL_HELLO0   EQU $FE
 DEF CL_HELLO1   EQU $43

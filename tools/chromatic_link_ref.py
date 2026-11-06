@@ -58,6 +58,17 @@ def buttons(phase, data):
     return held
 
 
+FPGA_BITS = {"start": 1, "select": 2, "b": 4, "a": 8, "up": 16, "right": 32, "left": 64, "down": 128}
+
+
+def mask(phase, data):
+    """The value the MCU writes to the FPGA's MCU_buttons register for one symbol."""
+    m = 0
+    for name in buttons(phase, data):
+        m |= FPGA_BITS[name]
+    return m
+
+
 Slot = namedtuple("Slot", "length seq ack nack data")
 
 

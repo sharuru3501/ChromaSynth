@@ -16,3 +16,8 @@ firmware/test/test_core
 firmware/test/test_core_asan
 firmware/test/*.dSYM
 firmware/test/libbridge.*
+chromatic-mcu/test/chl_cli
+chromatic-mcu/test/test_proto
+chromatic-mcu/test/test_proto_asan
+chromatic-mcu/test/vectors.txt
+*.dSYM/

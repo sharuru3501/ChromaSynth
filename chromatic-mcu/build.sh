@@ -13,6 +13,7 @@ fi
 cd "$WORK"
 git reset -q --hard && git clean -fdq main   # back to the pristine tag, keep build/ and managed_components/
 for p in "$HERE"/patches/*.patch; do git apply "$p"; echo "applied $(basename "$p")"; done
+cp "$HERE"/src/*.c "$HERE"/src/*.h main/   # the link core and task (src/ is also what the host tests build)
 . "${IDF_V53:-$HOME/esp/esp-idf-v5.3}/export.sh" >/dev/null 2>&1
 idf.py set-target esp32 >/dev/null 2>&1 || true
 idf.py build 2>&1 | tail -4

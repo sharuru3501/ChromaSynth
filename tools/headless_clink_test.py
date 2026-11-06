@@ -349,8 +349,8 @@ mem[sym["wTxHead"]] = 0
 mem[sym["wTxTail"]] = 0
 
 # ---------------------------------------------------------------- timeout
-pb.tick(130)
-check("no packets for 2 seconds drops the link", v("wClLinked") == 0, v("wClLinked"))
+pb.tick(255)
+check("no packets for 4 seconds drops the link", v("wClLinked") == 0, v("wClLinked"))
 queue(*([0xF8] * 4))
 isr_reply.clear()
 mem[0xFF0F] = mem[0xFF0F] | 0x08
