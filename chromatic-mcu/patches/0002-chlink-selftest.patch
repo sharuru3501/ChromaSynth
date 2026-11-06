@@ -1,0 +1,88 @@
+--- a/main/chlink.c
++++ b/main/chlink.c
+@@ -36,7 +36,7 @@
+ {
+     (void)argc;
+     (void)argv;
+-    printf("chlink test firmware v0 (stock v4.6 + sym/gpd, console on USB)\n");
++    printf("chlink test firmware v1 (stock v4.6 + sym/gpd + selftest, console on USB)\n");
+     return 0;
+ }
+ 
+@@ -58,6 +58,70 @@
+     return 0;
+ }
+ 
++static bool read_gpd(uint8_t out[8])
++{
++    if (s_sem == NULL)
++    {
++        s_sem = xSemaphoreCreateBinary();
++    }
++    s_want = true;
++    (void)xSemaphoreTake(s_sem, 0);
++    FPGA_Tx_RequestBGPD();
++    if (xSemaphoreTake(s_sem, pdMS_TO_TICKS(500)) == pdTRUE)
++    {
++        memcpy(out, s_gpd, 8);
++        return true;
++    }
++    s_want = false;
++    return false;
++}
++
++static void print_gpd(const char *tag)
++{
++    uint8_t g[8];
++    if (read_gpd(g))
++    {
++        printf("%s gpd %02X %02X %02X %02X %02X %02X %02X %02X\n", tag, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
++    }
++    else
++    {
++        printf("%s gpd timeout\n", tag);
++    }
++}
++
++// Self test: needs no console input (the console's RX does not seem to reach the app over the USB
++// bridge). Starts 6 s after boot; everything is printed on the console's TX.
++static void selftest_task(void *arg)
++{
++    (void)arg;
++    vTaskDelay(pdMS_TO_TICKS(6000));
++    printf("CHLINK v1 selftest start\n");
++    printf("T1 gpd x5 (200 ms apart)\n");
++    for (int i = 0; i < 5; i++)
++    {
++        print_gpd("T1");
++        vTaskDelay(pdMS_TO_TICKS(200));
++    }
++    printf("T2 virtual START pulse: write MCU_buttons = 01 for 150 ms, then 00\n");
++    FPGA_Tx_RawPoke(0x01);
++    vTaskDelay(pdMS_TO_TICKS(150));
++    FPGA_Tx_RawPoke(0x00);
++    printf("T2 done (did the game react to START?)\n");
++    vTaskDelay(pdMS_TO_TICKS(1000));
++    printf("T3 gpd x5 again\n");
++    for (int i = 0; i < 5; i++)
++    {
++        print_gpd("T3");
++        vTaskDelay(pdMS_TO_TICKS(200));
++    }
++    printf("selftest done; heartbeat gpd every 3 s\n");
++    for (;;)
++    {
++        vTaskDelay(pdMS_TO_TICKS(3000));
++        print_gpd("HB");
++    }
++}
++
+ static int cmd_gpd(int argc, char **argv)
+ {
+     int count = (argc >= 2) ? atoi(argv[1]) : 1;
+@@ -102,4 +166,5 @@
+     {
+         (void)esp_console_cmd_register(&cmds[i]);
+     }
++    (void)xTaskCreate(selftest_task, "chlink_selftest", 3072, NULL, 3, NULL);
+ }

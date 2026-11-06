@@ -54,3 +54,9 @@ FPGA 内の GB コアのシリアル(SB/SC)は**外部リンクポートにし�
 - ESP32 の BLE と WiFi は**同時に使えない**と chromatic-recon が記している(radio の時分割)。BLE MIDI だけなら問題ない。
 - 本体の ESP32 は USB を持たない通常の ESP32 なので、USB-MIDI は使えない(BLE MIDI のみ)。
 - MCU ファームウェアを入れ替えるリスク(KortaMod は復元手順と元のバックアップを推奨)。実行前に必ず `esptool.py read_flash` で全体をバックアップする。
+
+## 6. USB シリアルと ESP32 のリセット(FPGA の `top.v` より)
+- USB の CDC シリアルは FPGA が持ち、ESP32 の UART0(`ESP32_MCU_D3` = TXD、`D4` = RXD)に繋がる。
+- **DTR/RTS が ESP32 のリセットに直結**: `ESP32_EN_INT <= ~UART_RTS`(RTS オンで EN が Low)、`ESP32_IO0_INT <= (DTRRTS == 2'b00)`(DTR か RTS のどちらかがオンで IO0 が Low)。EN は FPGA 内の約 4 ms の遅延を経て ESP32 に届く。
+- したがって、**シリアルを開く側(Mac)は DTR/RTS をオフにして開く**こと。オンのまま開くと、開いている間じゅう ESP32 が止まる。
+- 2026-11-06 の実機確認: ポートを開く瞬間に 1 回リセットが入る。出力は取れるが、Mac からの入力はコンソールに届かなかった(原因は未確認)。
