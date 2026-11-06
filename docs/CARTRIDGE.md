@@ -37,6 +37,14 @@ ems-flasher --save --restore sram_20261106-183422_A.sav
 ```
 ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクトリにある(`ems-flasher-real`。ソースは再取得してビルドし直せる)。
 
+## 4.5 ChromaSynth をページ 2 に書いた結果(2026-11-06)
+- **1 回目は失敗し、何も書かれなかった**。ems-flasher が、空のページに自動で入れるメニュー ROM のファイル名を壊して(`can't stat p���`)止まった。**原因は ems-flasher のバグ**: `cmd.c` の `cmd_write` で、`if` ブロックの中のローカル配列 `menupath[1024]` のアドレスを `romfile->path` に保存し、ブロックを抜けた後も使っている(use-after-scope)。古いコンパイラではスタックの内容が残っていたが、新しい clang の最適化では別の用途に再利用されて文字化けした。**作業用コピーの `cmd.c` を 1 行直した**(`static char menupath[1024];`)。失敗した 1 回目の後でも、ページ 1 と SRAM はバックアップと完全に一致していた。
+- **2 回目は成功**: `ems-flasher --page 2 --verbose --write build/chromasynth.gb`(`MENUDIR` はビルドディレクトリ)。
+  - ページ 2: `MENU#`(bank 0、32KB、カラー)+ `CHROMASYNTH`(bank 2、32KB、カラー)。空き 4032KB。「Page enhancements: Color、Compatible consoles: All」。
+  - **ページ 2 の吸い出しに、ビルドした ROM(SHA-256 `68aa752d…`)が完全に同じ内容で入っていた**(オフセット `0x8000`)。
+  - **ページ 1 を再度吸い出して、バックアップと完全に一致**(LSDJ は無傷)。**SRAM も、バックアップと完全に一致**。
+- 起動時は、ページ 2 のバンク 0 のメニュー ROM が最初に動き、そこから ChromaSynth を選ぶ形になるはず(**未確認**)。ページをどう切り替えて起動するかも未確認(§1)。
+
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
 - **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
