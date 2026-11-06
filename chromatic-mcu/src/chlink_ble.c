@@ -9,6 +9,7 @@
 #include "esp_console.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +33,10 @@ static volatile uint32_t s_acc_read = 0, s_acc_write = 0, s_acc_other = 0, s_dis
 static volatile int s_disc_reason = 0, s_conn_status = 0, s_enc_status = -1, s_upd_rc = -99, s_notify_on = 0;
 static volatile uint16_t s_mtu = 0, s_conn_itvl = 0;
 static uint8_t s_last_pkt[16];
+// When the last BLE writes arrived (microseconds): the gaps show how the Mac/Live batches them (connection interval).
+#define ARR_N 16
+static volatile int64_t s_arr[ARR_N];
+static volatile uint32_t s_arr_n = 0;
 static volatile uint16_t s_last_pkt_len = 0;
 
 static void advertise(void);
@@ -79,6 +84,7 @@ static int midi_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
         uint16_t got = 0;
         if (ble_hs_mbuf_to_flat(ctxt->om, buf, len, &got) == 0)
         {
+            s_arr[s_arr_n++ % ARR_N] = esp_timer_get_time();
             s_writes++;
             s_last_pkt_len = got;
             memcpy(s_last_pkt, buf, got < sizeof s_last_pkt ? got : sizeof s_last_pkt);
@@ -205,6 +211,13 @@ static int cmd_ble(int argc, char **argv)
            (unsigned)s_mtu, (unsigned)s_conn_itvl);
     printf("disconnects %u (last reason 0x%02X), connect status %d, encryption status %d, conn-param request rc %d\n",
            (unsigned)s_disconnects, s_disc_reason & 0xFF, s_conn_status, s_enc_status, s_upd_rc);
+    {
+        const uint32_t n = s_arr_n;
+        printf("gaps between the last BLE writes (ms):");
+        for (uint32_t i = (n > ARR_N ? n - ARR_N + 1 : 1); i < n; i++)
+            printf(" %.1f", (double)(s_arr[i % ARR_N] - s_arr[(i - 1) % ARR_N]) / 1000.0);
+        printf("\n");
+    }
     printf("last write: %u bytes:", (unsigned)s_last_pkt_len);
     for (unsigned i = 0; i < s_last_pkt_len && i < sizeof s_last_pkt; i++) printf(" %02X", s_last_pkt[i]);
     printf("\n");

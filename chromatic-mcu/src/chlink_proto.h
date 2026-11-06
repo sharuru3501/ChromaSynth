@@ -67,6 +67,7 @@ typedef struct
 {
     uint8_t kind;   // CHL_CMD_*
     uint8_t a, b, c;
+    uint32_t t_us;  // when it was queued (the MCU's microsecond clock; only for latency statistics)
 } chl_cmd_t;
 
 enum { CHL_CMD_PLAY = 0, CHL_CMD_MIDI = 1, CHL_CMD_HELLO = 2, CHL_CMD_SYNC = 3 };

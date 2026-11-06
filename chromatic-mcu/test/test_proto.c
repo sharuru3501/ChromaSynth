@@ -107,7 +107,7 @@ int main(int argc, char **argv)
             const int cn = a[0];
             chl_cmd_t c[32];
             for (int i = 0; i < cn; i++)
-                c[i] = (chl_cmd_t){(uint8_t)a[1 + i * 4], (uint8_t)a[2 + i * 4], (uint8_t)a[3 + i * 4], (uint8_t)a[4 + i * 4]};
+                c[i] = (chl_cmd_t){(uint8_t)a[1 + i * 4], (uint8_t)a[2 + i * 4], (uint8_t)a[3 + i * 4], (uint8_t)a[4 + i * 4], 0};
             const int en = a[1 + cn * 4];
             const int got = chl_coalesce(c, cn);
             ok = got == en;

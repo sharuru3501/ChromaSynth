@@ -11,9 +11,10 @@
 //   link auto            (default) send only while the ROM shows it is on the keyboard screen
 //   link on              FORCE: send without checking the ROM (the ROM must be on its KEYBOARD screen!)
 //   link off             send nothing
-//   link hold <ms>       how long each symbol is held (default 40 ms; 30 works, 20 does not)
+//   link hold <ms>       how long each symbol is held (default 30 ms, about 2 ROM frames; 20 ms loses symbols)
 //   link hello|sync      queue a HELLO / a phase sync
 //   link stat            mode, armed, what the ROM shows (gpd), counters
+//   link lat             latency statistics measured inside the MCU (queue wait, packet time, gpd check time)
 //   note on <n> [vel] | note off <n> | note <n> [ms [vel]]    play a note (the last form: on, wait, off)
 //   midi <b0> <b1> [b2]  a MIDI message in hex, e.g. midi 90 3c 64
 #include "chlink_link.h"
@@ -21,6 +22,7 @@
 #include "chlink.h"
 #include "chlink_proto.h"
 #include "esp_console.h"
+#include "esp_timer.h"
 #include "fpga_tx.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -41,11 +43,28 @@ typedef enum { RS_UNKNOWN, RS_KBD, RS_LEFT, RS_OTHER } RomState;
 
 static QueueHandle_t s_q;
 static volatile Mode s_mode = MODE_AUTO;
-static volatile uint16_t s_hold_ms = 40;
+static volatile uint16_t s_hold_ms = 30;   // measured on the console: 30 ms works, 20 ms loses symbols
 static int s_phase = 0;                 // phase of the next symbol; kept equal to the ROM's (sync)
 static bool s_armed = false;            // HELLO sent and the ROM is on the keyboard screen
 static volatile uint32_t s_sent = 0, s_aborted = 0, s_dropped = 0, s_handshakes = 0;
 static volatile RomState s_last_state = RS_UNKNOWN;
+
+// Latency statistics (microseconds): queue wait = from "queued" (a BLE write arrived) to the first symbol being
+// pressed; packet = first symbol pressed to the last one released; check = one gpd request/reply.
+typedef struct { uint32_t n, last, sum, max; } Stat;
+static Stat s_wait, s_packet, s_check;
+static void stat_add(Stat *s, uint32_t us)
+{
+    s->n++;
+    s->last = us;
+    s->sum += us;
+    if (us > s->max) s->max = us;
+}
+static void stat_print(const char *name, const Stat *s)
+{
+    printf("  %-22s n %u, last %u us, avg %u us, max %u us\n", name, (unsigned)s->n, (unsigned)s->last,
+           (unsigned)(s->n ? s->sum / s->n : 0), (unsigned)s->max);
+}
 
 static void delay_ms(uint32_t ms)
 {
@@ -55,7 +74,10 @@ static void delay_ms(uint32_t ms)
 static RomState rom_state(void)
 {
     uint8_t g[8];
-    if (!ChLink_ReadGpdTimeout(g, GPD_TIMEOUT_MS))
+    const int64_t t0 = esp_timer_get_time();
+    const bool got = ChLink_ReadGpdTimeout(g, GPD_TIMEOUT_MS);
+    stat_add(&s_check, (uint32_t)(esp_timer_get_time() - t0));
+    if (!got)
     {
         return s_last_state = RS_UNKNOWN;
     }
@@ -108,6 +130,19 @@ static bool do_play(bool on, uint8_t note, uint8_t vel)
     uint8_t s[CHL_PLAY_SYMBOLS];
     chl_encode_play(on, note, vel, s);
     return send_symbols(s, CHL_PLAY_SYMBOLS, false);
+}
+
+// A queued note: records how long it waited and how long the packet took (note-ons only).
+static bool do_play_timed(const chl_cmd_t *c)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const bool ok = do_play(c->a != 0, c->b, c->c);
+    if (c->a != 0 && ok && c->t_us != 0)
+    {
+        stat_add(&s_wait, (uint32_t)((uint32_t)t0 - c->t_us));
+        stat_add(&s_packet, (uint32_t)(esp_timer_get_time() - t0));
+    }
+    return ok;
 }
 
 static bool do_midi(uint8_t b0, uint8_t b1, uint8_t b2, bool handshake)
@@ -199,7 +234,7 @@ static void link_task(void *arg)
             bool ok = true;
             switch (cmds[i].kind)
             {
-            case CHL_CMD_PLAY: ok = do_play(cmds[i].a != 0, cmds[i].b, cmds[i].c); break;
+            case CHL_CMD_PLAY: ok = do_play_timed(&cmds[i]); break;
             case CHL_CMD_MIDI: ok = do_midi(cmds[i].a, cmds[i].b, cmds[i].c, false); break;
             case CHL_CMD_HELLO: ok = handshake(); break;
             case CHL_CMD_SYNC: ok = do_sync(); break;
@@ -225,7 +260,7 @@ static bool queue_cmd(uint8_t kind, uint8_t a, uint8_t b, uint8_t c)
     {
         return false;
     }
-    const chl_cmd_t cmd = {kind, a, b, c};
+    const chl_cmd_t cmd = {kind, a, b, c, (uint32_t)esp_timer_get_time()};
     return xQueueSend(s_q, &cmd, 0) == pdTRUE;
 }
 
@@ -286,6 +321,15 @@ static int cmd_link(int argc, char **argv)
     {
         printf(queue_cmd(CHL_CMD_SYNC, 0, 0, 0) ? "sync queued\n" : "link is off\n");
     }
+    else if (argc >= 2 && !strcmp(argv[1], "lat"))
+    {
+        printf("latency inside the MCU (note-ons only; add the ROM's 1-2 frames, about 17-33 ms, and the BLE/Mac side):\n");
+        stat_print("queue wait", &s_wait);
+        stat_print("packet (symbols)", &s_packet);
+        stat_print("one gpd check", &s_check);
+        if (s_wait.n && s_packet.n)
+            printf("  => MCU part of a note-on: avg %u ms (wait + packet)\n", (unsigned)((s_wait.sum / s_wait.n + s_packet.sum / s_packet.n) / 1000));
+    }
     else if (argc >= 2 && !strcmp(argv[1], "stat"))
     {
         printf("mode %s, armed %s, hold %u ms, next phase %c\n", s_mode == MODE_AUTO ? "auto" : s_mode == MODE_FORCE ? "FORCE" : "off",
@@ -316,7 +360,7 @@ static int cmd_link(int argc, char **argv)
     }
     else
     {
-        printf("usage: link auto|on|off|hello|sync|stat | link hold <ms>\n");
+        printf("usage: link auto|on|off|hello|sync|stat|lat | link hold <ms>\n");
         return -1;
     }
     return 0;
