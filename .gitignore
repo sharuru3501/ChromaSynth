@@ -1,0 +1,8 @@
+build/
+*.gb
+*.gbc
+*.sav
+*.map
+*.sym
+*.o
+.DS_Store
