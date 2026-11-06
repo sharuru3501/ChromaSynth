@@ -17,7 +17,8 @@ make run      # SameBoy で起動
 make gen      # notetable/font/waves/tempo/divs/pattern/bend の include を再生成
 python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install pyboy pillow、先に make)
 python3 tools/headless_save_test.py   # SRAM保存のテスト
-python3 tools/headless_midi_test.py   # MIDI入力のテスト(リングバッファへ直接バイトを注入)
+python3 tools/headless_midi_test.py   # MIDI入力・DAW同期・シリアルISR・ブリッジ参照実装との往復のテスト
+python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
 make clean
 ```
 
@@ -42,4 +43,5 @@ make clean
 11. **SameBoyのキー割り当てに修飾キー(⌘/⇧/⌃/⌥)を使わない。** `Right ⌘` を START にすると、押している間の他キーが「⌘+キー」扱いになり、キーを離した信号が失われて SELECT が押しっぱなしになる等、ROMのバグに見える誤動作が起きた(実例)。START は Return など通常キーに。入力まわりの不具合報告を受けたら、まずエミュレータのキー設定を確認する(iPhone版SameBoyのタッチ操作では同じROMが問題なく動き、原因がキー設定だったと確定済み)。
 12. 時間の単位は**ティック(1拍=12)**。ステップ単位のコードを書かない。1フレームに2ティック以上処理しない前提(`gen_tempo.py` が検証する)。グリッド分割は表示/入力の単位であって、データはいつもティック。ページは必ず拍から始まり整数拍を表示する(分割を変えても小節が動かないこと)。ページ幅は `tools/gen_divs.py` の表で決める。
 13. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
-14. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。
+14. **リンクプロトコルを変えたら** `docs/BRIDGE.md`・`tools/bridge_ref.py`・ROM(`SerialISR`/`midi.asm`)を同時に直し、`headless_midi_test.py` の往復テストで確かめる。`$FD` はアイドル、`$FF` は「GBが待ち受けていない」の印なのでデータに使わない。
+15. 不明なハード仕様(Chromaticのリンクポートのピン配置・電圧等)は推測で断定せず、docs の「未確認事項」に記録する。ブリッジを配線する前に実測する(BRIDGE.md §4)。

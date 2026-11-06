@@ -72,6 +72,12 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - ベンドの 16bit 符号付きオフセットは「ビブラート + ベンド」を足して `wBase` に加える。0 に戻ったら素の周期を1回だけ書く(`wTickOn`)。
 - 重い計算は主ループ側(VBlank外)。MIDI の処理は VBlank に入らない。
 
+## リンク/ブリッジメモ
+- GB はスレーブ(SC=$80)。マスター(ブリッジ)は、GB が SB/SC を再設定し終える**前に**次のバイトを始めてはいけない。ISR は約100サイクルなので、バイト間隔は250 µs 以上にする。
+- 返信は1転送遅れる(ISR が次の返信を SB に置き、次の転送で出る)。送信キューが空なら `$FD`(アイドル)を返す。
+- PyBoy はシリアルを模擬できない(SB は常に `$FF` と読める)。ISR のテストは、`SerialISR+5`(`ldh a,[rSB]` の直後)に A を注入するフックと、`SerialISR.send` で B を読むフックで行う。
+- 状態を壊さない: ISR 以外で呼ぶルーチンは、呼び出し元が使うレジスタ(特に `HandleJoy` の `d` = 今フレームの新規押下)を保存する(`RollChannelChanged` が `d` を壊してパターンに音が置かれた実例)。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

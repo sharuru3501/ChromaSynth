@@ -13,7 +13,7 @@
 | M4c | **ティック分解能(1拍=12)とグリッド/サブグリッド**(1/4〜1/48、三連符対応、分割を変えても小節は固定)、方向キーのオートリピート、ティック単位で滑らかな再生ヘッド。設計: [ROLL_DESIGN.md](ROLL_DESIGN.md) | done(三連符入力・再生・小節固定の表示をSameBoy(Mac/iPhone)で確認。iPhoneでSTART/SELECT操作が安定動作することも確認) |
 | M5 | SRAM保存(パッチ/パターン/BPM、MBC5+RAM+BATTERY 8KB、起動時に自動復元) | untested(ヘッドレスで保存・再起動復元・破損検知・SRAM無しカート検知を確認。実カートのSRAMは未確認) |
 | M5b | ソング/チェイン(複数パターン) | todo |
-| M6 | MIDI OUT + MIDI clock 同期(DAW), 有線ブリッジ(マイコン側ファーム) | todo |
+| M6 | **ブリッジ**: 設計・リンクプロトコル(`$FD`アイドル、送信キュー、12ppqnクロック)、ROM側の MIDI アウト/外部同期(SYNC)、参照実装 `tools/bridge_ref.py`。仕様: [BRIDGE.md](BRIDGE.md) | ROM側と参照実装は done(PyBoyで往復テスト通過)。**ブリッジのファームウェア・基板・リンクの実測は todo** |
 | M7 | 実機(Chromatic+フラッシュカート)検証 | todo |
 | M8 | BLE MIDI(ESP32ブリッジ) | todo |
 
