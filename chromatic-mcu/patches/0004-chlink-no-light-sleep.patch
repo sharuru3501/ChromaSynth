@@ -1,0 +1,14 @@
+--- a/main/pwrmgr.c
++++ b/main/pwrmgr.c
+@@ -104,6 +104,11 @@
+ 
+ void PwrMgr_TriggerLightSleep(void)
+ {
++    // chlink: stay awake. In light sleep the CPU is stopped (no timers, no tasks, no console input);
++    // only a message from the FPGA wakes it, so the MCU could neither poll the game's palette data
++    // nor send virtual buttons while a game runs. Costs battery life; make it conditional later.
++    return;
++
+     // Wait for the sleep task to start
+     while(PwrMgrTaskHandle == NULL)
+     {
