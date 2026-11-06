@@ -36,6 +36,8 @@ DEF rSCY  EQU $FF42
 DEF rSCX  EQU $FF43
 DEF rLY   EQU $FF44
 DEF rBGP  EQU $FF47
+DEF rBCPS EQU $FF68 ; CGB background palette index
+DEF rBCPD EQU $FF69 ; CGB background palette data
 DEF rIE   EQU $FFFF
 
 DEF _VRAM   EQU $8000

@@ -42,7 +42,8 @@ EntryPoint:
     ldh [rLCDC], a
     call InitUI
     ld a, %11100100
-    ldh [rBGP], a
+    ldh [rBGP], a           ; DMG palette
+    call InitPalette        ; CGB palette (the CGB boots with white palette RAM)
     ld a, LCDCF_ON | LCDCF_BGON | LCDCF_BLK01
     ldh [rLCDC], a
 
@@ -125,6 +126,22 @@ SerialISR:
     reti
 
 ; ---------------------------------------------------------------- utils
+; BG palette 0 for CGB mode: white, light gray, dark gray, black.
+; Harmless on DMG (the registers are ignored). LCD must be off.
+InitPalette:
+    ld a, $80               ; index 0, auto-increment
+    ldh [rBCPS], a
+    ld hl, BGPalette
+    ld b, 8
+.l: ld a, [hl+]
+    ldh [rBCPD], a
+    dec b
+    jr nz, .l
+    ret
+
+BGPalette:
+    dw $7FFF, $56B5, $294A, $0000   ; RGB555
+
 ; hl = dest, bc = length (>0)
 MemClear:
     xor a
