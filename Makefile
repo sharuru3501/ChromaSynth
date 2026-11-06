@@ -31,6 +31,8 @@ gen:
 	python3 tools/gen_font.py > src/font.inc
 	python3 tools/gen_waves.py > src/waves.inc
 	python3 tools/gen_tempo.py > src/tempo.inc
+	python3 tools/gen_divs.py > src/divs.inc
+	python3 tools/gen_pattern.py > src/pattern.inc
 
 run: $(TARGET)
 	open -a SameBoy $(TARGET)

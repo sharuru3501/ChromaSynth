@@ -39,7 +39,8 @@ BuildScreen:
     ld bc, 160
     call MemClear
     ld a, $FF
-    ld [wPlayCol], a
+    ld [wPlayShown], a
+    ld [wPlayX], a
     ld a, [wScreen]
     and a
     jr z, .play

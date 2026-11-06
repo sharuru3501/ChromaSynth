@@ -1,21 +1,26 @@
-; Step sequencer engine + piano-roll editing input.
+; Sequencer engine + piano-roll editing input. Design notes: docs/ROLL_DESIGN.md.
 ;
-; Pattern cells (wPattern[channel * 64 + step]): 0 = empty, CELL_OFF = note off,
-; anything else = MIDI note (note-on). A note sounds from its note-on cell until
-; the next non-empty cell, which is how the piano roll draws its length.
+; Time base: 12 ticks per beat. Pattern cells (wPattern[channel * 256 + tick]):
+; 0 = empty, CELL_OFF = note off, anything else = MIDI note (note-on). A note
+; sounds from its note-on cell until the next non-empty cell, which is how the
+; piano roll draws its length.
 ;
 ; Timing: every frame wSeqAcc += 256 (8.8 fixed point, 1.0 = one frame). When it
-; reaches the step length for the current BPM (TempoTable, frames per 16th
-; note) one step is played. Step length is always > 3 frames, so at most one
-; step fires per frame.
+; reaches the tick length for the current BPM (TempoTable) one tick is played.
+; A tick always lasts more than one frame, so at most one tick fires per frame.
+;
+; The roll shows a grid of 16 columns; a "grid division" (DivTicks) says how
+; many ticks one column covers (1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/48).
+; The cursor sits on a cell (wRollCell) = tick wRollTick = cell * wDivTicks.
 ;
 ; Piano-roll controls (see SeqInput):
-;   d-pad            move cursor (hold B: 4 steps / octave)
-;   A                place a 1-step note at the cursor (and audition it)
-;   A + LEFT/RIGHT   shorten / lengthen the note under the cursor
+;   d-pad            move cursor one cell / semitone (B held: 4 cells / octave)
+;   A+B              next grid division
+;   A                place a one-cell note at the cursor (and audition it)
+;   A + LEFT/RIGHT   shorten / lengthen the note under the cursor by one cell
 ;   A + UP/DOWN      transpose the note under the cursor
 ;   B (tap)          delete the note under the cursor
-;   SELECT + UP/DOWN BPM +-1      SELECT + LEFT/RIGHT  loop length -+16 steps
+;   SELECT + UP/DOWN BPM +-1      SELECT + LEFT/RIGHT  loop length -+1 bar
 ;   SELECT tap       next channel (handled in joy.asm)
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
@@ -30,11 +35,11 @@ SeqToggle:
     ld [wSeqPlay], a
     jr z, .stop
     xor a
-    ld [wSeqStep], a
+    ld [wSeqTick], a
     inc a
     ld [wFollow], a         ; the roll scrolls along with the playhead
-    call GetStepLen
-    dec d                   ; acc = len - 1 frame: the first step fires next frame
+    call GetTickLen
+    dec d                   ; acc = len - 1 frame: the first tick fires next frame
     ld a, e
     ld [wSeqAcc], a
     ld a, d
@@ -59,7 +64,7 @@ SeqTick:
     ret z
     ld hl, wSeqAcc + 1
     inc [hl]                ; acc += 256
-    call GetStepLen         ; de = step length
+    call GetTickLen         ; de = tick length
     ld a, [wSeqAcc]
     ld l, a
     ld a, [wSeqAcc + 1]
@@ -77,20 +82,17 @@ SeqTick:
     ld [wSeqAcc + 1], a
     ; fall through
 
-; Play the current step on all channels, then advance.
+; Play the current tick on all channels, then advance.
 SeqStep:
-    ld a, [wSeqStep]
+    ld a, [wSeqTick]
     ld [wSeqCur], a
     ld c, 0
 .ch:
-    ld a, c
-    rrca
-    rrca                    ; channel * 64
-    ld b, a
-    ld a, [wSeqStep]
-    add b
+    ld a, [wSeqCur]
     ld l, a
-    ld h, HIGH(wPattern)
+    ld a, c
+    add HIGH(wPattern)
+    ld h, a
     ld a, [hl]
     and a
     jr z, .next
@@ -109,36 +111,21 @@ SeqStep:
     ld a, c
     cp NUM_CH
     jr c, .ch
-    ld a, [wSeqStep]
+    ld a, [wSeqTick]
     inc a
     ld hl, wSeqLen
     cp [hl]
     jr c, .store
     xor a                   ; reached the loop end
 .store:
-    ld [wSeqStep], a
-    ; the view follows the playhead until the user moves the cursor
-    ld a, [wFollow]
+    ld [wSeqTick], a
+    ld a, [wFollow]         ; the view follows the playhead until the user moves the cursor
     and a
     ret z
-    ld a, [wSeqCur]
-    swap a
-    and 15                  ; page of the step just played
-    ld b, a
-    ld a, [wRollPage]
-    cp b
-    ret z
-    ld a, b
-    ld [wRollPage], a
-    call RollRefreshAll
-    ld hl, wDirty
-    ld a, [hl]
-    or DIRTY_HEADER         ; redraw the ruler (page number)
-    ld [hl], a
-    ret
+    jp RollFollow
 
-; -> de = step length (8.8 frames) for wBpm. Clobbers a, hl.
-GetStepLen:
+; -> de = tick length (8.8 frames) for wBpm. Clobbers a, hl.
+GetTickLen:
     ld a, [wBpm]
     sub BPM_MIN
     ld l, a
@@ -151,33 +138,42 @@ GetStepLen:
     ld d, [hl]
     ret
 
-; Redraw the status line. Clobbers a, hl.
+; Ask for the status line to be rebuilt (outside VBlank) and copied. Clobbers a.
 MarkSeqStatus:
-    ld hl, wDirty
-    ld a, [hl]
-    or DIRTY_STATUS
-    ld [hl], a
+    ld a, 1
+    ld [wStatusRender], a
     ret
 
 ; ---------------------------------------------------------------- cell helpers
-; b = step -> hl = address of that cell in the selected channel. Clobbers a.
+; b = tick -> hl = address of that cell in the selected channel. Clobbers a.
 CellHL:
     ld a, [wSelCh]
-    rrca
-    rrca
-    add b
-    ld l, a
-    ld h, HIGH(wPattern)
+    add HIGH(wPattern)
+    ld h, a
+    ld l, b
     ret
 
-; -> a = start step of the note under the cursor, or $FF if there is none.
-; The note under the cursor is the latest note-on at or before the cursor step
-; that has the cursor's pitch and has not been ended by an OFF cell.
-; Clobbers b, c, hl.
+; -> a = tick of the note-on under the cursor cell, or $FF if there is none.
+; Looks for a note-on of the cursor's pitch inside the cell, then for a note of
+; that pitch that is still sounding when the cell starts. Clobbers b, c, e, hl.
 FindNote:
-    ld a, [wRollStep]
+    ld a, [wRollNote]
+    ld e, a                 ; e = cursor pitch
+    ld a, [wRollTick]
     ld b, a
-.back:
+    ld a, [wDivTicks]
+    ld c, a                 ; c = ticks left in the cell
+.inside:
+    call CellHL
+    ld a, [hl]
+    cp e
+    jr z, .found
+    inc b
+    dec c
+    jr nz, .inside
+    ld a, [wRollTick]
+    ld b, a
+.back:                      ; the last event at or before the cell start
     call CellHL
     ld a, [hl]
     and a
@@ -190,24 +186,23 @@ FindNote:
 .hit:
     cp CELL_OFF
     jr z, .none
-    ld c, a
-    ld a, [wRollNote]
-    cp c
+    cp e
     jr nz, .none
+.found:
     ld a, b
     ret
 .none:
     ld a, $FF
     ret
 
-; b = start step -> a = b = index of the first non-empty cell after it
-; (SEQ_STEPS if there is none). Clobbers hl.
+; b = start tick -> a = b = tick of the first non-empty cell after it
+; (SEQ_TICKS if there is none). Clobbers hl.
 FindEnd:
 .l: inc b
     ld a, b
-    cp SEQ_STEPS
+    cp SEQ_TICKS
     jr c, .look
-    ld a, SEQ_STEPS
+    ld a, SEQ_TICKS
     ld b, a
     ret
 .look:
@@ -227,11 +222,24 @@ SeqInput:
     jp nz, SeqSelectHeld
     bit PADB_B, d
     jr z, .noBPress
+    bit PADB_A, e
+    jr nz, .chord           ; B pressed while A is held
     xor a
     ld [wBUsed], a
+    jr .noBPress
+.chord:
+    ld a, 1
+    ld [wBUsed], a
+    jp SeqCycleDiv
 .noBPress:
     bit PADB_A, d
-    jp nz, SeqPlace
+    jr z, .noAPress
+    bit PADB_B, e
+    jp z, SeqPlace
+    ld a, 1                 ; A pressed while B is held
+    ld [wBUsed], a
+    jp SeqCycleDiv
+.noAPress:
     bit PADB_A, e
     jp nz, SeqNoteEdit
 
@@ -244,7 +252,7 @@ SeqInput:
     call NoteOff
     pop de
 .afterA:
-    ld a, [wJoyPrev]        ; B released without moving: delete the note
+    ld a, [wJoyPrev]        ; B released without moving or chording: delete the note
     bit PADB_B, a
     jr z, .cursor
     bit PADB_B, e
@@ -258,7 +266,7 @@ SeqInput:
 .cursor:
     ; fall through
 
-; d-pad: move the cursor. Holding B jumps 4 steps / one octave.
+; d-pad: move the cursor. Holding B jumps 4 cells / one octave.
 SeqCursor:
     ld a, d
     and %11110000
@@ -274,8 +282,6 @@ SeqCursor:
 .small:
     ld a, [wRollNote]
     ld b, a                 ; b = note
-    ld a, [wRollStep]
-    ld c, a                 ; c = step
     bit PADB_UP, d
     jr z, .noUp
     ld a, 1
@@ -308,42 +314,109 @@ SeqCursor:
 .downOk:
     ld b, a
 .noDown:
-    bit PADB_RIGHT, d
-    jr z, .noRight
     ld a, 1
     bit PADB_B, e
-    jr z, .rightGo
+    jr z, .cells
     ld a, 4
-.rightGo:
-    add c
-    cp SEQ_STEPS
-    jr c, .rightOk
-    ld a, SEQ_STEPS - 1
-.rightOk:
-    ld c, a
+.cells:
+    ld c, a                 ; c = cells to move horizontally
+    bit PADB_RIGHT, d
+    jr z, .noRight
+    call CellRight
 .noRight:
     bit PADB_LEFT, d
     jr z, .noLeft
-    ld a, 1
-    bit PADB_B, e
-    jr z, .leftGo
-    ld a, 4
-.leftGo:
-    ld l, a
-    ld a, c
-    sub l
-    jr nc, .leftOk
-    xor a
-.leftOk:
-    ld c, a
+    call CellLeft
 .noLeft:
     ld a, b
     ld [wRollNote], a
-    ld a, c
-    ld [wRollStep], a
     jp RollCursorMoved
 
-; SELECT held: UP/DOWN = BPM +-1, LEFT/RIGHT = loop length -+16 steps.
+; c = cells: move the cursor right, stopping at the last cell. Keeps b, c, d, e.
+CellRight:
+    push bc
+    push de
+    ld a, [wDiv]
+    ld e, a
+    ld d, 0
+    ld hl, DivCells
+    add hl, de
+    ld a, [hl]
+    dec a
+    ld e, a                 ; e = last cell
+.l: ld a, [wRollCell]
+    cp e
+    jr nc, .done
+    inc a
+    ld [wRollCell], a
+    ld a, [wDivTicks]
+    ld b, a
+    ld a, [wRollTick]
+    add b
+    ld [wRollTick], a
+    dec c
+    jr nz, .l
+.done:
+    pop de
+    pop bc
+    ret
+
+; c = cells: move the cursor left, stopping at cell 0. Keeps b, c, d, e.
+CellLeft:
+    push bc
+.l: ld a, [wRollCell]
+    and a
+    jr z, .done
+    dec a
+    ld [wRollCell], a
+    ld a, [wDivTicks]
+    ld b, a
+    ld a, [wRollTick]
+    sub b
+    ld [wRollTick], a
+    dec c
+    jr nz, .l
+.done:
+    pop bc
+    ret
+
+; A+B: next grid division. The cursor keeps its tick, snapped down to the new grid.
+SeqCycleDiv:
+    ld a, [wDiv]
+    inc a
+    cp NUM_DIVS
+    jr c, .ok
+    xor a
+.ok:
+    ld [wDiv], a
+    ld e, a
+    ld d, 0
+    ld hl, DivTicks
+    add hl, de
+    ld a, [hl]
+    ld [wDivTicks], a
+    ld c, a                 ; c = ticks per cell
+    ld a, [wRollTick]
+    ld b, 0                 ; b = cell = tick / c
+.div:
+    cp c
+    jr c, .divDone
+    sub c
+    inc b
+    jr .div
+.divDone:
+    ld d, a                 ; remainder
+    ld a, [wRollTick]
+    sub d
+    ld [wRollTick], a
+    ld a, b
+    ld [wRollCell], a
+    swap a
+    and 15
+    call RollSetPage
+    jp RollRefreshAll
+
+; SELECT held: UP/DOWN = BPM +-1, LEFT/RIGHT = loop length -+1 bar.
 SeqSelectHeld:
     ld a, d
     and %11110000
@@ -373,43 +446,41 @@ SeqSelectHeld:
     ld b, a
     bit PADB_RIGHT, d
     jr z, .noRight
-    add SEQ_PAGE
+    add TICKS_PER_BAR
 .noRight:
     bit PADB_LEFT, d
     jr z, .noLeft
-    sub SEQ_PAGE
+    sub TICKS_PER_BAR
 .noLeft:
-    cp SEQ_PAGE
-    ret c                   ; below one page (also catches underflow)
-    cp SEQ_STEPS + 1
+    cp TICKS_PER_BAR
+    ret c                   ; below one bar (also catches underflow)
+    cp SEQ_TICKS + 1
     ret nc
     cp b
     ret z
     ld [wSeqLen], a
-    ld hl, wDirty
-    ld a, [hl]
-    or DIRTY_HEADER | DIRTY_STATUS
-    ld [hl], a              ; ruler shows where the loop ends
-    ret
+    jp RollRefreshAll       ; the ruler shows where the loop ends
 
-; A pressed: put a one-step note at the cursor unless a note of that pitch is
+; A pressed: put a one-cell note at the cursor unless a note of that pitch is
 ; already under it. The note is auditioned either way.
 SeqPlace:
     call FindNote
     cp $FF
     jr nz, .audition        ; already there: just audition it
-    ld a, [wRollStep]
+    ld a, [wRollTick]
     ld b, a
     call CellHL
     ld a, [wRollNote]
     ld [hl], a              ; note-on
-    ld a, b
-    cp SEQ_STEPS - 1
-    jr nc, .placed          ; last step: no room for an OFF
-    inc l
+    ld a, [wDivTicks]
+    add b                   ; a = end of the cell
+    cp SEQ_TICKS
+    jr nc, .placed          ; last cell: no room for an OFF
+    ld b, a
+    call CellHL
     ld a, [hl]
     and a
-    jr nz, .placed          ; next cell used: the note ends there
+    jr nz, .placed          ; something already there: the note ends at it
     ld [hl], CELL_OFF
 .placed:
     call RollRefresh
@@ -466,17 +537,18 @@ SeqTranspose:
     call RollScrollFix
     jr c, .moved
     call RollRefresh        ; same view: only the changed rows
-    jr .audition
+    jr .status
 .moved:
     call RollRefreshAll     ; the window scrolled with the note
-.audition:
+.status:
+    call MarkSeqStatus      ; the cursor pitch is shown in the status line
     ld a, [wSelCh]
     ld [wPadCh], a
     ld c, a
     ld a, d
     jp NoteOn
 
-; c = +1 / -1: lengthen / shorten the note under the cursor by one step.
+; c = +1 / -1: lengthen / shorten the note under the cursor by one cell.
 ; The end of a note is the next non-empty cell: an OFF marker, or another note.
 SeqLength:
     push bc
@@ -484,38 +556,41 @@ SeqLength:
     pop bc
     cp $FF
     ret z
-    ld d, a                 ; d = start step
+    ld d, a                 ; d = start tick
     ld b, a
-    call FindEnd            ; b = end step (first non-empty cell, or 64)
+    call FindEnd            ; b = end tick (first non-empty cell, or 192)
     bit 7, c
     jr nz, .shorten
-    ; ---- lengthen: move the OFF one step right
+    ; ---- lengthen: move the OFF one cell to the right
     ld a, b
-    cp SEQ_STEPS
+    cp SEQ_TICKS
     ret nc                  ; runs to the end of the pattern already
     call CellHL
     ld a, [hl]
     cp CELL_OFF
     ret nz                  ; touches the next note: cannot grow
     xor a
-    ld [hl], a              ; remove the OFF
-    ld a, b
-    inc a
-    cp SEQ_STEPS
-    jp nc, RollRefresh      ; no room for a new OFF: the note now runs to the end
-    inc l
-    ld a, [hl]
-    and a
-    jp nz, RollRefresh      ; next cell is used: the note ends there
+    ld [hl], a              ; remove the old OFF
+    ld e, b                 ; e = old end
+    call FindEnd            ; b = next event after it (or 192)
+    ld a, [wDivTicks]
+    add e                   ; a = new end
+    cp b
+    jp nc, RollRefresh      ; reaches the next event / the end: the note runs into it
+    ld b, a
+    call CellHL
     ld [hl], CELL_OFF
     jp RollRefresh
 .shorten:
+    ld a, [wDivTicks]
+    ld c, a                 ; c = one cell
     ld a, b
-    sub d
-    cp 2
-    ret c                   ; already one step long
+    sub d                   ; a = current length
+    cp c
+    ret c
+    ret z                   ; already one cell long
     ld a, b
-    cp SEQ_STEPS
+    cp SEQ_TICKS
     jr nc, .noOff
     call CellHL
     ld a, [hl]
@@ -524,9 +599,11 @@ SeqLength:
     xor a
     ld [hl], a              ; the old OFF goes away...
 .noOff:
-    dec b
+    ld a, b
+    sub c                   ; ...and a new one a cell earlier
+    ld b, a
     call CellHL
-    ld [hl], CELL_OFF       ; ...and a new one one step earlier
+    ld [hl], CELL_OFF
     jp RollRefresh
 
 ; B tapped: delete the note under the cursor together with its OFF marker.
@@ -537,13 +614,13 @@ SeqDelete:
     ld d, a
     ld b, a
     call FindEnd
-    ld e, a                 ; e = end step
+    ld e, a                 ; e = end tick
     ld b, d
     call CellHL
     xor a
     ld [hl], a              ; note-on gone
     ld a, e
-    cp SEQ_STEPS
+    cp SEQ_TICKS
     jp nc, RollRefresh
     ld b, e
     call CellHL
@@ -555,21 +632,6 @@ SeqDelete:
     jp RollRefresh
 
 ; ---------------------------------------------------------------- data
-; Demo pattern (32 steps): arpeggio, bass, hi-hat. Channel blocks are 64 bytes.
-DefaultPattern:
-    ; CH1 pulse: C major arpeggio, then A minor
-    db 60, 0, CELL_OFF, 0,  64, 0, CELL_OFF, 0,  67, 0, CELL_OFF, 0,  64, 0, CELL_OFF, 0
-    db 57, 0, CELL_OFF, 0,  60, 0, CELL_OFF, 0,  64, 0, CELL_OFF, 0,  60, 0, CELL_OFF, 0
-    ds 32, 0
-    ; CH2 pulse (empty)
-    ds 64, 0
-    ; CH3 wave: bass
-    db 48, 0, 0, 0,  0, 0, 0, 0,  43, 0, 0, 0,  0, 0, 0, 0
-    db 45, 0, 0, 0,  0, 0, 0, 0,  40, 0, 0, 0,  0, 0, 0, 0
-    ds 32, 0
-    ; CH4 noise: hats
-    db 90, 0, 0, 0,  100, 0, 0, 0,  90, 0, 0, 0,  100, 0, 0, 0
-    db 90, 0, 0, 0,  100, 0, 0, 0,  90, 0, 0, 0,  100, 0, 0, 0
-    ds 32, 0
-
-INCLUDE "tempo.inc"
+INCLUDE "tempo.inc"         ; TempoTable
+INCLUDE "divs.inc"          ; DivTicks, DivCells, DivLabels, PlayXPtrs
+INCLUDE "pattern.inc"       ; DefaultPattern

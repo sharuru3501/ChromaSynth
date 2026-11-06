@@ -9,10 +9,10 @@ wRing:          ds 256      ; serial RX ring buffer (ISR -> main loop)
 SECTION "Patch", WRAM0, ALIGN[5]
 wPatch:         ds NUM_CH * PATCH_SIZE
 
-; Pattern: wPattern[channel * 64 + step]. 256-byte aligned: the low byte of an
-; address is simply channel * 64 + step (no carry handling anywhere).
+; Pattern: wPattern[channel * 256 + tick]. 256-byte aligned: HIGH(wPattern)+channel
+; is the high byte and the tick is the low byte (no 16-bit arithmetic anywhere).
 SECTION "Pattern", WRAM0, ALIGN[8]
-wPattern:       ds NUM_CH * SEQ_STEPS
+wPattern:       ds NUM_CH * SEQ_STRIDE
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
@@ -59,24 +59,38 @@ wDirtyEdit:     db          ; edit-screen parameter rows needing redraw
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
 wSeqPlay:       db          ; 1 = sequencer running
-wSeqStep:       db          ; next step to play (0..15)
-wSeqCur:        db          ; step that was played last (playhead)
+wSeqTick:       db          ; next tick to play (0..wSeqLen-1)
+wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
-wSeqLen:        db          ; loop length in steps (16/32/48/64)
+wSeqLen:        db          ; loop length in ticks (48/96/144/192)
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
-wRollStep:      db          ; piano-roll cursor: step 0..63
+wDiv:           db          ; grid division index (src/divs.inc)
+wDivTicks:      db          ; ticks per grid cell for that division
+wRollCell:      db          ; piano-roll cursor: grid cell index (tick / wDivTicks)
+wRollTick:      db          ; piano-roll cursor: tick (= cell * wDivTicks)
 wRollNote:      db          ; piano-roll cursor: MIDI note
 wRollTop:       db          ; pitch shown on the top grid row
-wRollPage:      db          ; visible page (first step = page * 16)
+wRollPage:      db          ; visible page (first cell = page * 16)
+wPageTick:      db          ; tick of the first visible column (= page * 16 * wDivTicks)
 wFollow:        db          ; 1 = the view follows the playhead
-wPlayCol:       db          ; column the playhead sprite is drawn at ($FF = hidden)
+wPlayX:         db          ; wanted playhead X in OAM coordinates ($FF = hidden)
+wPlayShown:     db          ; playhead X currently in OAM ($FF = hidden)
+wStatusRender:  db          ; 1 = rebuild wStatusBuf (outside VBlank)
 wOldNote:       db          ; cursor pitch before the last move
 wRRPitch:       db          ; RenderRow scratch
 wRRBlack:       db
 wRRCur:         db
 wSaveSum:       db          ; SaveAll running checksum
+wBCPitch:       db          ; BuildCols scratch
+wBCHead:        db
+wBCFlag:        db
+wBCPhase:       db
+wBCBeat:        db
+wBCCol:         db
+wRulerBuf:      ds 20       ; row 0 of the roll, built outside VBlank
+wStatusBuf:     ds 20       ; row 17 of the roll
 wMsg:           db          ; message code shown on row 17 (0 = none)
 wMsgTimer:      db
 wVibM:          db          ; scratch for the vibrato tick

@@ -198,7 +198,7 @@ after = mem[sym["wOut"] + 2] | (mem[sym["wOut"] + 3] << 8)
 check("depth 0 -> no vibrato updates", before == after)
 midi(0x81, 69, 0)
 
-# --- piano roll
+# --- piano roll (12 ticks per beat, grid division selectable)
 def hold(*btns, frames=3):
     for b in btns:
         pb.button_press(b)
@@ -228,13 +228,18 @@ G = sym["wGrid"]
 T_EMP_W, T_NOTE_HEAD, T_NOTE_BODY, T_CUR_EMP, T_CUR_NOTE = 64, 68, 69, 70, 71
 
 
-def cell(ch, step):
-    return mem[P + ch * 64 + step]
+def cell(ch, tick):
+    return mem[P + ch * 256 + tick]
 
 
 def grid(row, col):
-    """Tile in the shadow map: grid row 0..15, step column 0..15."""
+    """Tile in the shadow map: grid row 0..15, grid column 0..15."""
     return mem[G + row * 20 + 2 + col]
+
+
+def vram(row, col):
+    """Tile actually in VRAM (BG map) at grid row 0..15 / column 0..15."""
+    return mem[0x9800 + (1 + row) * 32 + 2 + col]
 
 
 def v(name):
@@ -245,26 +250,40 @@ def settle():
     pb.tick(10)  # rendering and copying are spread over a few frames
 
 
+def chord_grid():
+    """B held, then A pressed: next grid division."""
+    pb.button_press("b")
+    pb.tick(3)
+    pb.button_press("a")
+    pb.tick(3)
+    pb.button_release("a")
+    pb.button_release("b")
+    pb.tick(4)
+
+
 press("start")
 pb.tick(4)
 check("START -> piano roll", v("wScreen") == 2, v("wScreen"))
 settle()
 shot("09_roll")
-check("demo pattern: CH1 C4 / OFF, CH1 page 2 starts with A3, CH3 bass",
-      cell(0, 0) == 60 and cell(0, 2) == 0xFF and cell(0, 16) == 57 and cell(2, 0) == 48)
-check("defaults: loop 32, cursor C4 step 0, window top C5",
-      (v("wSeqLen"), v("wRollNote"), v("wRollStep"), v("wRollTop")) == (32, 60, 0, 72),
-      (v("wSeqLen"), v("wRollNote"), v("wRollStep"), v("wRollTop")))
+check("demo pattern (ticks): CH1 C4 + OFF after 6, A3 at bar 2, CH3 bass",
+      cell(0, 0) == 60 and cell(0, 6) == 0xFF and cell(0, 12) == 64 and cell(0, 48) == 57 and cell(2, 0) == 48)
+state = (v("wSeqLen"), v("wRollNote"), v("wRollTick"), v("wRollCell"), v("wRollTop"), v("wDiv"), v("wDivTicks"))
+check("defaults: 2 bars, cursor C4 tick 0, window top C5, grid 1/16 (3 ticks)", state == (96, 60, 0, 0, 72, 4, 3), state)
 # top = 72 -> grid row r shows pitch 72 - r: C4 (60) is row 12, E4 (64) row 8, G4 (67) row 5
 check("grid: cursor on the C4 note head", grid(12, 0) == T_CUR_NOTE, grid(12, 0))
-check("grid: note body follows the head", grid(12, 1) == T_NOTE_BODY, grid(12, 1))
-check("grid: E4 head at step 4", grid(8, 4) == T_NOTE_HEAD, grid(8, 4))
+check("grid: note body follows the head (a 6-tick note spans two 1/16 columns)", grid(12, 1) == T_NOTE_BODY, grid(12, 1))
+check("grid: E4 head in column 4 (tick 12)", grid(8, 4) == T_NOTE_HEAD, grid(8, 4))
 check("grid: empty white-key cell", grid(12, 2) == T_EMP_W, grid(12, 2))
 check("grid: black-key row is shaded (+1)", grid(11, 2) == T_EMP_W + 1, grid(11, 2))
 check("grid: beat column marked (+2)", grid(10, 4) == T_EMP_W + 2, grid(10, 4))
+ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
+check("ruler: beat numbers on the beat columns, page number at the right",
+      ruler[2] == 16 and ruler[6] == 17 and ruler[10] == 18 and ruler[14] == 19 and ruler[3] == 0 and ruler[18] == 48 + 128 and ruler[19] == 17 + 128,
+      ruler)
 
 press("right")
-check("RIGHT: cursor step 1", v("wRollStep") == 1)
+check("RIGHT: cursor cell 1 = tick 3", (v("wRollCell"), v("wRollTick")) == (1, 3), (v("wRollCell"), v("wRollTick")))
 settle()
 check("cursor moved onto the note body", grid(12, 1) == T_CUR_NOTE and grid(12, 0) == T_NOTE_HEAD,
       (grid(12, 0), grid(12, 1)))
@@ -274,22 +293,22 @@ settle()
 check("cursor on an empty cell", grid(11, 1) == T_CUR_EMP, grid(11, 1))
 press("down")
 press("left")
-check("back at C4 step 0", (v("wRollNote"), v("wRollStep")) == (60, 0))
+check("back at C4 tick 0", (v("wRollNote"), v("wRollTick")) == (60, 0))
 
 # --- d-pad auto-repeat: holding RIGHT keeps moving the cursor after an initial delay
 hold("right", frames=0)
 pb.tick(10)
-check("auto-repeat: only the first move before the initial delay", v("wRollStep") == 1, v("wRollStep"))
+check("auto-repeat: only the first move before the initial delay", v("wRollCell") == 1, v("wRollCell"))
 pb.tick(30)
-check("auto-repeat: a held direction keeps moving the cursor", v("wRollStep") >= 6, v("wRollStep"))
+check("auto-repeat: a held direction keeps moving the cursor", v("wRollCell") >= 6, v("wRollCell"))
 release("right")
-stop_at = v("wRollStep")
+stop_at = v("wRollCell")
 pb.tick(20)
-check("auto-repeat stops on release", v("wRollStep") == stop_at)
+check("auto-repeat stops on release", v("wRollCell") == stop_at)
 hold("left", frames=0)
 pb.tick(120)
 release("left")
-check("auto-repeat to the left stops at step 0", v("wRollStep") == 0, v("wRollStep"))
+check("auto-repeat to the left stops at cell 0", (v("wRollCell"), v("wRollTick")) == (0, 0), (v("wRollCell"), v("wRollTick")))
 pb.tick(10)
 
 # B + d-pad jumps and must not delete anything
@@ -297,13 +316,14 @@ hold("b")
 press("right")
 press("right")
 release("b", frames=4)
-check("B+RIGHT jumps 4 steps", v("wRollStep") == 8, v("wRollStep"))
-check("B+d-pad did not delete the note", cell(0, 0) == 60 and cell(0, 4) == 64)
+check("B+RIGHT jumps 4 cells", v("wRollCell") == 8 and v("wRollTick") == 24, (v("wRollCell"), v("wRollTick")))
+check("B+d-pad did not delete the note", cell(0, 0) == 60 and cell(0, 12) == 64)
 hold("b")
 press("right")
 press("right")
 release("b", frames=4)
-check("page scroll: step 16 -> page 2", (v("wRollStep"), v("wRollPage")) == (16, 1), (v("wRollStep"), v("wRollPage")))
+check("page scroll: cell 16 -> page 2 (starts at tick 48)",
+      (v("wRollCell"), v("wRollPage"), v("wPageTick")) == (16, 1, 48), (v("wRollCell"), v("wRollPage"), v("wPageTick")))
 settle()
 check("page 2: A3 head at column 0 (row 15), cursor empty at C4",
       grid(15, 0) == T_NOTE_HEAD and grid(12, 0) == T_CUR_EMP, (grid(15, 0), grid(12, 0)))
@@ -311,11 +331,10 @@ hold("b")
 press("left")
 press("left")
 release("b", frames=4)
-check("page scroll back", (v("wRollStep"), v("wRollPage")) == (8, 0))
-press("left")
-for _ in range(7):
+check("page scroll back", (v("wRollCell"), v("wRollPage"), v("wPageTick")) == (8, 0, 0))
+for _ in range(8):
     press("left")
-check("cursor at step 0", v("wRollStep") == 0)
+check("cursor at cell 0", v("wRollCell") == 0 and v("wRollTick") == 0)
 hold("b")
 press("up")
 release("b", frames=4)
@@ -331,15 +350,10 @@ release("b", frames=4)
 check("pitch scroll down: window follows", (v("wRollNote"), v("wRollTop")) == (60, 75), (v("wRollNote"), v("wRollTop")))
 settle()
 
-# ---- editing on CH2 (empty channel)
+# ---- editing on CH2 (empty channel), 1/16 grid (3 ticks per cell)
 press("select")
 check("SELECT tap -> channel 2 on the roll", v("wSelCh") == 1)
 settle()
-def vram(row, col):
-    """Tile actually in VRAM (BG map) at grid row 0..15 / step column 0..15."""
-    return mem[0x9800 + (1 + row) * 32 + 2 + col]
-
-
 row = v("wRollTop") - v("wRollNote")
 pb.button_press("a")
 frames = 0
@@ -350,12 +364,12 @@ for frames in range(1, 13):
 check("input latency: the note is on screen within 4 frames of pressing A", frames <= 4, frames)
 pb.tick(2)
 check("A places a note at the cursor", cell(1, 0) == 60, cell(1, 0))
-check("...with a one-step length (OFF after it)", cell(1, 1) == 0xFF, cell(1, 1))
+check("...one cell long (OFF 3 ticks later)", cell(1, 3) == 0xFF, cell(1, 3))
 check("A auditions on CH2", cur(1) == 60, cur(1))
-press("right")  # ignored while A is held? no: right while A held lengthens
-check("A held + RIGHT lengthens: OFF moved to step 2", cell(1, 1) == 0 and cell(1, 2) == 0xFF, (cell(1, 1), cell(1, 2)))
+press("right")
+check("A held + RIGHT lengthens by a cell: OFF moved to tick 6", cell(1, 3) == 0 and cell(1, 6) == 0xFF, (cell(1, 3), cell(1, 6)))
 press("left")
-check("A held + LEFT shortens: OFF back at step 1", cell(1, 2) == 0 and cell(1, 1) == 0xFF, (cell(1, 1), cell(1, 2)))
+check("A held + LEFT shortens: OFF back at tick 3", cell(1, 6) == 0 and cell(1, 3) == 0xFF, (cell(1, 3), cell(1, 6)))
 release("a", frames=4)
 check("A release stops the audition", cur(1) == 0)
 hold("a", frames=4)
@@ -367,7 +381,7 @@ release("a", frames=4)
 settle()
 check("grid: the new note is drawn (cursor on its head)", grid(15, 0) == T_CUR_NOTE, grid(15, 0))
 press("b")
-check("B tap deletes the note and its OFF", cell(1, 0) == 0 and cell(1, 1) == 0, (cell(1, 0), cell(1, 1)))
+check("B tap deletes the note and its OFF", cell(1, 0) == 0 and cell(1, 3) == 0, (cell(1, 0), cell(1, 3)))
 
 # collision: a note that grows until it touches the next one
 hold("a", frames=4)
@@ -376,22 +390,22 @@ press("right")
 press("right")
 hold("a", frames=4)
 release("a", frames=4)
-check("two notes on CH2 (steps 0 and 2)", cell(1, 0) == 60 and cell(1, 2) == 60 and cell(1, 1) == 0xFF)
+check("two notes on CH2 (ticks 0 and 6)", cell(1, 0) == 60 and cell(1, 6) == 60 and cell(1, 3) == 0xFF)
 press("left")
 press("left")
 hold("a", frames=4)
 press("right")
-check("growing into the next note removes the OFF (they touch)", cell(1, 1) == 0 and cell(1, 2) == 60, (cell(1, 1), cell(1, 2)))
+check("growing into the next note removes the OFF (they touch)", cell(1, 3) == 0 and cell(1, 6) == 60, (cell(1, 3), cell(1, 6)))
 press("right")
-check("cannot grow past the next note", cell(1, 2) == 60 and cell(1, 3) == 0xFF, (cell(1, 2), cell(1, 3)))
+check("cannot grow past the next note", cell(1, 6) == 60 and cell(1, 9) == 0xFF, (cell(1, 6), cell(1, 9)))
 release("a", frames=4)
 press("b")
-check("deleting the first note keeps the neighbour", cell(1, 0) == 0 and cell(1, 2) == 60)
-for i in range(64):
-    mem[P + 64 + i] = 0     # clean up CH2
+check("deleting the first note keeps the neighbour", cell(1, 0) == 0 and cell(1, 6) == 60)
+for i in range(256):
+    mem[P + 256 + i] = 0     # clean up CH2
 press("select")             # CH3 (bass): the cursor jumps to its first note
-check("channel switch: cursor on the first bass note", (v("wRollNote"), v("wRollStep"), v("wRollTop")) == (48, 0, 56),
-      (v("wRollNote"), v("wRollStep"), v("wRollTop")))
+check("channel switch: cursor on the first bass note", (v("wRollNote"), v("wRollTick"), v("wRollTop")) == (48, 0, 56),
+      (v("wRollNote"), v("wRollTick"), v("wRollTop")))
 settle()
 check("channel switch: bass note drawn in the window", grid(8, 0) == T_CUR_NOTE, grid(8, 0))
 press("select")             # CH4, then back to CH1
@@ -405,68 +419,134 @@ check("SELECT+UP: BPM 121", v("wBpm") == 121, v("wBpm"))
 tap_while("select", "down")
 check("SELECT+DOWN: BPM 120", v("wBpm") == 120, v("wBpm"))
 tap_while("select", "left")
-check("SELECT+LEFT: loop length 16", v("wSeqLen") == 16, v("wSeqLen"))
+check("SELECT+LEFT: loop length 1 bar (48 ticks)", v("wSeqLen") == 48, v("wSeqLen"))
 tap_while("select", "left")
-check("loop length clamps at 16", v("wSeqLen") == 16)
+check("loop length clamps at 1 bar", v("wSeqLen") == 48)
 tap_while("select", "right")
 tap_while("select", "right")
-check("SELECT+RIGHT x2: loop length 48", v("wSeqLen") == 48, v("wSeqLen"))
+check("SELECT+RIGHT x2: loop length 3 bars", v("wSeqLen") == 144, v("wSeqLen"))
 tap_while("select", "left")
-check("loop length 32 again", v("wSeqLen") == 32)
+check("loop length 2 bars again", v("wSeqLen") == 96)
 check("combos did not change screen/channel", v("wScreen") == 2 and v("wSelCh") == 0)
 
-# ---- playback
+# ---- playback at the 1/16 grid
 tap_while("select", "start")
 check("SELECT+START starts playback", v("wSeqPlay") == 1)
 check("...still on the roll", v("wScreen") == 2)
-steps = 0
-last = v("wSeqStep")
+ticks = 0
+last = v("wSeqTick")
 bass = set()
-heads = []
+samples = []
 for i in range(120):
     pb.tick(1)
-    s_ = v("wSeqStep")
-    if s_ != last:
-        steps += 1
-        last = s_
+    t_ = v("wSeqTick")
+    if t_ != last:
+        ticks += 1
+        last = t_
     bass.add(cur(2))
-    if v("wPlayCol") != 0xFF:
-        heads.append((v("wSeqCur") & 15, v("wPlayCol")))
+    if v("wPlayX") != 0xFF:
+        samples.append((v("wSeqCur"), v("wPageTick"), v("wPlayX"), v("wPlayShown")))
     if i == 30:
         shot("10_roll_playing")
-check("tempo: 16 steps in 2 s at 120 BPM", 15 <= steps <= 17, steps)
-check("bass notes triggered by the pattern (steps 8 and 16)", {43, 45} <= bass, sorted(bass))
+check("tempo: 48 ticks in 2 s at 120 BPM (12 ticks per beat)", 46 <= ticks <= 50, ticks)
+check("bass notes triggered by the pattern (ticks 24 and 48)", {43, 45} <= bass, sorted(bass))
 check("hi-hat (CH4) triggered", cur(3) in (90, 100), cur(3))
-# the sprite is moved in the VBlank after the step plays, so it may lag by one frame
-exact = sum(1 for a, b in heads if a == b)
-near = all(a == b or (a - 1) % 16 == b for a, b in heads)
-check("playhead sprite follows the played step", len(heads) > 50 and near and exact >= 0.8 * len(heads),
-      (exact, len(heads)))
-oam_x = mem[0xFE01]
-check("playhead sprite is placed in OAM", mem[0xFE00] == 24 and oam_x == 24 + 8 * v("wPlayCol"), (mem[0xFE00], oam_x))
-check("playhead line sits at the left edge of its cell (on the beat line)", mem[0x8000 + 72 * 16] == 0xC0 and mem[0x8000 + 72 * 16 + 1] == 0x00)
+
+
+def expect_x(cur_tick, page_tick, div=3):
+    return ROLL_X0 + (cur_tick - page_tick) * 8 // div
+
+
+ROLL_X0 = 24
+# the sprite is moved in the VBlank after the tick plays, so it may lag by one tick-frame
+exact = sum(1 for c, p, x, _ in samples if x == expect_x(c, p))
+near = all(x == expect_x(c, p) or x == expect_x(c - 1, p) for c, p, x, _ in samples)
+check("playhead moves smoothly with the tick (X = 24 + dt*8/3)", len(samples) > 50 and near and exact >= 0.8 * len(samples),
+      (exact, len(samples)))
+# the sprite really lands on every beat line: X = 24 + 32 * beat at 1/16 (4 columns of 8 px per beat)
+shown = {sh for _, _, _, sh in samples}
+check("playhead sprite lands exactly on the beat lines (X = 24, 56, 88, 120)", {24, 56, 88, 120} <= shown, sorted(shown)[:12])
+check("playhead sprite is placed in OAM", mem[0xFE00] == 24 and mem[0xFE01] == v("wPlayShown"), (mem[0xFE00], mem[0xFE01]))
 check("16 playhead sprites stacked on the grid rows", mem[0xFE00 + 15 * 4] == 24 + 15 * 8 and mem[0xFE02] == 72)
+check("playhead line sits at the left edge of its cell (on the beat line)", mem[0x8000 + 72 * 16] == 0xC0 and mem[0x8000 + 72 * 16 + 1] == 0x00)
 tap_while("select", "start")
 check("SELECT+START stops playback", v("wSeqPlay") == 0)
 check("stop silences all channels", [cur(c) for c in range(4)] == [0, 0, 0, 0])
 pb.tick(4)
-check("playhead hidden while stopped", v("wPlayCol") == 0xFF and mem[0xFE00] == 0)
+check("playhead hidden while stopped", v("wPlayShown") == 0xFF and mem[0xFE00] == 0)
 
-# 240 BPM: loops over 32 steps, view follows the playhead across pages
+# 240 BPM: loops over 96 ticks, view follows the playhead across pages
 mem[sym["wBpm"]] = 240
-mem[sym["wRollStep"]] = 0
 tap_while("select", "start")
 seen = set()
 pages = set()
-for _ in range(200):
+for _ in range(240):
     pb.tick(1)
-    seen.add(v("wSeqStep"))
-    if v("wSeqCur") >= 16:
+    seen.add(v("wSeqTick"))
+    if v("wSeqCur") >= 48:
         pages.add(v("wRollPage"))
-check("loop: steps wrap inside 0..31", max(seen) == 31 and 0 in seen, (min(seen), max(seen)))
+check("loop: ticks wrap inside 0..95", max(seen) == 95 and 0 in seen, (min(seen), max(seen)))
 check("view followed the playhead onto page 2", 1 in pages, pages)
 tap_while("select", "start")
+mem[sym["wBpm"]] = 120
 
+# ---- grid division: triplets by placement, not by commands
+press("select")             # CH2 (empty)
+check("on CH2", v("wSelCh") == 1)
+settle()
+chord_grid()
+check("B+A: grid 1/16 -> 1/16T (2 ticks per cell)", (v("wDiv"), v("wDivTicks")) == (5, 2), (v("wDiv"), v("wDivTicks")))
+check("B+A did not place a note or delete anything", cell(1, 0) == 0 and cell(0, 0) == 60)
+for _ in range(5):
+    chord_grid()            # 1/48, 1/4, 1/4T, 1/8, 1/8T
+check("five more B+A: 1/8T (4 ticks per cell)", (v("wDiv"), v("wDivTicks")) == (3, 4), (v("wDiv"), v("wDivTicks")))
+settle()
+status = [mem[sym["wStatusBuf"] + i] for i in range(9, 14)]
+check("status line shows the division label '1/8T'", status[:4] == [ord(c) - 32 for c in "1/8T"], status)
+ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
+check("ruler: beat lines every 3 columns at 1/8T (12 ticks / 4)",
+      ruler[2] == 16 and ruler[5] == 17 and ruler[8] == 18 and ruler[11] == 19 and ruler[3] == 0 and ruler[4] == 0, ruler)
+check("grid: beat column tiles follow the new division",
+      (grid(0, 3) - T_EMP_W) & 2 == 2 and (grid(0, 6) - T_EMP_W) & 2 == 2 and (grid(0, 1) - T_EMP_W) & 2 == 0 and (grid(0, 2) - T_EMP_W) & 2 == 0,
+      (grid(0, 1), grid(0, 3), grid(0, 6)))
+# three 1/8T notes in the time of one beat: ticks 0, 4, 8 (pitches 60, 61, 62)
+hold("a", frames=4)
+release("a", frames=4)
+for pitch in (61, 62):
+    press("right")
+    press("up")
+    hold("a", frames=4)
+    release("a", frames=4)
+check("triplet: three notes 4 ticks apart (cells 0, 1, 2)",
+      (cell(1, 0), cell(1, 4), cell(1, 8)) == (60, 61, 62), (cell(1, 0), cell(1, 4), cell(1, 8)))
+check("...each as long as one 1/8T cell, the last one ends at tick 12", cell(1, 12) == 0xFF and cell(1, 3) == 0 and cell(1, 7) == 0,
+      (cell(1, 12), cell(1, 3), cell(1, 7)))
+settle()
+check("grid: the three notes are heads in columns 0, 1, 2",
+      all(vram(v("wRollTop") - p, c) in (T_NOTE_HEAD, T_CUR_NOTE) for c, p in ((0, 60), (1, 61), (2, 62))))
+# play it: a note-on every 4 ticks (a third of a beat)
+mem[sym["wRollTick"]] = 0
+pb.tick(2)
+mem[sym["wSeqLen"]] = 48
+tap_while("select", "start")
+events = {}
+prev = cur(1)
+for _ in range(200):
+    pb.tick(1)
+    if cur(1) != prev:
+        events.setdefault(v("wSeqCur"), []).append(cur(1))
+        prev = cur(1)
+tap_while("select", "start")
+check("triplet playback: note-ons land on ticks 0, 4 and 8 of the beat",
+      events.get(0, [None])[0] == 60 and events.get(4, [None])[0] == 61 and events.get(8, [None])[0] == 62,
+      {k: events[k] for k in sorted(events)[:6]})
+mem[sym["wSeqLen"]] = 96
+# one more full cycle returns to 1/16 (7 divisions)
+for _ in range(6):
+    chord_grid()
+check("grid divisions wrap around (7 steps back to 1/8T)", (v("wDiv"), v("wDivTicks")) == (3, 4) or v("wDiv") == 2, (v("wDiv"), v("wDivTicks")))
+for i in range(256):
+    mem[P + 256 + i] = 0
 press("start")
 pb.tick(4)
 check("START -> back to play screen", v("wScreen") == 0, v("wScreen"))

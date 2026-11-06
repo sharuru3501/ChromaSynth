@@ -14,14 +14,14 @@ MIDI入出力(まず有線、最後に BLE MIDI)も行う。詳細設計は [doc
 ```bash
 make          # build/chromasynth.gb を生成
 make run      # SameBoy で起動
-make gen      # notetable/font/waves の include を再生成
+make gen      # notetable/font/waves/tempo/divs/pattern の include を再生成
 python3 tools/headless_test.py        # PyBoy で自動テスト(要 pip install pyboy pillow、先に make)
 python3 tools/headless_save_test.py   # SRAM保存のテスト
 make clean
 ```
 
 ## ディレクトリ
-- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。シンボルは `-E` で全export
+- `src/` ROMソース: `main.asm`(ベクタ/初期化/ループ), `ram.asm`(WRAM変数), `voice.asm`(発音), `midi.asm`, `joy.asm`, `ui.asm`, `seq.asm`(ティック再生エンジン+ピアノロール編集操作), `roll.asm`(ピアノロール描画), `sram.asm`(保存)。ピアノロールの設計は `docs/ROLL_DESIGN.md`シンボルは `-E` で全export
 - `inc/` 共有 include(`hardware.inc` は必要なレジスタだけ定義した自前版)
 - `tools/` コード/データ生成スクリプト
 - `docs/` 設計・ロードマップ
@@ -31,7 +31,7 @@ make clean
 1. **小さく進める**: マイルストーン単位(ROADMAP参照)で、各ステップで `make` が通る状態でコミット。
 2. **コミットはConventional風**(`feat:`/`fix:`/`docs:`/`chore:`)。ビルド成果物(`build/`, `*.gb`)は無視。
 3. **`-Weverything` で警告ゼロ**を維持。
-4. 生成ファイル(`src/notetable.inc`, `font.inc`, `waves.inc`)は手で編集しない。`tools/gen_*.py` を直して `make gen`。音域は `inc/synth.inc` が唯一の定義元。
+4. 生成ファイル(`src/notetable.inc`, `font.inc`, `waves.inc`, `tempo.inc`, `divs.inc`, `pattern.inc`)は手で編集しない。`tools/gen_*.py` を直して `make gen`。音域は `inc/synth.inc` が唯一の定義元。
 5. 割り込みハンドラは最小限に(シリアルISRはリングバッファに積むだけ)。重い処理はメインループ。
 6. APU レジスタの注意: NR12 等のエンベロープは**トリガ時にしか反映されない**、DAC は NRx2 の上位5bitが0で OFF、波形RAMは CH3 停止中にのみ安全に書ける。
 7. 実機/エミュレータで確認できていない動作を「動作確認済み」と書かない。ROADMAP の状態欄に `untested` を付ける。
@@ -39,5 +39,6 @@ make clean
 9. 保存データ(`wPatch`/`wPattern`/`wBpm`)のレイアウトや大きさを変えたら `SAVE_VERSION`(sram.asm)を上げる。エミュレータの `.sav`/`.ram` は `build/` 配下にできるので `make clean` で消える。
 10. **VBlankは約1140サイクル**。VRAM/OAMへの書き込みはその間だけ。重い描画はシャドウバッファにVBlank外で作り、VBlankでは少量コピーするだけにする。`tools/headless_test.py` の「UpdateUI finishes inside VBlank」テストが超過を検出する(PyBoyはVRAMアクセス制限を再現しないので、LYをフックして測る)。
 11. **SameBoyのキー割り当てに修飾キー(⌘/⇧/⌃/⌥)を使わない。** `Right ⌘` を START にすると、押している間の他キーが「⌘+キー」扱いになり、キーを離した信号が失われて SELECT が押しっぱなしになる等、ROMのバグに見える誤動作が起きた(実例)。START は Return など通常キーに。入力まわりの不具合報告を受けたら、まずエミュレータのキー設定を確認する。
-12. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
-13. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。
+12. 時間の単位は**ティック(1拍=12)**。ステップ単位のコードを書かない。1フレームに2ティック以上処理しない前提(`gen_tempo.py` が検証する)。グリッド分割は表示/入力の単位であって、データはいつもティック。
+13. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
+14. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。

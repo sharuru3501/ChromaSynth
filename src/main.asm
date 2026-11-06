@@ -34,13 +34,17 @@ EntryPoint:
     call MemCopy
     ld hl, DefaultPattern
     ld de, wPattern
-    ld bc, NUM_CH * SEQ_STEPS
+    ld bc, NUM_CH * SEQ_STRIDE
     call MemCopy
     ld a, 120
     ld [wBpm], a
-    ld a, 32
+    ld a, 2 * TICKS_PER_BAR ; the demo is two bars long
     ld [wSeqLen], a
-    ld a, 60                ; piano-roll cursor starts on C4, window C5..C#4... (top = 72)
+    ld a, DEFAULT_DIV       ; piano-roll grid: 1/16
+    ld [wDiv], a
+    ld a, [DivTicks + DEFAULT_DIV]
+    ld [wDivTicks], a
+    ld a, 60                ; piano-roll cursor starts on C4; window top = C5
     ld [wRollNote], a
     ld a, 72
     ld [wRollTop], a
@@ -99,6 +103,7 @@ MainLoop:
     call UpdateUI           ; VRAM is only writable now, so do this first
     call VoiceTick
     call SeqTick
+    call RollPlayheadCalc
     call MsgTick
     ld a, [wBootTimer]
     and a

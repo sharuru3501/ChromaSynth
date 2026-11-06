@@ -1,18 +1,22 @@
-; Piano-roll screen: horizontal time axis (16-step pages), vertical pitch axis.
+; Piano-roll screen: horizontal time axis (16 columns per page), vertical pitch axis.
+; Design notes and budgets: docs/ROLL_DESIGN.md.
 ;
-;   row 0       ruler:  channel label, one beat number per 4 steps, page number
+;   row 0       ruler:  channel label, beat numbers over the beat columns, page
 ;   rows 1-16   cols 0-1: key labels (black keys inverted)
-;               cols 2-17: 16 steps. Notes are bars; the cursor is an outline box.
-;   row 17      status: PLAY/STOP, BPM, L = loop length, cursor pitch, cursor step
+;               cols 2-17: 16 grid columns of wDivTicks ticks each. Notes are
+;               bars; the cursor is an outline box.
+;   row 17      status: PLAY/STOP, BPM, grid division, cursor pitch
 ;
 ; Drawing is split in two so that VBlank stays short:
-;   1. RenderPending (main loop, outside VBlank) renders up to 4 flagged rows
-;      into the shadow tilemap wGrid and flags them for copying.
-;   2. UpdateSeq (right after VBlank starts) copies up to 3 flagged rows to VRAM
-; and moves the playhead sprite (OAM is only writable in VBlank too).
-;      tools/headless_test.py measures that this really finishes inside VBlank.
+;   1. RenderPending (main loop, outside VBlank) renders up to 8 flagged rows
+;      into the shadow tilemap wGrid, and builds the status line into wStatusBuf
+;      (the ruler is built by BuildCols into wRulerBuf).
+;   2. UpdateSeq (right after VBlank starts) only COPIES: up to 2 grid rows
+;      (1 when the playhead moved), or the ruler, or the status line, and moves
+;      the playhead sprite (OAM is only writable in VBlank too).
 ; Anything that changes what is shown just flags rows (MarkRowRender /
 ; MarkAllRender); the screen catches up over the next few frames.
+; tools/headless_test.py measures that UpdateUI really finishes inside VBlank.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -47,7 +51,7 @@ RollRefresh:
     ld a, l
     add SEQ_PAGE
     ld l, a
-    ld d, [hl]              ; new head flag
+    ld d, [hl]              ; new flags
     ld a, c
     add LOW(wColOld)
     ld l, a
@@ -56,7 +60,7 @@ RollRefresh:
     ld a, l
     add SEQ_PAGE
     ld l, a
-    ld a, [hl]              ; old head flag
+    ld a, [hl]              ; old flags
     cp d
     jr nz, .changed
     ld a, e
@@ -73,8 +77,7 @@ RollRefresh:
     cp SEQ_PAGE
     jr c, .col
     ld a, [wRollNote]       ; the cursor tile depends on what is under it
-    call MarkPitchRow
-    jp MarkSeqStatus
+    jp MarkPitchRow
 
 ; a = pitch (0 = none) -> flag its row for rendering if it is inside the window.
 ; Clobbers a, hl.
@@ -88,26 +91,28 @@ MarkPitchRow:
     ret nc
     jp MarkRowRender
 
-; Everything may have changed (new page, new pitch window, other channel, load):
-; rebuild the column summary and redraw all rows.
+; Everything may have changed (new page, new pitch window, other channel, other
+; division, loop length, load): rebuild the column summary and ruler, redraw all
+; rows and the status line.
 RollRefreshAll:
     call BuildCols
     call MarkAllRender
+    ld hl, wDirty
+    ld a, [hl]
+    or DIRTY_HEADER         ; copy the ruler to VRAM
+    ld [hl], a
     jp MarkSeqStatus
 
 ; The selected channel changed: put the cursor on its first note (if it has
 ; one) and centre the pitch window on it, so the channel is visible at once.
 RollChannelChanged:
     ld a, [wSelCh]
-    rrca
-    rrca
-    ld b, a                 ; b = channel * 64
-    ld c, 0                 ; c = step
+    add HIGH(wPattern)
+    ld b, a
+    ld c, 0                 ; c = tick
 .scan:
-    ld a, b
-    add c
-    ld l, a
-    ld h, HIGH(wPattern)
+    ld h, b
+    ld l, c
     ld a, [hl]
     and a
     jr z, .next
@@ -116,17 +121,32 @@ RollChannelChanged:
 .next:
     inc c
     ld a, c
-    cp SEQ_STEPS
+    cp SEQ_TICKS
     jr c, .scan
     jp RollRefreshAll       ; empty channel: leave the cursor where it is
 .found:
     ld [wRollNote], a
-    ld d, a
+    ld d, a                 ; d = pitch
+    ld a, [wDivTicks]
+    ld e, a
     ld a, c
-    ld [wRollStep], a
+    ld b, 0                 ; b = cell = tick / div
+.div:
+    cp e
+    jr c, .divDone
+    sub e
+    inc b
+    jr .div
+.divDone:
+    ld h, a                 ; remainder
+    ld a, c
+    sub h
+    ld [wRollTick], a       ; snapped to the grid
+    ld a, b
+    ld [wRollCell], a
     swap a
     and 15
-    ld [wRollPage], a
+    call RollSetPage
     ld a, d
     add 8                   ; a few rows of headroom above the note
     cp NOTE_MAX + 1
@@ -143,11 +163,7 @@ RollChannelChanged:
 ; The cursor moved (wOldNote = pitch before the move).
 RollCursorMoved:
     call RollScrollFix
-    jr nc, .sameView
-    call BuildCols          ; new page and/or new pitch window
-    call MarkAllRender
-    jp MarkSeqStatus
-.sameView:
+    jp c, RollRefreshAll    ; new page and/or new pitch window
     ld a, [wRollTop]        ; redraw the row the cursor left and the row it entered
     ld c, a
     ld a, [wOldNote]
@@ -164,26 +180,27 @@ RollCursorMoved:
     sub b
     cp ROLL_ROWS
     call c, MarkRowRender
+    ld a, [wRollNote]       ; the status line shows the cursor pitch
+    ld b, a
+    ld a, [wOldNote]
+    cp b
+    ret z
     jp MarkSeqStatus
 
 ; Scroll the view so that the cursor is visible.
 ; -> carry set if the page or the pitch window changed.
 RollScrollFix:
     ld d, 0
-    ld a, [wRollStep]
+    ld a, [wRollCell]
     swap a
-    and 15
+    and 15                  ; page of the cursor cell
     ld b, a
     ld a, [wRollPage]
     cp b
     jr z, .samePage
     ld a, b
-    ld [wRollPage], a
+    call RollSetPage
     ld d, 1
-    ld hl, wDirty
-    ld a, [hl]
-    or DIRTY_HEADER         ; ruler shows the page
-    ld [hl], a
 .samePage:
     ld a, [wRollNote]
     ld b, a
@@ -208,6 +225,56 @@ RollScrollFix:
     rra                     ; carry = changed
     ret
 
+; a = page index -> wRollPage, wPageTick = page * 16 * wDivTicks. Clobbers a, b, c.
+RollSetPage:
+    ld [wRollPage], a
+    ld b, a
+    ld a, [wDivTicks]
+    swap a                  ; span of a page in ticks (16 * div, at most 192)
+    ld c, a
+    xor a
+    inc b
+.l: dec b
+    jr z, .done
+    add c
+    jr .l
+.done:
+    ld [wPageTick], a
+    ret
+
+; While playing with wFollow set: keep the playhead's tick inside the page.
+; The user scrolling (moving the cursor) clears wFollow.
+RollFollow:
+    ld a, [wSeqCur]
+    ld b, a
+    ld a, [wPageTick]
+    ld c, a
+    ld a, b
+    sub c
+    jr c, .move             ; before the page
+    ld d, a
+    ld a, [wDivTicks]
+    swap a
+    ld e, a                 ; span
+    ld a, d
+    cp e
+    ret c                   ; still inside the page
+.move:
+    ld a, [wDivTicks]
+    swap a
+    ld e, a                 ; span of a page in ticks
+    ld a, b                 ; tick
+    ld d, 0                 ; d = page index
+.l: cp e
+    jr c, .done
+    sub e
+    inc d
+    jr .l
+.done:
+    ld a, d
+    call RollSetPage
+    jp RollRefreshAll
+
 ; a = row -> flag it for rendering. Clobbers a, hl.
 MarkRowRender:
     add LOW(wRowRender)
@@ -226,69 +293,187 @@ MarkAllRender:
     ret
 
 ; ---------------------------------------------------------------- column summary
-; For the visible page of the selected channel, work out which pitch sounds in
-; each of the 16 columns (wColPitch) and whether a note starts there (wColHead).
+; For the visible page of the selected channel, work out for each of the 16
+; columns (wDivTicks ticks each):
+;   wColPitch[c]  the pitch drawn in the column (0 = none): a note-on inside the
+;                 column wins, else the note already sounding when it starts,
+;                 and an OFF in the very first tick of a column silences it
+;   wColHead[c]   bit 0 = a note starts in this column, bit 1 = beat line column
+; and the ruler line (wRulerBuf). Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
     ld a, [wSelCh]
-    rrca
-    rrca
-    ld b, a                 ; b = channel * 64
-    ld a, [wRollPage]
-    swap a
-    ld c, a                 ; c = first step of the page
-    ld d, 0                 ; d = pitch sounding when the page starts
+    add HIGH(wPattern)
+    ld b, a                 ; b = high byte of this channel's pattern
+    ld a, [wPageTick]
+    ld c, a                 ; c = tick where the current column starts
+    ld d, 0                 ; d = pitch sounding at c
     ld e, c
 .back:                      ; look backwards for the last event before the page
     ld a, e
     and a
-    jr z, .forward
+    jr z, .init
     dec e
-    ld a, b
-    add e
-    ld l, a
-    ld h, HIGH(wPattern)
+    ld h, b
+    ld l, e
     ld a, [hl]
     and a
     jr z, .back
     cp CELL_OFF
-    jr z, .forward          ; ended: silence
+    jr z, .init
     ld d, a
-.forward:
-    ld e, 0                 ; e = column
+.init:                      ; beat phase of the first column: tick mod 12, tick / 12
+    ld a, c
+    ld e, 0
+.mod:
+    cp TICKS_PER_BEAT
+    jr c, .modDone
+    sub TICKS_PER_BEAT
+    inc e
+    jr .mod
+.modDone:
+    ld [wBCPhase], a
+    ld a, e
+    ld [wBCBeat], a
+    xor a
+    ld [wBCCol], a
 .col:
-    ld a, b
-    add c
-    ld l, a
-    ld h, HIGH(wPattern)
+    ld a, c
+    cp SEQ_TICKS
+    jp nc, .beyond
+    ld a, [wBCPhase]        ; beat line column?
+    and a
+    ld a, 0
+    jr nz, .notBeat
+    ld a, 2
+.notBeat:
+    ld [wBCFlag], a
+    and a                   ; ruler: beat number on a beat column, a dot after the loop end
+    ld a, 0
+    jr z, .rulerSet
+    ld a, c
+    ld hl, wSeqLen
+    cp [hl]
+    ld a, '.' - 32
+    jr nc, .rulerSet        ; tick >= loop length
+    ld a, [wBCBeat]
+    call NibbleTile
+.rulerSet:
+    call BCStoreRuler
+    ld a, d
+    ld [wBCPitch], a        ; default: whatever is sounding
+    xor a
+    ld [wBCHead], a
+    ld a, [wDivTicks]
+    ld e, a                 ; e = ticks left in this column
+.tick:
+    ld h, b
+    ld l, c
     ld a, [hl]
     and a
-    jr z, .keep
+    jr z, .nextTick
     cp CELL_OFF
-    jr z, .off
-    ld d, a                 ; note-on
-    ld a, 1                 ; head
-    jr .store
-.off:
-    ld d, 0
-.keep:
-    xor a                   ; no head
-.store:
+    jr nz, .noteOn
+    ld d, 0                 ; OFF
+    ld a, [wDivTicks]
+    cp e
+    jr nz, .nextTick        ; not the first tick: the column still shows the note
+    xor a
+    ld [wBCPitch], a        ; OFF right at the start: nothing in this column
+    jr .nextTick
+.noteOn:
+    ld d, a
+    ld a, [wBCHead]
+    and a
+    jr nz, .nextTick        ; only the first note-on of the column is drawn
+    ld a, d
+    ld [wBCPitch], a
+    ld a, 1
+    ld [wBCHead], a
+.nextTick:
+    inc c
+    dec e
+    jr nz, .tick
+    ; advance the beat phase by one column
+    ld a, [wDivTicks]
+    ld e, a
+    ld a, [wBCPhase]
+    add e
+    cp TICKS_PER_BEAT
+    jr c, .phaseOk
+    sub TICKS_PER_BEAT
     push af
-    ld a, e
+    ld a, [wBCBeat]
+    inc a
+    ld [wBCBeat], a
+    pop af
+.phaseOk:
+    ld [wBCPhase], a
+    jr .storeCol
+.beyond:                    ; past the end of the pattern: empty column
+    xor a
+    ld [wBCPitch], a
+    ld [wBCHead], a
+    ld [wBCFlag], a
+    call BCStoreRuler
+.storeCol:
+    ld a, [wBCCol]
     add LOW(wColPitch)
     ld l, a
     ld h, HIGH(wColPitch)
-    ld [hl], d
+    ld a, [wBCPitch]
+    ld [hl], a
     ld a, l
     add SEQ_PAGE
     ld l, a
+    ld a, [wBCHead]
+    ld e, a
+    ld a, [wBCFlag]
+    or e
+    ld [hl], a
+    ld a, [wBCCol]
+    inc a
+    ld [wBCCol], a
+    cp SEQ_PAGE
+    jp c, .col
+    ; ---- ruler ends: inverted channel label on the left, page number on the right
+    ld de, ChanLabels
+    ld a, [wSelCh]
+    add a
+    add e
+    ld e, a
+    jr nc, .labelPtr
+    inc d
+.labelPtr:
+    ld hl, wRulerBuf
+    ld a, [de]
+    sub 32 - TILE_INV       ; inverted: the label reads as a tab
+    ld [hl+], a
+    inc de
+    ld a, [de]
+    sub 32 - TILE_INV
+    ld [hl], a
+    ld hl, wRulerBuf + 18
+    ld a, 'P' - 32 + TILE_INV   ; inverted tab, like the channel label
+    ld [hl+], a
+    ld a, [wRollPage]
+    inc a
+    call NibbleTile
+    add TILE_INV
+    ld [hl], a
+    ret
+
+; a = tile -> wRulerBuf[2 + wBCCol]. Clobbers a, hl (keeps b, c, d).
+BCStoreRuler:
+    push af
+    ld hl, wRulerBuf + ROLL_COL0
+    ld a, [wBCCol]
+    add l
+    ld l, a
+    jr nc, .ok
+    inc h
+.ok:
     pop af
     ld [hl], a
-    inc c
-    inc e
-    ld a, e
-    cp SEQ_PAGE
-    jr c, .col
     ret
 
 ; ---------------------------------------------------------------- rendering
@@ -307,8 +492,20 @@ GridPtr:
     add hl, de
     ret
 
-; Render up to RENDER_BUDGET flagged rows and flag them for copying.
+; Build the status line if requested, then render up to RENDER_BUDGET flagged
+; rows and flag them for copying. Runs in the main loop, outside VBlank.
 RenderPending:
+    ld a, [wStatusRender]
+    and a
+    jr z, .rows
+    xor a
+    ld [wStatusRender], a
+    call BuildStatus
+    ld hl, wDirty
+    ld a, [hl]
+    or DIRTY_STATUS         ; copy it to VRAM
+    ld [hl], a
+.rows:
     ld c, 0
     ld b, RENDER_BUDGET
 .scan:
@@ -352,8 +549,8 @@ RenderRow:
     ld a, [wRollPage]
     swap a
     ld d, a
-    ld a, [wRollStep]
-    sub d                   ; column = step - page start
+    ld a, [wRollCell]
+    sub d                   ; column = cell - first cell of the page
     cp SEQ_PAGE
     jr c, .haveCur
 .noCursor:
@@ -427,11 +624,11 @@ RenderRow:
     push hl
     ld h, HIGH(wColPitch)
     ld l, c
-    ld b, [hl]              ; sounding pitch in this column
+    ld b, [hl]              ; pitch drawn in this column
     ld a, l
     add SEQ_PAGE
     ld l, a
-    ld d, [hl]              ; 1 = note head
+    ld d, [hl]              ; flags: bit 0 = note head, bit 1 = beat line
     pop hl
     ld a, [wRRPitch]
     cp b
@@ -440,8 +637,7 @@ RenderRow:
     cp e
     ld a, T_CUR_NOTE
     jr z, .put
-    ld a, d
-    and a
+    bit 0, d
     ld a, T_NOTE_BODY
     jr z, .put
     ld a, T_NOTE_HEAD
@@ -451,13 +647,10 @@ RenderRow:
     cp e
     ld a, T_CUR_EMP
     jr z, .put
-    ld a, e                 ; background: beat column? black-key row?
-    and 3
-    jr nz, .noBeat
+    bit 1, d                ; background: beat column? black-key row?
+    ld a, 0
+    jr z, .bg
     ld a, 2
-    jr .bg
-.noBeat:
-    xor a
 .bg:
     ld b, a
     ld a, [wRRBlack]
@@ -481,6 +674,44 @@ KeyLabels:
     db 'G' - 32, '#' - 32,  'A' - 32, 0,  'A' - 32, '#' - 32,  'B' - 32, 0
 BlackKeys:
     db 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0
+ChanLabels: db "1P", "2P", "3W", "4N"
+
+; Status line into wStatusBuf: PLAY/STOP  bpm  grid division  cursor pitch
+BuildStatus:
+    ld hl, wStatusBuf
+    ld b, 20
+    xor a
+.clear:
+    ld [hl+], a
+    dec b
+    jr nz, .clear
+    ld hl, wStatusBuf
+    ld de, sStop
+    ld a, [wSeqPlay]
+    and a
+    jr z, .state
+    ld de, sPlay
+.state:
+    call DrawString
+    ld hl, wStatusBuf + 5
+    ld a, [wBpm]
+    call DrawDec3
+    ld a, [wDiv]            ; label = DivLabels + 6 * index
+    ld e, a
+    add a
+    add e
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, DivLabels
+    add hl, de
+    ld d, h
+    ld e, l
+    ld hl, wStatusBuf + 9
+    call DrawString
+    ld hl, wStatusBuf + 15
+    ld a, [wRollNote]
+    jp DrawNoteName
 
 ; ---------------------------------------------------------------- copy to VRAM
 ; c = row -> copy that row of wGrid to the screen. Clobbers a, b, hl, de.
@@ -506,12 +737,32 @@ RollCopyRow:
     ENDR
     ret
 
+CopyRuler:
+    ld hl, wRulerBuf
+    ld de, _SCRN0
+    REPT 20
+        ld a, [hl+]
+        ld [de], a
+        inc de
+    ENDR
+    ret
+
+CopyStatus:
+    ld hl, wStatusBuf
+    ld de, _SCRN0 + 17 * 32
+    REPT 20
+        ld a, [hl+]
+        ld [de], a
+        inc de
+    ENDR
+    ret
+
 ; ---------------------------------------------------------------- screen
 ; Called with the LCD off: build the whole roll screen.
 BuildSeq:
-    ld hl, _SCRN0 + 17 * 32 + 9
-    ld a, 'L' - 32
-    ld [hl], a
+    ld a, $FF
+    ld [wPlayShown], a
+    ld [wPlayX], a
     call BuildCols
     ld c, 0
 .render:
@@ -532,8 +783,11 @@ BuildSeq:
     ld [hl+], a
     dec b
     jr nz, .clr
-    call DrawRuler
-    call DrawSeqStatus
+    call BuildStatus
+    call CopyStatus
+    call CopyRuler
+    xor a
+    ld [wStatusRender], a
     ; playhead: 16 sprites stacked down the grid, tile + attribute set once
     ld hl, _OAMRAM + 2
     ld b, ROLL_ROWS
@@ -550,26 +804,26 @@ BuildSeq:
     ld [wDirty], a
     ret
 
-; Right after VBlank starts: one cheap job per frame, plus the playhead.
+; Right after VBlank starts: copy jobs only (see the header comment).
 UpdateSeq:
     call UpdatePlayhead     ; carry set if it touched OAM
     ld a, 0
     rla
     ld e, a                 ; e = 1 if the playhead moved this frame
     and a
-    jr nz, .rows            ; it did: leave the ruler/status redraw for the next frame
+    jr nz, .rows            ; it did: leave the ruler/status copy for the next frame
     ld a, [wDirty]
     bit 5, a
     jr z, .noRuler
     res 5, a
     ld [wDirty], a
-    jp DrawRuler
+    jp CopyRuler
 .noRuler:
     bit 4, a
     jr z, .rows
     res 4, a
     ld [wDirty], a
-    jp DrawSeqStatus
+    jp CopyStatus
 .rows:
     ld a, COPY_BUDGET       ; one row less when the playhead used up some of VBlank
     sub e
@@ -597,43 +851,63 @@ UpdateSeq:
     jr c, .scan
     ret
 
-; Move the playhead sprites to the column of the step that was played last. -> carry set if OAM was written.
-; (hidden while stopped or when that step is on another page). Moving between
-; two visible columns only rewrites the 16 X coordinates; Y is written when the
-; line appears (and zeroed when it disappears).
-UpdatePlayhead:
+; Decide where the playhead line should be (OAM X) for the tick that was played
+; last, using the per-division pixel table. Outside VBlank, once per frame.
+; wPlayX = X in OAM coordinates, or $FF when stopped / the tick is on another page.
+RollPlayheadCalc:
     ld a, [wSeqPlay]
     and a
     jr z, .hide
-    ld a, [wSeqCur]
-    ld b, a
-    swap a
-    and 15
+    ld a, [wPageTick]
     ld c, a
-    ld a, [wRollPage]
-    cp c
-    jr nz, .hide
-    ld a, b
-    and 15                  ; column
-    jr .show
+    ld a, [wSeqCur]
+    sub c
+    jr c, .hide             ; before the page
+    ld b, a                 ; b = ticks since the page start
+    ld a, [wDivTicks]
+    swap a                  ; ticks in a page
+    cp b
+    jr z, .hide
+    jr c, .hide             ; after the page
+    ld a, [wDiv]
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, PlayXPtrs
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld d, [hl]              ; de = pixel table of this division
+    ld h, d
+    ld l, e
+    ld c, b
+    ld b, 0
+    add hl, bc
+    ld a, [hl]              ; pixels from the left edge of the grid
+    add ROLL_COL0 * 8 + 8   ; + grid left edge + OAM X offset
+    ld [wPlayX], a
+    ret
 .hide:
     ld a, $FF
-.show:
-    ld hl, wPlayCol
+    ld [wPlayX], a
+    ret
+
+; Move the playhead sprites to wPlayX. Moving between two visible positions only
+; rewrites the 16 X coordinates; Y is written when the line appears (and zeroed
+; when it disappears). -> carry set if OAM was written. Runs in VBlank.
+UpdatePlayhead:
+    ld a, [wPlayX]
+    ld hl, wPlayShown
     cp [hl]
     jr nz, .changed
     and a                   ; nothing changed: carry clear
     ret
 .changed:
-    ld b, [hl]              ; b = previous column ($FF = was hidden)
+    ld b, [hl]              ; b = previous X ($FF = was hidden)
     ld [hl], a
     cp $FF
     jr z, .hideAll
-    add a
-    add a
-    add a
-    add (ROLL_COL0 * 8) + 8 ; X = column * 8 + grid left edge + OAM offset
-    ld c, a
+    ld c, a                 ; c = new X
     ld a, b
     cp $FF
     jr z, .appear
@@ -681,84 +955,3 @@ UpdatePlayhead:
     jr nz, .hideLoop
     scf
     ret
-
-; Ruler: channel label, beat numbers (a dot where the loop has ended), page.
-DrawRuler:
-    ld hl, _SCRN0
-    ld de, ChanLabels
-    ld a, [wSelCh]
-    add a
-    add e
-    ld e, a
-    jr nc, .labelPtr
-    inc d
-.labelPtr:
-    ld a, [de]
-    sub 32 - TILE_INV       ; inverted: the label reads as a tab
-    ld [hl+], a
-    inc de
-    ld a, [de]
-    sub 32 - TILE_INV
-    ld [hl+], a
-    ld c, 0
-.beat:
-    ld a, [wRollPage]
-    add a
-    add a
-    add c
-    ld b, a                 ; b = beat number
-    add a
-    add a
-    ld d, a                 ; d = first step of that beat
-    ld a, [wSeqLen]
-    cp d
-    jr c, .past
-    jr z, .past
-    ld a, b
-    call NibbleTile
-    jr .put
-.past:
-    ld a, '.' - 32
-.put:
-    ld [hl+], a
-    xor a
-    ld [hl+], a
-    ld [hl+], a
-    ld [hl+], a
-    inc c
-    ld a, c
-    cp 4
-    jr c, .beat
-    ld a, 'P' - 32
-    ld [hl+], a
-    ld a, [wRollPage]
-    inc a
-    add '0' - 32
-    ld [hl], a
-    ret
-
-ChanLabels: db "1P", "2P", "3W", "4N"
-
-; Status: PLAY/STOP  bpm  Llen  note  step
-DrawSeqStatus:
-    ld hl, _SCRN0 + 17 * 32
-    ld de, sStop
-    ld a, [wSeqPlay]
-    and a
-    jr z, .state
-    ld de, sPlay
-.state:
-    call DrawString
-    ld hl, _SCRN0 + 17 * 32 + 5
-    ld a, [wBpm]
-    call DrawDec3
-    ld hl, _SCRN0 + 17 * 32 + 10
-    ld a, [wSeqLen]
-    call DrawDec3
-    ld hl, _SCRN0 + 17 * 32 + 14
-    ld a, [wRollNote]
-    call DrawNoteName
-    ld hl, _SCRN0 + 17 * 32 + 17
-    ld a, [wRollStep]
-    inc a                   ; shown 1-based
-    jp DrawDec3
