@@ -58,6 +58,11 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - 反転フォント: タイル番号に128を足す(`TILE_INV`)。ピアノロール用タイルは `tools/gen_font.py` の `ROLL_TILES` で絵を定義。
 - スプライト: OAMはVBlank中のみ書ける。起動時にOAMをクリアしないとゴミスプライトが出る(`BuildScreen`)。
 
+## 入力/遅延メモ
+- SameBoy の既定は Start=Return, Select=Backspace 系。ユーザーの環境では Start=`Right ⌘` で誤動作した(修飾キーはkey-upが欠落する)。
+- 押下→画面反映の遅延 = 入力サンプル(最大1フレーム) + 描画行の更新数。全行再描画は約9フレームかかった → 差分行だけ(約3フレーム)に。
+- 差分は「列ごとの鳴っている音程」の旧/新を比べて、変わった列の旧/新ピッチの行 + カーソル行だけ印を付ける。
+
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。

@@ -169,7 +169,7 @@ DoLoad:
     ld [wDirty], a
     ld a, $FF
     ld [wDirtyEdit], a
-    call RollRefresh        ; piano roll: rebuild columns and redraw every row
+    call RollRefreshAll     ; piano roll: rebuild columns and redraw every row
     ld a, MSG_LOADED
     ; fall through
 

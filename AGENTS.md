@@ -38,4 +38,6 @@ make clean
 8. **CGB パレット**: ヘッダが GBC 対応(`-c`)なので GBC 機/SameBoy では `BGP` が無視され、パレット RAM は白で始まる。画面に何か出すなら `InitPalette`(main.asm)のような CGB パレット設定が必須。PyBoy は独自パレットで描くため、この不具合は PyBoy では再現しない → 画面はSameBoyでも確認する。
 9. 保存データ(`wPatch`/`wPattern`/`wBpm`)のレイアウトや大きさを変えたら `SAVE_VERSION`(sram.asm)を上げる。エミュレータの `.sav`/`.ram` は `build/` 配下にできるので `make clean` で消える。
 10. **VBlankは約1140サイクル**。VRAM/OAMへの書き込みはその間だけ。重い描画はシャドウバッファにVBlank外で作り、VBlankでは少量コピーするだけにする。`tools/headless_test.py` の「UpdateUI finishes inside VBlank」テストが超過を検出する(PyBoyはVRAMアクセス制限を再現しないので、LYをフックして測る)。
-11. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。
+11. **SameBoyのキー割り当てに修飾キー(⌘/⇧/⌃/⌥)を使わない。** `Right ⌘` を START にすると、押している間の他キーが「⌘+キー」扱いになり、キーを離した信号が失われて SELECT が押しっぱなしになる等、ROMのバグに見える誤動作が起きた(実例)。START は Return など通常キーに。入力まわりの不具合報告を受けたら、まずエミュレータのキー設定を確認する。
+12. 編集操作は「変わった行だけ」再描画する(`RollRefresh`)。全行は `RollRefreshAll`(ページ/表示窓/チャンネル/ロード時のみ)。押してから画面反映まで4フレーム以内をテストで守る。
+13. 不明なハード仕様(Chromaticのリンクポート仕様等)は推測で断定せず、docs の「未確認事項」に記録する。

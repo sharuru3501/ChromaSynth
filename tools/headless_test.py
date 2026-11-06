@@ -319,7 +319,20 @@ settle()
 press("select")
 check("SELECT tap -> channel 2 on the roll", v("wSelCh") == 1)
 settle()
-hold("a", frames=4)
+def vram(row, col):
+    """Tile actually in VRAM (BG map) at grid row 0..15 / step column 0..15."""
+    return mem[0x9800 + (1 + row) * 32 + 2 + col]
+
+
+row = v("wRollTop") - v("wRollNote")
+pb.button_press("a")
+frames = 0
+for frames in range(1, 13):
+    pb.tick(1)
+    if vram(row, 0) == T_CUR_NOTE:
+        break
+check("input latency: the note is on screen within 4 frames of pressing A", frames <= 4, frames)
+pb.tick(2)
 check("A places a note at the cursor", cell(1, 0) == 60, cell(1, 0))
 check("...with a one-step length (OFF after it)", cell(1, 1) == 0xFF, cell(1, 1))
 check("A auditions on CH2", cur(1) == 60, cur(1))

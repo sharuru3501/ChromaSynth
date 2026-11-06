@@ -28,6 +28,10 @@ wRowDirty:      ds ROLL_ROWS    ; row must be copied to VRAM
 wColPitch:      ds SEQ_PAGE
 wColHead:       ds SEQ_PAGE
 
+; Previous column summary, kept so that an edit only redraws the rows that changed.
+SECTION "Roll old cols", WRAM0, ALIGN[5]
+wColOld:        ds SEQ_PAGE * 2
+
 SECTION "Synth state", WRAM0, ALIGN[3]
 wBase:          ds NUM_CH * 2   ; base period of the sounding note (lo, hi)
 wOut:           ds NUM_CH * 2   ; last period written by the vibrato (debug/test)

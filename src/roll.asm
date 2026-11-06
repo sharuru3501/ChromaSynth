@@ -17,13 +17,80 @@ INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
 DEF COPY_BUDGET   EQU 2     ; rows copied to VRAM per frame (VBlank is only ~1140 cycles)
-DEF RENDER_BUDGET EQU 4     ; rows rendered per frame
+DEF RENDER_BUDGET EQU 8     ; rows rendered per frame (outside VBlank, ~750 cycles each)
 
 SECTION "Roll", ROM0
 
 ; ---------------------------------------------------------------- state changes
-; Something in the pattern changed: rebuild the column summary, redraw all rows.
+; The pattern changed under the cursor (place / delete / length / transpose):
+; rebuild the column summary and redraw only the rows whose content changed
+; (the old and the new pitch of every changed column, plus the cursor row).
+; This keeps the delay between a button press and the screen to a few frames.
 RollRefresh:
+    ld hl, wColPitch        ; keep the old summary to compare against
+    ld de, wColOld
+    ld b, SEQ_PAGE * 2
+.save:
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .save
+    call BuildCols
+    ld c, 0
+.col:
+    ld a, c
+    add LOW(wColPitch)
+    ld l, a
+    ld h, HIGH(wColPitch)
+    ld b, [hl]              ; new pitch
+    ld a, l
+    add SEQ_PAGE
+    ld l, a
+    ld d, [hl]              ; new head flag
+    ld a, c
+    add LOW(wColOld)
+    ld l, a
+    ld h, HIGH(wColOld)
+    ld e, [hl]              ; old pitch
+    ld a, l
+    add SEQ_PAGE
+    ld l, a
+    ld a, [hl]              ; old head flag
+    cp d
+    jr nz, .changed
+    ld a, e
+    cp b
+    jr z, .same
+.changed:
+    ld a, b
+    call MarkPitchRow
+    ld a, e
+    call MarkPitchRow
+.same:
+    inc c
+    ld a, c
+    cp SEQ_PAGE
+    jr c, .col
+    ld a, [wRollNote]       ; the cursor tile depends on what is under it
+    call MarkPitchRow
+    jp MarkSeqStatus
+
+; a = pitch (0 = none) -> flag its row for rendering if it is inside the window.
+; Clobbers a, hl.
+MarkPitchRow:
+    and a
+    ret z
+    ld l, a
+    ld a, [wRollTop]
+    sub l
+    cp ROLL_ROWS
+    ret nc
+    jp MarkRowRender
+
+; Everything may have changed (new page, new pitch window, other channel, load):
+; rebuild the column summary and redraw all rows.
+RollRefreshAll:
     call BuildCols
     call MarkAllRender
     jp MarkSeqStatus
@@ -51,7 +118,7 @@ RollChannelChanged:
     ld a, c
     cp SEQ_STEPS
     jr c, .scan
-    jp RollRefresh          ; empty channel: leave the cursor where it is
+    jp RollRefreshAll       ; empty channel: leave the cursor where it is
 .found:
     ld [wRollNote], a
     ld d, a
@@ -71,7 +138,7 @@ RollChannelChanged:
     ld a, NOTE_MIN + ROLL_ROWS - 1
 .loOk:
     ld [wRollTop], a
-    jp RollRefresh
+    jp RollRefreshAll
 
 ; The cursor moved (wOldNote = pitch before the move).
 RollCursorMoved:

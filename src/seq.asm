@@ -130,7 +130,7 @@ SeqStep:
     ret z
     ld a, b
     ld [wRollPage], a
-    call RollRefresh
+    call RollRefreshAll
     ld hl, wDirty
     ld a, [hl]
     or DIRTY_HEADER         ; redraw the ruler (page number)
@@ -464,7 +464,12 @@ SeqTranspose:
     ld a, d
     ld [wRollNote], a
     call RollScrollFix
-    call RollRefresh
+    jr c, .moved
+    call RollRefresh        ; same view: only the changed rows
+    jr .audition
+.moved:
+    call RollRefreshAll     ; the window scrolled with the note
+.audition:
     ld a, [wSelCh]
     ld [wPadCh], a
     ld c, a

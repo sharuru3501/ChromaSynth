@@ -147,7 +147,7 @@ SerialISR:
 ;   BG  0: white, pale blue, mid blue, navy (grid, notes and text)
 ;   OBJ 0: transparent, red, red, red (playhead line)
 InitPalette:
-    ld a, %11100100
+    ld a, %11111100         ; DMG: sprite colours 1-3 = black, so the playhead shows
     ldh [rOBP0], a
     ld a, $80               ; index 0, auto-increment
     ldh [rBCPS], a
