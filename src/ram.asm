@@ -134,6 +134,7 @@ wClNack:        db          ; 1 = the last packet failed its check
 wClCh:          db          ; GB channel the keyboard note went to
 wClSlot:        ds 4        ; the 4 bytes last written to OBJ palette 1 (also read by the tests)
 wClLen:         db          ; length of the message in the slot (kept until the next message replaces it)
-wKbdExit:       db          ; frames SELECT+START have been held on the keyboard screen
+wKbdNav:        db          ; 1 = START+LEFT was held on the last person frame of the keyboard screen
+wNavHide:       db          ; 1 = changed screen with START+LEFT/RIGHT: hide the d-pad until released
 wClBeacon:      db          ; 1 = the slot shows the keyboard screen (beacon or link): an end beacon is owed when we leave
 wClearEnd:      db

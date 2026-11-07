@@ -520,18 +520,18 @@ sTitle:       db "CHROMASYNTH", 0
 sHeader:      db " CH  TYPE  NOTE", 0
 sPad:         db "PAD", 0
 sRx:          db "RX", 0
-sHelp1:       db "A:PLAY  START:SCREEN", 0
+sHelp1:       db "A:PLAY ST+LR:SCREEN", 0
 sHelp2:       db "SEL:CH  PAD:NOTE", 0
 sHelp3:       db "SEL+A:SAVE +B:LOAD", 0
 sKbdTitle:    db "KEYBOARD   ", 0
 sKbdHelp1:    db "PAD BUTTONS: OFF    ", 0
 sKbdHelp2:    db "SEL TAP: NEXT CH    ", 0
-sKbdHelp3:    db "HOLD SEL+START: EXIT", 0
+sKbdHelp3:    db "START+LEFT: BACK    ", 0
 sPatch:       db "PATCH", 0
 sCh:          db "CH", 0
 sEditHelp1:   db "UD:ROW  LR:VALUE", 0
 sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
-sEditHelp3:   db "SEL:CH  START:SCREEN", 0
+sEditHelp3:   db "SEL:CH ST+LR:SCREEN", 0
 sMsgSaved:    db "SAVED", 0
 sMsgLoaded:   db "LOADED", 0
 sMsgNoData:   db "NO SAVE DATA", 0

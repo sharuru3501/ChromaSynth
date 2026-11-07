@@ -76,6 +76,18 @@ def press(btn, frames=4):
     pb.tick(3)
 
 
+def nav(d):
+    """START+LEFT / START+RIGHT: previous / next screen."""
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_press(d)
+    pb.tick(3)
+    pb.button_release(d)
+    pb.tick(2)
+    pb.button_release("start")
+    pb.tick(4)
+
+
 MB = sym["wPatch"] + 32  # MIDI settings block: 4 listen channels, bend, velocity, mod wheel
 
 
@@ -93,7 +105,7 @@ check("defaults: CH1-4 listen to MIDI 1-4, velocity on, mod wheel on",
       [mem[MB + i] for i in range(7)] == [1, 2, 3, 4, 2, 1, 1], [mem[MB + i] for i in range(7)])
 
 # ---- the settings page on the edit screen (UI)
-press("start")                      # play -> edit
+nav("right")                        # play -> edit
 for _ in range(4):
     press("select")                 # CH1 -> ... -> CH4 -> MIDI page
 check("edit screen: 5th page is the MIDI settings", (v("wScreen"), v("wSelCh")) == (1, 4), (v("wScreen"), v("wSelCh")))

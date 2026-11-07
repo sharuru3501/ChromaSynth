@@ -63,7 +63,8 @@ def buttons(phase, data):
     """Virtual buttons for one symbol (the ROM must be on its keyboard screen).
     Phase A = UP held, phase B = DOWN held. The FPGA cancels UP+DOWN and LEFT+RIGHT, so a symbol never
     has an opposite pair. data bits: 0 A, 1 B, 2 START, 3 LEFT. SELECT and RIGHT are never pressed:
-    SELECT belongs to the person (channel select; SELECT+START held = leave the screen)."""
+    SELECT belongs to the person (channel select; SELECT+START = sequencer play/stop). A frame without UP/DOWN is
+    the person's: START+LEFT there leaves the screen (the ESP32 never presses LEFT without UP/DOWN)."""
     held = {"up" if phase == 0 else "down"}
     for bit, name in ((0, "a"), (1, "b"), (2, "start"), (3, "left")):
         if data & (1 << bit):

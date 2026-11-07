@@ -22,7 +22,7 @@ AGENTS.md のルール 13〜15 の詳細。安全に関わる要点(書き込み
 2. **外付けブリッジの動作を変えたら** `tools/bridge_ref.py` と `firmware/core/bridge_core.c` を同じ算術(整数 µs、切り捨て除算)で両方直し、`make -C firmware/test vectors` で正解を作り直して `make check-bridge`。`main/` を変えたら `make firmware`(ESP-IDF v5.5.6、`~/esp/esp-idf`。無い環境では `make -C firmware/test syntax` の型検査だけで、API の実在は証明できない)。
 3. **ケーブルなしリンクを変えたら** `docs/CHROMATIC_LINK.md`・`tools/chromatic_link_ref.py`・ROM(`src/clink.asm`、`ReadJoy`、`SerialISR`)を同時に直し、`headless_clink_test.py` で確かめる。
    - 上り(パレット RAM への書き込み)は VBlank の先頭だけ。
-   - 下りのシンボルは**キーボード画面(`SCREEN_KBD`)でだけ**読み、その間 `ReadJoy` は物理ボタンを UI に通さない(SELECT だけ通す。SELECT+START の長押しで抜ける)。
+   - 下りのシンボルは**キーボード画面(`SCREEN_KBD`)でだけ**読み、その間 `ReadJoy` は物理ボタンを UI に通さない(SELECT だけ通す)。上も下も押されていないフレームだけを人の操作とみなし、そこで START+← = 抜ける(シーケンサーへ)、SELECT+START = 再生・停止。**MCU は ← を必ず ↑か↓と一緒に押す**ので、これを変えるときはこの判定も直す。
    - **FPGA は上下・左右の同時押しを消す**ので、シンボルに反対のペアを使わない。MCU は SELECT と右を押さない。
    - **ノートオンの 4 シンボル・4 ビットの検査は変えない**(違う音が鳴らないことが最優先。遅延を理由に縮めない)。
    - ROM は古い MCU の 4 シンボルのノートオフも受け付けるので、**ROM を先に、MCU を後に**書く。

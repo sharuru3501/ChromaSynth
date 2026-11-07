@@ -85,10 +85,22 @@ def press(btn, frames=4):
     pb.tick(3)
 
 
+def nav(d):
+    """START+LEFT / START+RIGHT: previous / next screen."""
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_press(d)
+    pb.tick(3)
+    pb.button_release(d)
+    pb.tick(2)
+    pb.button_release("start")
+    pb.tick(4)
+
+
 for _ in range(8):
     if v("wScreen") == 3:
         break
-    press("start")
+    nav("right")
 pb.tick(10)
 check("the ROM is on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 phase = v("wClNextPh")   # the MCU assumes 0 at boot; the ROM starts with 0 too
@@ -193,13 +205,14 @@ for rom_ahead in (False, True):
     mcu_send(cli("play", 0, 60, 0, v("wClNextPh")))
 
 # leaving the keyboard screen: the MCU must see the end beacon and stop
-pb.button_press("select")
 pb.button_press("start")
-pb.tick(70)
-pb.button_release("select")
+pb.tick(3)
+pb.button_press("left")
+pb.tick(4)
+pb.button_release("left")
 pb.button_release("start")
 pb.tick(4)
-check("the ROM left the keyboard screen and unlinked", v("wScreen") == 0 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
+check("the ROM left the keyboard screen (START+LEFT) and unlinked", v("wScreen") == 2 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
 check("the MCU's classifier sees the end beacon (stop sending)", mcu_view() == "left", slot_bytes())
 pb.tick(30)
 check("... and it stays that way while the ROM is elsewhere", mcu_view() == "left", slot_bytes())
