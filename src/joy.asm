@@ -6,6 +6,7 @@
 ;               SELECT tap = next channel (all screens; the roll shows it),
 ;               SELECT+A = save to SRAM, SELECT+B = load.
 ;  Play/edit:   A = gate on the selected channel.
+; START+DOWN = slot list (UP/DOWN pick, A load, B save), START+UP = back.
 ;  Play screen : d-pad = note (+-1 / +-octave), SELECT+LEFT/RIGHT = save slot.
 ;  Edit screen : UP/DOWN = parameter row, LEFT/RIGHT = value,
 ;                hold B + d-pad = change the audition note.
@@ -250,6 +251,32 @@ HandleJoy:
     pop de
     jr .startHeld
 .nav:
+    ; START+DOWN opens the slot list (from play / edit / sequencer), START+UP goes back
+    ld a, [wJoyPrev]
+    cpl
+    ld c, a
+    ld a, [wJoy]
+    and c
+    and (1 << PADB_UP) | (1 << PADB_DOWN)
+    jr z, .navLR
+    ld c, a
+    ld a, [wScreen]
+    cp SCREEN_SLOT
+    jr z, .fromSlot
+    bit PADB_DOWN, c
+    jr z, .startHeld
+    ld [wScreenBack], a
+    ld a, SCREEN_SLOT
+    jr .request
+.fromSlot:
+    bit PADB_UP, c
+    jr z, .startHeld
+    ld a, [wScreenBack]
+    jr .request
+.navLR:
+    ld a, [wScreen]
+    cp SCREEN_SLOT
+    jr z, .startHeld        ; the slot list is left with START+UP only
     ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
     ld a, [wJoyPrev]
     bit PADB_START, a
@@ -328,6 +355,8 @@ HandleJoy:
     ld a, [wScreen]
     and a
     jr z, .play
+    cp SCREEN_SLOT
+    jp z, SlotInput
     cp SCREEN_SEQ
     jp z, SeqInput
     call EditInput

@@ -83,6 +83,44 @@ SlotStep:
     ld [hl], a
     ret
 
+; a = new slot. Slot screen: marks the old and the new row for redraw, drops a pending "again".
+SlotGoto:
+    push af
+    call SlotMask
+    ld hl, wDirtySlot
+    or [hl]
+    ld [hl], a
+    pop af
+    ld [wSlot], a
+    xor a
+    ld [wConfirm], a
+    call SlotMask
+    ld hl, wDirtySlot
+    or [hl]
+    ld [hl], a
+    ret
+
+; Slot screen input. d = buttons newly pressed.
+SlotInput:
+    bit PADB_A, d
+    jp nz, DoLoad
+    bit PADB_B, d
+    jp nz, DoSave
+    ld a, [wSlot]
+    bit PADB_UP, d
+    jr z, .down
+    and a
+    ret z
+    dec a
+    jr SlotGoto
+.down:
+    bit PADB_DOWN, d
+    ret z
+    cp NUM_SLOTS - 1
+    ret nc
+    inc a
+    jr SlotGoto
+
 ; hl = slot start (SRAM open). -> carry set if the slot may NOT be written: it is neither a
 ; ChromaSynth save (any version) nor entirely $00 or $FF. Clobbers a, bc, de, hl.
 SlotWritable:
@@ -327,6 +365,10 @@ DoSave:
     ld hl, wDirty
     ld a, [hl]
     or DIRTY_STATUS         ; the play screen's USED / FREE mark
+    ld [hl], a
+    call SlotMask           ; and the slot list's
+    ld hl, wDirtySlot
+    or [hl]
     ld [hl], a
     ret
 

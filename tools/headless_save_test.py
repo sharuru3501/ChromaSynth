@@ -213,6 +213,56 @@ with tempfile.TemporaryDirectory() as tmp:
     check("almost-empty slot: SELECT+A -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
     pb.stop(save=False)
 
+
+# --- the slot list screen (START+DOWN / START+UP, UP/DOWN pick, A load, B save)
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    ram = pathlib.Path(str(rom) + ".ram")
+    pb = boot(rom)
+    mem = pb.memory
+    combo(pb, "start", "down")
+    check("START+DOWN opens the slot list", mem[sym["wScreen"]] == 4 and mem[sym["wScreenBack"]] == 0, (mem[sym["wScreen"]], mem[sym["wScreenBack"]]))
+    combo(pb, "start", "right")
+    combo(pb, "start", "left")
+    check("START+LEFT/RIGHT do nothing on the slot list", mem[sym["wScreen"]] == 4)
+    combo(pb, "start", "up")
+    check("START+UP goes back to the play screen", mem[sym["wScreen"]] == 0, mem[sym["wScreen"]])
+    combo(pb, "start", "right")                       # edit screen
+    combo(pb, "start", "down")
+    combo(pb, "start", "up")
+    check("... and back to the edit screen when it came from there", mem[sym["wScreen"]] == 1, mem[sym["wScreen"]])
+    combo(pb, "start", "left")
+    combo(pb, "start", "down")
+    pb.tick(20)
+    mem[P + 257] = 33
+    mem[sym["wBpm"]] = 111
+    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(10)
+    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(10)
+    check("DOWN picks slot 3", mem[sym["wSlot"]] == 2, mem[sym["wSlot"]])
+    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(10)
+    check("B saves into slot 3", mem[sym["wMsg"]] == 1 and mem[sym["wSlotUsed"]] == 4, (mem[sym["wMsg"]], mem[sym["wSlotUsed"]]))
+    pb.tick(20)
+    # every row must have been drawn (marker on row of slot 3, USED on it, FREE on slot 1)
+    def row(n):
+        return bytes(mem[0x9800 + (2 + n) * 32 + i] for i in range(10))
+    check("slot 3's row: marker and USED", row(2)[0] == ord(">") - 32 and row(2)[5:9] == bytes(ord(c) - 32 for c in "USED"), row(2))
+    check("slot 1's row: no marker, FREE", row(0)[0] == 0 and row(0)[5:9] == bytes(ord(c) - 32 for c in "FREE"), row(0))
+    pb.button_press("up"); pb.tick(3); pb.button_release("up"); pb.tick(20)
+    check("the marker moved to slot 2's row", row(1)[0] == ord(">") - 32 and row(2)[0] == 0, (row(1), row(2)))
+    pb.button_press("a"); pb.tick(3); pb.button_release("a"); pb.tick(10)
+    check("A on an empty slot -> NO SAVE DATA", mem[sym["wMsg"]] == 3, mem[sym["wMsg"]])
+    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(10)
+    mem[P + 257] = 0
+    pb.button_press("a"); pb.tick(3); pb.button_release("a"); pb.tick(10)
+    check("A loads slot 3", mem[sym["wMsg"]] == 2 and mem[P + 257] == 33 and mem[sym["wBpm"]] == 111, (mem[sym["wMsg"]], mem[P + 257]))
+    pb.tick(100)
+    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(10)
+    check("B on a used slot asks first", mem[sym["wMsg"]] == 6, mem[sym["wMsg"]])
+    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(10)
+    check("... the second B overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    pb.stop(save=False)
+
 # --- a cart without SRAM: the read-back check must report failure, not "SAVED"
 with tempfile.TemporaryDirectory() as tmp:
     data = bytearray(rom_src.read_bytes())

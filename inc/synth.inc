@@ -78,6 +78,7 @@ DEF REPEAT_RATE  EQU 4
 DEF SCREEN_PLAY EQU 0
 DEF SCREEN_EDIT EQU 1
 DEF SCREEN_SEQ  EQU 2
+DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN opens it from play/edit/sequencer, START+UP goes back
 DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/clink.asm)
 
 ; Time base: 12 ticks per beat (quarter note); see docs/ROLL_DESIGN.md.
