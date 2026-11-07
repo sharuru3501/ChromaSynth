@@ -21,6 +21,15 @@ if [ "${CHLINK_BLE:-1}" = "0" ]; then   # -Os without the BLE stack: to tell the
     echo "built WITHOUT BLE (CHLINK_BLE=0)"
 fi
 . "${IDF_V53:-$HOME/esp/esp-idf-v5.3}/export.sh" >/dev/null 2>&1
+if [ "${CHLINK_BLE_TRIM:-0}" = "1" ]; then   # CANDIDATE, not verified with a Mac: no BLE security (pairing) and fewer BLE buffers
+    cat >> sdkconfig.defaults <<'TRIM'
+# chlink BLE trim (CHLINK_BLE_TRIM=1): about 95 KB less flash. Needs a real BLE MIDI connection test from a Mac before it is flashed.
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+TRIM
+    echo "built with the BLE trim (CHLINK_BLE_TRIM=1): NOT verified with a Mac"
+fi
 rm -f sdkconfig   # generated from sdkconfig.defaults (the patches add BLE and -Os there); a stale one would win
 idf.py set-target esp32 >/dev/null 2>&1 || true
 idf.py build > build.log 2>&1 || { grep -E "error|Error|undefined|FAILED" -A3 build.log | head -30; echo "BUILD FAILED (full log: $WORK/build.log)"; exit 1; }
