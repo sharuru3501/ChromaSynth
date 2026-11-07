@@ -88,11 +88,13 @@ class MockPort:
         if w[0] == "heap":
             return "free heap %d B, lowest ever %d B, largest free block %d B\n" % (self.heap, self.heap - 4000, self.heap - 50000)
         if w[0] == "m":
-            if self.applied == "USB":
+            if self.applied == "USB" and w[1] == "90":      # only a note-on counts as a note-on packet
                 self.packets += 1
             return ""
+        if w[0] == "link" and len(w) > 1 and w[1] == "lat":
+            return "  packet (symbols)       n %d, last 0 us, avg 0 us, max 0 us\n" % self.packets
         if w[0] == "link":
-            return "mode auto, armed no, hold 36 ms\npackets sent %d, aborted 0, dropped 0\n" % self.packets
+            return "mode auto, armed %s, hold 36 ms\npackets sent %d, aborted 0, dropped 0\n" % ("yes" if self.applied == "USB" else "no", self.packets)
         return ""
 
     def read(self, t):
@@ -122,6 +124,7 @@ def main():
     ap.add_argument("--mock", action="store_true")
     ap.add_argument("--port")
     ap.add_argument("--cycles", type=int, default=5)
+    ap.add_argument("--no-sleep-test", action="store_true", help="skip the light-sleep and MENU wake-up part (it needs a person to press MENU)")
     a = ap.parse_args()
     if a.mock:
         port = MockPort()
@@ -147,17 +150,27 @@ def main():
         m = re.search(r"packets sent (\d+)", port.command("link stat", wait=1.2))
         return int(m.group(1)) if m else None
 
+    def note_ons():
+        """Note-on packets the link has sent (`link lat`: the n of 'packet (symbols)'). Keep-alives, HELLO and releases do not count."""
+        m = re.search(r"packet \(symbols\)\s+n (\d+)", port.command("link lat", wait=1.0))
+        return int(m.group(1)) if m else None
+
+    def armed():
+        return "armed yes" in port.command("link stat", wait=1.2)
+
     # wired notes first: OFF still keeps the ESP32 awake during the 20 s after boot (the boot grace), so the console answers
-    p0 = packets()
+    n0 = note_ons()
     port.command("m 90 3c 64", wait=0.2)
     port.command("m 80 3c 00", wait=0.2)
-    time.sleep(0.4)
-    check("`m` is ignored in OFF mode (no packets queued or sent)", packets() == p0, p0)
+    time.sleep(1.0)
+    check("`m` is ignored in OFF mode (no note-on packet is queued or sent)", note_ons() == n0, n0)
     mode_cmd(port, "ble")
+    time.sleep(3.0)                       # (BLE mode arms the link by itself: let its own HELLO/keep-alive traffic settle)
+    n1 = note_ons()
     port.command("m 90 3c 64", wait=0.2)
     port.command("m 80 3c 00", wait=0.2)
-    time.sleep(0.4)
-    check("`m` is ignored in BLE mode (BLE and wired input are never both live)", packets() == p0, p0)
+    time.sleep(1.5)
+    check("`m` is ignored in BLE mode (BLE and wired input are never both live)", note_ons() == n1, n1)
 
     # BLE <-> USB (never OFF between cycles: after the boot grace OFF lets the ESP32 sleep and the console goes quiet)
     usb_heaps, ble_heaps = [], []
@@ -182,15 +195,25 @@ def main():
 
     # wired notes in USB mode
     mode_cmd(port, "usb")
-    time.sleep(3)
-    p1 = packets()
+    time.sleep(4)
+    n2 = note_ons()
+    is_armed = armed()
     port.command("m 90 3c 64", wait=0.3)
-    time.sleep(1.5)
+    time.sleep(2.5)
     port.command("m 80 3c 00", wait=0.3)
-    time.sleep(1.5)
-    p2 = packets()
-    print("INFO  USB mode, ROM on its KEYBOARD screen? packets sent before/after two notes: %s -> %s "
-          "(they only increase if the ROM shows the keyboard screen and the link is armed)" % (p1, p2))
+    time.sleep(2.0)
+    n3 = note_ons()
+    if is_armed:
+        check("`m` is accepted in USB mode: a note-on packet is sent when the ROM is on its KEYBOARD screen", n3 == n2 + 1, "%s -> %s" % (n2, n3))
+    else:
+        print("INFO  USB mode, but the link is not armed (the ROM is not on its KEYBOARD screen): note-on packets %s -> %s, not checked" % (n2, n3))
+
+    if a.no_sleep_test:
+        mode_cmd(port, "usb")           # leave the ESP32 awake (USB mode) for the next test
+        print()
+        n_fail = results.count(False)
+        print("ALL PASSED" if not n_fail else "%d FAILED" % n_fail)
+        return 1 if n_fail else 0
 
     # light sleep, and waking from it
     heap_before = heap_of(port)
