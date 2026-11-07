@@ -39,4 +39,4 @@ python3 tools/mcu_{mode,soak,longrun}_test.py   # 実機(コンソール経由)�
 13. プロトコル(ケーブル方式・ケーブルなしリンク・外付けブリッジ)を変えるときは、参照実装・ROM・C・テストを同時に直す。詳細は `chromatic-hw` スキル。**ノートオンの 4 シンボル・4 ビットの検査は縮めない**(違う音が鳴らないことが最優先)。ROM を先に、MCU を後に書く。
 14. **本体 ESP32 とスマートカードへの書き込みは、毎回ユーザーの確認を取る**(手順は `docs/MCU_FLASH_SAFETY.md`、`docs/CARTRIDGE.md`)。カードの**ページ 1(LSDj)とバックアップは壊さない**、書くのはページ 2 だけ。
 15. **MCU から SELECT+A / SELECT+B が出るボタンの組み合わせを送らない**(共有 SRAM の LSDj の曲データを壊す)。
-16. 大きな docs(`BLE_MIDI.md`、`MCU_FLASH_SAFETY.md`、`CHROMATIC_LINK.md`)は冒頭の「現状」と目次を読んでから、必要な節だけ読む。後半の節の多くは日付つきの記録。
+16. 大きな docs(`BLE_MIDI.md`、`MCU_FLASH_SAFETY.md`、`CHROMATIC_LINK.md`)は冒頭の「現状」と目次を読んでから、必要な節だけ読む。日付つきの記録は `docs/log/` に分けてある(必要なときだけ読む)。

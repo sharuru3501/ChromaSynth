@@ -11,9 +11,9 @@ AGENTS.md のルール 13〜15 の詳細。安全に関わる要点(書き込み
 | やること | 読む |
 |---|---|
 | 現在の実機の状態・版 | `docs/ROADMAP.md`(M6b/M8 の行)、`docs/BLE_MIDI.md` の冒頭の「現状」 |
-| ケーブルなしリンクのプロトコル | `docs/CHROMATIC_LINK.md` §1〜§4.5(§5 以降は実装と記録) |
-| BLE/USB MIDI、MIDI モード | `docs/BLE_MIDI.md` §2・§3・§9.1〜9.2(§8・§9.4 以降は日付つきの記録) |
-| MCU への書き込み | `docs/MCU_FLASH_SAFETY.md` §0・§2・§6 と最新の §5.x |
+| ケーブルなしリンクのプロトコル | `docs/CHROMATIC_LINK.md` §1〜§4.5(実機の記録は `docs/log/CHROMATIC_LINK_LOG.md`) |
+| BLE/USB MIDI、MIDI モード | `docs/BLE_MIDI.md` §2・§3・§9.1〜9.2(実装と実機の記録は `docs/log/BLE_MIDI_LOG.md`) |
+| MCU への書き込み | `docs/MCU_FLASH_SAFETY.md` §0・§2・§6。各版の記録は `docs/log/MCU_FLASH_SAFETY_LOG.md`(最新は末尾) |
 | カード | `docs/CARTRIDGE.md` |
 | 外付けブリッジ(ケーブル方式) | `docs/BRIDGE.md`、`docs/FIRMWARE.md` |
 
