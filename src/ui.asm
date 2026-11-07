@@ -302,23 +302,42 @@ DrawEditHeader:
     ld [hl+], a
     inc hl
     call TypeNamePtr
-    jp DrawString
+    call DrawString
+    ld hl, _SCRN0 + 18      ; page: P1 = patch rows 0-7, P2 = rows 8-15
+    ld a, 'P' - 32
+    ld [hl+], a
+    ld a, [wEditRow]
+    and 8
+    rrca
+    rrca
+    rrca
+    add '1' - 32
+    ld [hl], a
+    ret
 
-; b = parameter row 0..7 for channel wSelCh
+; b = screen row 0..7 of the edit list; the page of wEditRow picks patch row b or b + 8
 DrawEditRow:
-    call EntryPtr           ; hl = entry
-    ld a, [hl+]
-    ld c, a                 ; c = max ($FF = hidden)
-    push hl                 ; -> name string
     ld a, b
     swap a
     ld l, a
     ld h, 0
-    add hl, hl              ; row * 32
+    add hl, hl              ; screen row * 32
     ld de, _SCRN0 + 2 * 32
     add hl, de              ; hl = start of this row on the map
+    push hl
+    ld a, [wEditRow]
+    and 8
+    or b
+    ld b, a                 ; b = patch row
+    call EntryPtr           ; hl = entry
+    ld a, [hl+]
+    ld c, a                 ; c = max (0 = hidden)
+    ld d, h
+    ld e, l                 ; de -> name string
+    pop hl
+    push de
     ld a, c
-    inc a
+    and a
     jr nz, .visible
     pop de                  ; hidden: blank the row
     ld b, 12
@@ -340,25 +359,49 @@ DrawEditRow:
     pop de
     call DrawString         ; name, cols 2..5
     inc hl
-    inc hl                  ; value at col 8
+    inc hl                  ; value at cols 8-10, right-aligned
     push hl
     call PatchRowHL
     ld a, [hl]
     pop hl
-    cp 10
-    jr c, .ones
-    sub 10
-    ld c, a
-    ld a, '1' - 32
-    jr .tens
-.ones:
-    ld c, a
-    ld a, 0
-.tens:
-    ld [hl+], a
-    ld a, c
+    jp DrawNum3
+
+; a = 0..255, hl = dest -> three tiles, right-aligned, no leading zeros. Clobbers a, b, c.
+DrawNum3:
+    ld b, 0
+.h: cp 100
+    jr c, .hd
+    sub 100
+    inc b
+    jr .h
+.hd:
+    ld c, a                 ; c = tens and ones
+    ld a, b
+    and a
+    jr z, .noH
     add '0' - 32
-    ld [hl], a
+.noH:
+    ld [hl+], a             ; hundreds, or blank
+    ld a, c
+    ld c, b                 ; c = hundreds (non-zero: the tens must show)
+    ld b, 0
+.t: cp 10
+    jr c, .td
+    sub 10
+    inc b
+    jr .t
+.td:
+    push af                 ; ones
+    ld a, b
+    or c
+    jr z, .noT
+    ld a, b
+    add '0' - 32
+.noT:
+    ld [hl+], a             ; tens, or blank
+    pop af
+    add '0' - 32
+    ld [hl+], a
     ret
 
 ; b = row -> hl = parameter table entry [max, name(4), 0] of channel wSelCh.
@@ -386,11 +429,9 @@ EntryPtr:
 ; b = row -> hl = address of that patch byte for channel wSelCh. Keeps b. Clobbers a.
 PatchRowHL:
     ld a, [wSelCh]
-    add a
-    add a
-    add a
+    swap a                  ; * PATCH_SIZE (16)
     add b
-    add LOW(wPatch)         ; wPatch is 32-byte aligned: no carry
+    add LOW(wPatch)         ; wPatch is 128-byte aligned: no carry
     ld l, a
     ld h, HIGH(wPatch)
     ret
@@ -542,8 +583,9 @@ sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0
 NoteNames:    db "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 
-; Parameter tables: 8 rows per channel, [max, 4-char name, 0]. max $FF = hidden.
-; Row order must match the patch byte layout in synth.inc.
+; Parameter tables: EDIT_ROWS rows per channel, [max, 4-char name, 0]. max 0 = hidden
+; (so a parameter can go up to 255, e.g. the CH3 length).
+; Row order must match the patch byte layout in synth.inc (row = patch byte).
 MACRO PARAM
     db \1
     db \2, 0
@@ -554,39 +596,71 @@ ParamTables:  dw PT_Pulse1, PT_Pulse2, PT_Wave, PT_Noise, PT_Midi
 PT_Pulse1:
     PARAM 3, "DUTY"
     PARAM 15, "VOL "
-    PARAM 15, "ENV "
+    PARAM 1, "EDIR"
+    PARAM 7, "EPAC"
+    PARAM 64, "LEN "
+    PARAM 2, "PAN "
+    PARAM 7, "VIBD"
+    PARAM 7, "VIBS"
     PARAM 7, "SWT "
     PARAM 1, "SWD "
     PARAM 7, "SWS "
-    PARAM 7, "VIBD"
-    PARAM 7, "VIBS"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 PT_Pulse2:
     PARAM 3, "DUTY"
     PARAM 15, "VOL "
-    PARAM 15, "ENV "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
+    PARAM 1, "EDIR"
+    PARAM 7, "EPAC"
+    PARAM 64, "LEN "
+    PARAM 2, "PAN "
     PARAM 7, "VIBD"
     PARAM 7, "VIBS"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 PT_Wave:
     PARAM 3, "WAVE"
     PARAM 2, "LVL "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 255, "LEN "
+    PARAM 2, "PAN "
     PARAM 7, "VIBD"
     PARAM 7, "VIBS"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 PT_Noise:
     PARAM 1, "WDTH"
     PARAM 15, "VOL "
-    PARAM 15, "ENV "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
-    PARAM $FF, "    "
+    PARAM 1, "EDIR"
+    PARAM 7, "EPAC"
+    PARAM 64, "LEN "
+    PARAM 2, "PAN "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 7, "NDIV"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 
 ; The 5th page of the edit screen: MIDI settings (patch bytes MIDI_BLOCK + row).
 ; Rows 0-3: which MIDI channel (1-16, 0 = off) each GB channel listens to.
@@ -599,5 +673,15 @@ PT_Midi:
     PARAM 1, "VELO"
     PARAM 1, "MODW"
     PARAM 2, "SYNC"
+    PARAM 7, "VOLL"
+    PARAM 7, "VOLR"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+
+    ASSERT PT_Pulse2 - PT_Pulse1 == EDIT_ROWS * 6
 
 INCLUDE "font.inc"

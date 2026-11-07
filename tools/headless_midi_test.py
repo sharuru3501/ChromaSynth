@@ -88,7 +88,7 @@ def nav(d):
     pb.tick(4)
 
 
-MB = sym["wPatch"] + 32  # MIDI settings block: 4 listen channels, bend, velocity, mod wheel
+MB = sym["wPatch"] + 64  # MIDI settings block (after 4 patches of 16): listen channels, bend, velocity, mod wheel, sync, master volume
 
 
 def reset_midi_block(vals=(1, 2, 3, 4, 2, 1, 1, 0)):

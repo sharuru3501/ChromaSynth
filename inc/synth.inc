@@ -6,12 +6,26 @@ DEF NOTE_MIN EQU 36     ; C2
 DEF NOTE_MAX EQU 107    ; B7
 DEF NUM_CH   EQU 4
 
-; Patch: 8 bytes per channel in wPatch (see docs/ARCHITECTURE.md).
-;  CH1: duty vol env swt swd sws vibd vibs
-;  CH2: duty vol env -   -   -   vibd vibs
-;  CH3: wave level -  -   -   -   vibd vibs
-;  CH4: width vol env -   -   -   -    -
-DEF PATCH_SIZE EQU 8
+; Patch: 16 bytes per channel in wPatch (see docs/ARCHITECTURE.md). The edit screen shows
+; them as two pages of 8 rows (row = byte). Only what the APU registers can do, plus the
+; vibrato. Bytes 12-15 are reserved (M9b).
+;        0     1     2    3    4   5   6    7    8   9   10  11
+;  CH1: duty  vol   edir epac len pan vibd vibs swt swd sws -
+;  CH2: duty  vol   edir epac len pan vibd vibs -   -   -   -
+;  CH3: wave  level -    -    len pan vibd vibs -   -   -   -
+;  CH4: width vol   edir epac len pan -    -    -   -   -   ndiv
+DEF PATCH_SIZE EQU 16
+DEF EDIT_ROWS  EQU 16       ; rows per channel on the edit screen (2 pages of 8)
+DEF P_MAIN EQU 0            ; duty (CH1/2), wave (CH3), LFSR width (CH4)
+DEF P_VOL  EQU 1            ; initial volume 0-15 (CH3: output level 0-2)
+DEF P_EDIR EQU 2            ; envelope direction (1 = up)          -> NRx2 bit 3
+DEF P_EPAC EQU 3            ; envelope pace 0-7 (0 = no envelope)   -> NRx2 bits 2-0
+DEF P_LEN  EQU 4            ; length counter: 0 = off, else steps of 1/256 s (CH1/2/4 1-64, CH3 1-255)
+DEF P_PAN  EQU 5            ; 0 = both speakers, 1 = left, 2 = right -> NR51
+DEF P_SWT  EQU 8            ; CH1 sweep time / direction / shift -> NR10
+DEF P_SWD  EQU 9
+DEF P_SWS  EQU 10
+DEF P_NDIV EQU 11           ; CH4 noise divisor code 0-7 -> NR43 bits 2-0
 DEF NUM_PATCHES EQU NUM_CH + 1  ; CH1-CH4 plus a MIDI settings block (the 5th "page")
 ; MIDI settings block (patch byte offsets within the block). A MIDI channel is
 ; 1-16, 0 = off. Several GB channels on the same MIDI channel play polyphonically.
@@ -20,6 +34,8 @@ DEF PM_BEND EQU 4           ; pitch bend range in semitones
 DEF PM_VELO EQU 5           ; 1 = velocity changes the volume
 DEF PM_MODW EQU 6           ; 1 = CC1 (mod wheel) raises the vibrato depth
 DEF PM_SYNC EQU 7           ; sync mode, see SYNC_*
+DEF PM_VOLL EQU 8           ; master volume left 0-7  -> NR50 bits 6-4
+DEF PM_VOLR EQU 9           ; master volume right 0-7 -> NR50 bits 2-0
 DEF SYNC_OFF EQU 0          ; no clock, nothing sent
 DEF SYNC_OUT EQU 1          ; this unit is the master: sends clock/start/stop and the sequencer's notes
 DEF SYNC_IN  EQU 2          ; this unit follows the DAW: clock/start/stop come from the link

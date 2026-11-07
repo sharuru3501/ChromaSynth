@@ -99,7 +99,7 @@ StoreBase:
     ld [hl], a
     ret
 
-; ---- CH1: duty vol env swt swd sws
+; ---- CH1: duty vol env len pan + sweep
 VoicePulse1:
     ld a, b
     cp NOTE_MIN
@@ -110,39 +110,29 @@ VoicePulse1:
     call GetPeriod
     call StoreBase
     call ApplyBendDE        ; a held bend applies from the first moment
-    ld hl, wPatch
-    ld a, [hl+]
-    rrca
-    rrca                    ; duty -> bits 7-6
-    ldh [rNR11], a
-    ld a, [hl+]
-    call ScaleVol           ; patch volume scaled by the note velocity
-    ld [wVoiceVol], a
-    swap a                  ; volume -> bits 7-4
-    ld b, a
-    ld a, [hl+]
-    or b                    ; env: bit 3 = direction (1 = up), bits 2-0 = pace
-    ldh [rNR12], a
-    ld a, [hl+]
+    call PulseRegs          ; NR11, NR12 (c = 0: rNR11 + 0)
+    ld a, P_SWT
+    call PatchByte
     swap a                  ; sweep time -> bits 6-4
     ld b, a
-    ld a, [hl+]
+    ld a, P_SWD
+    call PatchByte
     add a
     add a
     add a                   ; sweep direction -> bit 3
     or b
     ld b, a
-    ld a, [hl]              ; sweep shift -> bits 2-0
+    ld a, P_SWS
+    call PatchByte          ; sweep shift -> bits 2-0
     or b
     ldh [rNR10], a
     ld a, e
     ldh [rNR13], a
-    ld a, d
-    or $80                  ; trigger
+    call TrigHigh
     ldh [rNR14], a
     ret
 
-; ---- CH2: duty vol env
+; ---- CH2: duty vol env len pan
 VoicePulse2:
     ld a, b
     cp NOTE_MIN
@@ -153,24 +143,112 @@ VoicePulse2:
     call GetPeriod
     call StoreBase
     call ApplyBendDE
-    ld hl, wPatch + PATCH_SIZE
-    ld a, [hl+]
-    rrca
-    rrca
-    ldh [rNR21], a
-    ld a, [hl+]
-    call ScaleVol
-    ld [wVoiceVol + 1], a
-    swap a
-    ld b, a
-    ld a, [hl]
-    or b
-    ldh [rNR22], a
+    call PulseRegs
     ld a, e
     ldh [rNR23], a
-    ld a, d
-    or $80
+    call TrigHigh
     ldh [rNR24], a
+    ret
+
+; c = 0 (CH1) or 1 (CH2): writes NRx1 (duty + length) and NRx2 (volume + envelope).
+; Keeps c, de.
+PulseRegs:
+    call LenSetup           ; a = length load
+    ld b, a
+    ld a, P_MAIN
+    call PatchByte
+    rrca
+    rrca                    ; duty -> bits 7-6
+    or b
+    ld b, a
+    ld a, c
+    and a
+    ld a, b
+    jr nz, .ch2
+    ldh [rNR11], a
+    call VolEnv
+    ldh [rNR12], a
+    ret
+.ch2:
+    ldh [rNR21], a
+    call VolEnv
+    ldh [rNR22], a
+    ret
+
+; c = channel -> a = NRx2: volume (scaled by the velocity) << 4 | direction << 3 | pace.
+; Records the volume in wVoiceVol. Keeps c, de.
+VolEnv:
+    push de
+    ld a, P_VOL
+    call PatchByte
+    push bc
+    call ScaleVol           ; (clobbers b, c)
+    pop bc
+    ld d, a
+    ld hl, wVoiceVol
+    call HLplusC            ; (clobbers a)
+    ld [hl], d
+    ld a, d
+    swap a
+    ld d, a
+    ld a, P_EDIR
+    call PatchByte
+    add a
+    add a
+    add a                   ; direction -> bit 3
+    or d
+    ld d, a
+    ld a, P_EPAC
+    call PatchByte
+    and 7
+    or d
+    pop de
+    ret
+
+; c = channel -> a = the NRx1 length load for P_LEN (0 = off), and wLenBit[c] = $40 if on.
+; CH1/2/4 count 64 - load steps, CH3 256 - load (steps of 1/256 s). Keeps bc, de.
+LenSetup:
+    push hl
+    ld hl, wLenBit
+    call HLplusC            ; (clobbers a)
+    ld a, P_LEN
+    call PatchByte
+    and a
+    jr z, .off
+    ld [hl], $40
+    cpl
+    inc a                   ; -len: 64 - len in the low 6 bits, 256 - len for CH3
+    pop hl
+    ret
+.off:
+    ld [hl], a              ; a = 0
+    pop hl
+    ret
+
+; c = channel, d = period high bits -> a = NRx4 with the trigger and the length enable.
+TrigHigh:
+    push hl
+    ld hl, wLenBit
+    call HLplusC
+    ld a, [hl]
+    pop hl
+    or d
+    or $80
+    ret
+
+; a = patch byte offset -> a = that byte of channel c's patch. Keeps bc, de, hl.
+PatchByte:
+    ASSERT PATCH_SIZE == 16
+    push hl
+    ld l, a
+    ld a, c
+    swap a                  ; c * PATCH_SIZE (16)
+    add l
+    add LOW(wPatch)         ; wPatch is 128-byte aligned: no carry
+    ld l, a
+    ld h, HIGH(wPatch)
+    ld a, [hl]
+    pop hl
     ret
 
 ; ---- CH3: wave level
@@ -192,9 +270,9 @@ VoiceWave:
     call LoadWave
     ld a, $80
     ldh [rNR30], a
-    xor a
+    call LenSetup
     ldh [rNR31], a
-    ld a, [wPatch + 2 * PATCH_SIZE + 1]
+    ld a, [wPatch + 2 * PATCH_SIZE + P_VOL]
     ld b, a                 ; patch level 0/1/2
     ld a, [wPatch + MIDI_BLOCK + PM_VELO]
     and a
@@ -219,8 +297,7 @@ VoiceWave:
     ldh [rNR32], a
     ld a, e
     ldh [rNR33], a
-    ld a, d
-    or $80
+    call TrigHigh
     ldh [rNR34], a
     ret
 
@@ -228,7 +305,7 @@ VoiceWave:
 LoadWave:
     push de
     push bc
-    ld a, [wPatch + 2 * PATCH_SIZE]
+    ld a, [wPatch + 2 * PATCH_SIZE + P_MAIN]
     swap a                  ; * 16 bytes
     ld l, a
     ld h, 0
@@ -267,24 +344,23 @@ VoiceNoise:
     ld a, d
     swap a                  ; shift -> bits 7-4
     ld e, a
-    ld a, [wPatch + 3 * PATCH_SIZE]
+    ld a, [wPatch + 3 * PATCH_SIZE + P_MAIN]
     and 1                   ; LFSR width -> bit 3
     add a
     add a
     add a
     or e
+    ld e, a
+    ld a, [wPatch + 3 * PATCH_SIZE + P_NDIV]
+    and 7                   ; divisor code -> bits 2-0
+    or e
     ldh [rNR43], a
-    xor a
+    call LenSetup
     ldh [rNR41], a
-    ld a, [wPatch + 3 * PATCH_SIZE + 1]
-    call ScaleVol
-    ld [wVoiceVol + 3], a
-    swap a
-    ld b, a
-    ld a, [wPatch + 3 * PATCH_SIZE + 2]
-    or b
+    call VolEnv
     ldh [rNR42], a
-    ld a, $80
+    ld d, 0
+    call TrigHigh
     ldh [rNR44], a
     ret
 
@@ -305,6 +381,48 @@ VoiceTick:
     ld a, c
     cp 3
     jr c, .loop
+    ; fall through: the mixer follows the patches every frame (an edit is heard at once)
+
+; NR51 from each channel's P_PAN (0 = both, 1 = left, 2 = right) and NR50 from the
+; master volume of the MIDI block. Clobbers a, b, c, e.
+ApplyMixer:
+    ld b, 0                 ; NR51: bit n = right, bit n + 4 = left
+    ld e, %00010001         ; channel 0's bits
+    ld c, 0
+.pan:
+    ld a, P_PAN
+    call PatchByte
+    cp 1
+    jr z, .left
+    cp 2
+    jr z, .right
+    ld a, e                 ; both
+    jr .set
+.left:
+    ld a, e
+    and $F0
+    jr .set
+.right:
+    ld a, e
+    and $0F
+.set:
+    or b
+    ld b, a
+    sla e
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .pan
+    ld a, b
+    ldh [rNR51], a
+    ld a, [wPatch + MIDI_BLOCK + PM_VOLL]
+    and 7
+    swap a
+    ld b, a
+    ld a, [wPatch + MIDI_BLOCK + PM_VOLR]
+    and 7
+    or b
+    ldh [rNR50], a
     ret
 
 TickChannel:                ; c = channel 0..2
@@ -379,29 +497,36 @@ TickChannel:                ; c = channel 0..2
     jr z, .ch2
     ld a, e
     ldh [rNR33], a
-    ld a, d
+    call LenHigh
     ldh [rNR34], a          ; bit 7 clear: no retrigger
     ret
 .ch1:
     ld a, e
     ldh [rNR13], a
-    ld a, d
+    call LenHigh
     ldh [rNR14], a
     ret
 .ch2:
     ld a, e
     ldh [rNR23], a
-    ld a, d
+    call LenHigh
     ldh [rNR24], a
+    ret
+
+; c = channel, d = period high bits -> a = NRx4 without the trigger, keeping the length
+; enable (writing it as 0 would stop the length counter).
+LenHigh:
+    ld hl, wLenBit
+    call HLplusC
+    ld a, [hl]
+    or d
     ret
 
 ; c = channel -> hl = signed vibrato offset in period units (0 if there is none).
 ; Keeps c. Clobbers a, b, d, e.
 VibOffset:
     ld a, c
-    add a
-    add a
-    add a
+    swap a                  ; c * PATCH_SIZE (16)
     add PATCH_VIBD
     add LOW(wPatch)
     ld l, a
@@ -646,12 +771,14 @@ Mul8:
     jr .l
 
 ; ---------------------------------------------------------------- data
-DefaultPatch:
-    db 2, 15, 0, 0, 0, 0, 0, 3      ; CH1
-    db 2, 15, 0, 0, 0, 0, 0, 3      ; CH2
-    db 0, 0, 0, 0, 0, 0, 0, 3       ; CH3
-    db 0, 15, 2, 0, 0, 0, 0, 0      ; CH4
-    db 1, 2, 3, 4, 2, 1, 1, 0       ; MIDI: CH1-4 listen to MIDI ch 1-4, bend 2, velocity on, mod wheel on
+DefaultPatch:                       ; byte order: see synth.inc
+    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH1
+    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH2
+    db 0, 0,  0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH3
+    db 0, 15, 0, 2, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0      ; CH4: decays at pace 2
+    db 1, 2, 3, 4, 2, 1, 1, 0,  7, 7, 0, 0,  0, 0, 0, 0       ; MIDI: CH1-4 listen to MIDI ch 1-4, bend 2,
+                                                              ; velocity on, mod wheel on, sync off, master 7/7
+    ASSERT @ - DefaultPatch == NUM_PATCHES * PATCH_SIZE
 
 DirtyBits:  db %00000001, %00000010, %00000100, %00001000
             db %00010000, %00100000, %01000000, %10000000
