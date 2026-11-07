@@ -314,6 +314,13 @@ check("CH1 with LEN: the length counter is enabled", mem[sym["wLenBit"]] == 0x40
 pb.tick(16)
 check("... and the APU stops the channel by itself (NR52 bit 0 clear)", mem[0xFF26] & 1 == 0, hex(mem[0xFF26]))
 midi(0x80, 60, 0)
+for duty in (0, 1, 2, 3):                          # the length must not overwrite the duty (NR11 bits 7-6)
+    mem[W + 0] = duty
+    midi(0x90, 60, 100)
+    pb.tick(1)
+    check("CH1 DUTY %d with LEN 48: NR11 keeps the duty" % duty, mem[0xFF11] >> 6 == duty, hex(mem[0xFF11]))
+    midi(0x80, 60, 0)
+mem[W + 0] = 2
 mem[W + 4] = 0
 midi(0x90, 60, 100)
 pb.tick(12)
