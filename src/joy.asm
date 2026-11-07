@@ -370,6 +370,31 @@ EditInput:
     ld a, [wJoy]
     bit PADB_B, a
     ret nz
+    bit PADB_SELECT, a
+    jr z, .rows
+    ; SELECT + UP/DOWN: the value +10 / -10 (the same idea as the sequencer's SELECT + UP/DOWN = BPM)
+    ld a, d
+    and $F0
+    ret z
+    ld a, 1
+    ld [wSelUsed], a        ; any d-pad under SELECT: its release is no channel tap
+    ld a, d
+    and (1 << PADB_UP) | (1 << PADB_DOWN)
+    ret z                   ; SELECT + LEFT/RIGHT: nothing (kept free)
+    bit PADB_UP, d
+    jr z, .tenDown
+    push de
+    ld c, 10
+    call ChangeValue
+    pop de
+    ret
+.tenDown:
+    push de
+    ld c, -10
+    call ChangeValue
+    pop de
+    ret
+.rows:
     bit PADB_UP, d
     jr z, .noUp
     push de
@@ -432,7 +457,7 @@ MoveRow:
     ld a, [wEditRow]
     jp MarkEditRow
 
-; c = delta (+1 / $FF). Changes the selected parameter, clamped to 0..max.
+; c = signed delta (+1, -1, +10, -10). Changes the selected parameter, clamped to 0..max.
 ChangeValue:
     ld a, [wEditRow]
     ld b, a
@@ -447,12 +472,20 @@ ChangeValue:
     jr nz, .down
     cp e
     ret nc                  ; already at the maximum
-    inc a
+    add c
+    jr c, .toMax            ; past 255
+    cp e
+    jr c, .store
+    jr z, .store
+.toMax:
+    ld a, e                 ; a big step stops at the maximum
     jr .store
 .down:
     and a
     ret z                   ; already 0
-    dec a
+    add c                   ; c < 0: carry = no underflow
+    jr c, .store
+    xor a                   ; a big step stops at 0
 .store:
     ld [hl], a
     ld a, b

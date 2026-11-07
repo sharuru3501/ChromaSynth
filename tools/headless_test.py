@@ -157,6 +157,34 @@ check("VOL 15 -> 14", mem[patch2 + 1] == 14, mem[patch2 + 1])
 press("right")
 press("right")
 check("VOL clamped at 15", mem[patch2 + 1] == 15, mem[patch2 + 1])
+
+
+def sel_dpad(btn, frames=3):
+    """SELECT held + a d-pad press (released before SELECT)."""
+    pb.button_press("select")
+    pb.tick(3)
+    pb.button_press(btn)
+    pb.tick(frames)
+    pb.button_release(btn)
+    pb.tick(2)
+    pb.button_release("select")
+    pb.tick(4)
+
+
+ch_before = mem[sym["wSelCh"]]
+sel_dpad("down")
+check("SELECT+DOWN: VOL 15 -> 5 (-10), the row stays", mem[patch2 + 1] == 5 and mem[sym["wEditRow"]] == 1,
+      (mem[patch2 + 1], mem[sym["wEditRow"]]))
+check("... and SELECT was not a channel tap", mem[sym["wSelCh"]] == ch_before, mem[sym["wSelCh"]])
+sel_dpad("down")
+check("SELECT+DOWN from 5: stops at 0", mem[patch2 + 1] == 0, mem[patch2 + 1])
+sel_dpad("up")
+check("SELECT+UP: 0 -> 10", mem[patch2 + 1] == 10, mem[patch2 + 1])
+sel_dpad("up")
+check("SELECT+UP from 10: stops at the maximum 15", mem[patch2 + 1] == 15, mem[patch2 + 1])
+sel_dpad("left")
+check("SELECT+LEFT does nothing on the edit screen, and is no channel tap", mem[patch2 + 1] == 15 and mem[sym["wSelCh"]] == ch_before,
+      (mem[patch2 + 1], mem[sym["wSelCh"]]))
 for _ in range(5):
     press("down")
 check("row 6 (VIBD)", mem[sym["wEditRow"]] == 6)
@@ -186,6 +214,12 @@ mem[sym["wPatch"] + 32 + 4] = 254
 press("right")
 press("right")
 check("CH3 LEN goes up to 255 and stops there (no wrap to 0)", mem[sym["wPatch"] + 32 + 4] == 255, mem[sym["wPatch"] + 32 + 4])
+mem[sym["wPatch"] + 32 + 4] = 0
+sel_dpad("up", frames=16 + 4 * 30)            # held: auto-repeat, 10 at a time
+check("CH3 LEN: SELECT+UP held runs 0 -> 255 by tens and stops at 255", mem[sym["wPatch"] + 32 + 4] == 255,
+      mem[sym["wPatch"] + 32 + 4])
+sel_dpad("down")
+check("... SELECT+DOWN: 255 -> 245", mem[sym["wPatch"] + 32 + 4] == 245, mem[sym["wPatch"] + 32 + 4])
 pb.tick(12)
 shot("06_edit_ch3_len")
 mem[sym["wPatch"] + 32 + 4] = 0

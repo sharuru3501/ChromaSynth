@@ -570,7 +570,7 @@ sKbdHelp2:    db "SEL TAP: NEXT CH    ", 0
 sKbdHelp3:    db "START+LEFT: BACK    ", 0
 sPatch:       db "PATCH", 0
 sCh:          db "CH", 0
-sEditHelp1:   db "UD:ROW  LR:VALUE", 0
+sEditHelp1:   db "UD:ROW LR/SEL+UD:VAL", 0
 sEditHelp2:   db "A:PLAY  B+PAD:NOTE", 0
 sEditHelp3:   db "SEL:CH ST+LR:SCREEN", 0
 sMsgSaved:    db "SAVED", 0
