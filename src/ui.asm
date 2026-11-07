@@ -12,6 +12,7 @@ INCLUDE "synth.inc"
 
 DEF ROW_CH0    EQU 3
 DEF ROW_STATUS EQU _SCRN0 + 9 * 32
+DEF ROW_SLOT   EQU _SCRN0 + 11 * 32
 
 SECTION "UI", ROM0
 
@@ -57,7 +58,25 @@ BuildScreen:
     jp z, BuildSeq
     cp SCREEN_KBD
     jr z, .kbd
-    jr .edit
+    cp SCREEN_SLOT
+    jp z, .slot
+    jp .edit
+.slot:
+    ld hl, _SCRN0 + 4
+    ld de, sSlotTitle
+    call DrawString
+    ld hl, _SCRN0 + 14 * 32
+    ld de, sSlotHelp1
+    call DrawString
+    ld hl, _SCRN0 + 15 * 32
+    ld de, sSlotHelp2
+    call DrawString
+    ld hl, _SCRN0 + 16 * 32
+    ld de, sSlotHelp3
+    call DrawString
+    ld a, $FF
+    ld [wDirtySlot], a
+    ret
 .kbd:
     call .play              ; the channel rows and status line are the play screen's
     ld hl, _SCRN0 + 4
@@ -85,6 +104,19 @@ BuildScreen:
     ld hl, ROW_STATUS + 9
     ld de, sRx
     call DrawString
+    ld hl, ROW_SLOT
+    ld de, sSlot
+    call DrawString
+    ld hl, ROW_SLOT + 12
+    ld de, sSlotHint
+    call DrawString
+    ld a, [wScreen]         ; (the keyboard screen shares this, but cannot open the list)
+    and a
+    jr nz, .noListHint
+    ld hl, _SCRN0 + 12 * 32
+    ld de, sSlotList
+    call DrawString
+.noListHint:
     ld hl, _SCRN0 + 15 * 32
     ld de, sHelp1
     call DrawString
@@ -165,6 +197,8 @@ UpdateUI:
     jp z, UpdateSeq
     cp SCREEN_KBD
     jr z, .play
+    cp SCREEN_SLOT
+    jp z, UpdateSlot
     jp UpdateEdit
 .play:
     ld a, [wDirty]
@@ -233,7 +267,81 @@ DrawStatus:
     call DrawNoteName
     ld a, [wLastRx]
     ld hl, ROW_STATUS + 12
-    jp DrawHex
+    call DrawHex
+    ld a, [wSlot]           ; slot number and whether it holds a save
+    add '1' - 32
+    ld [ROW_SLOT + 5], a
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    ld de, sSlotFree
+    jr z, .mark
+    ld de, sSlotUsed
+.mark:
+    ld hl, ROW_SLOT + 7
+    jp DrawString
+
+; Slot list: one dirty row per frame. Row n = screen row 2 + n: marker, number, USED / FREE.
+UpdateSlot:
+    ld a, [wDirty]
+    and DIRTY_MSG
+    ld [wDirty], a          ; the other play-screen bits mean nothing here
+    ld a, [wDirtySlot]
+    and a
+    ret z
+    ld c, 0
+.find:
+    rra
+    jr c, .found
+    inc c
+    jr .find
+.found:
+    ld hl, DirtyBits
+    call HLplusC
+    ld a, [hl]
+    cpl
+    ld hl, wDirtySlot
+    and [hl]
+    ld [hl], a
+    ld b, c                 ; b = slot
+    ld a, c
+    swap a
+    add a                   ; c * 32
+    ld e, a
+    ld d, 0
+    ld hl, _SCRN0 + 2 * 32
+    add hl, de
+    ld a, [wSlot]
+    cp b
+    ld a, 0
+    jr nz, .mark
+    ld a, '>' - 32
+.mark:
+    ld [hl+], a
+    inc hl
+    ld a, b
+    add '1' - 32
+    ld [hl+], a
+    inc hl
+    inc hl
+    ld a, 1                 ; mask of slot b
+    inc b
+    dec b
+    jr z, .masked
+.shift:
+    add a
+    dec b
+    jr nz, .shift
+.masked:
+    push hl
+    ld hl, wSlotUsed
+    and [hl]
+    pop hl
+    ld de, sSlotFree
+    jr z, .draw
+    ld de, sSlotUsed
+.draw:
+    jp DrawString
 
 ; c = channel -> de = TypeNames + c * 5. Keeps hl, c.
 TypeNamePtr:
@@ -459,7 +567,12 @@ DrawMsg:
     ld e, a
     ld d, [hl]
     ld hl, _SCRN0 + 17 * 32
-    jp DrawString
+    call DrawString
+    inc hl                  ; every message ends with the slot number
+    ld a, [wSlot]
+    add '1' - 32
+    ld [hl], a
+    ret
 .restore:
     ld a, [wScreen]
     cp SCREEN_SEQ
@@ -578,7 +691,18 @@ sMsgSaved:    db "SAVED", 0
 sMsgLoaded:   db "LOADED", 0
 sMsgNoData:   db "NO SAVE DATA", 0
 sMsgFail:     db "SAVE FAILED", 0
-MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail
+sMsgInUse:    db "SLOT IN USE", 0
+sMsgConfirm:  db "AGAIN:OVERWRITE", 0
+MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail, sMsgInUse, sMsgConfirm
+sSlot:        db "SLOT", 0
+sSlotUsed:    db "USED", 0
+sSlotFree:    db "FREE", 0
+sSlotHint:    db "SEL+LR", 0
+sSlotList:    db "ST+DOWN:SLOT LIST", 0
+sSlotTitle:   db "SAVE SLOTS", 0
+sSlotHelp1:   db "UD:PICK  A:LOAD", 0
+sSlotHelp2:   db "B:SAVE (TWICE:OVER)", 0
+sSlotHelp3:   db "ST+UP:BACK", 0
 sStop:        db "STOP", 0
 sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0

@@ -113,6 +113,11 @@ wRRPitch:       db          ; RenderRow scratch
 wRRBlack:       db
 wRRCur:         db
 wSaveSum:       db          ; SaveAll running checksum
+wSlot:          db          ; selected save slot 0..NUM_SLOTS-1
+wSlotUsed:      db          ; bit n = slot n holds a valid save (cached; scanned at boot, kept up to date)
+wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)
+wScreenBack:    db          ; the screen START+UP returns to from the slot screen
+wConfirm:       db          ; slot + 1 while "SEL+A again to overwrite" is waiting, else 0
 wBCPitch:       db          ; BuildCols scratch
 wBCHead:        db
 wBCFlag:        db
