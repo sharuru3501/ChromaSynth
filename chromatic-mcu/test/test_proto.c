@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     if (!f) { perror("vectors"); return 2; }
     char line[4096];
     int n = 0, bad = 0;
-    static int kinds[10];
+    static int kinds[11];
     while (fgets(line, sizeof line, f))
     {
         n++;
@@ -85,6 +85,12 @@ int main(int argc, char **argv)
             chl_slot_t sl = {0, 0, (uint8_t)a[1], (uint8_t)a[0], {0, 0, 0}};
             ok = chl_verify_ack(&sl, a[2]) == a[3];
             kinds[9]++;
+        }
+        else if (!strcmp(kind, "alive") && k == 6)
+        {
+            chl_slot_t sl = {(uint8_t)a[0], 0, (uint8_t)a[2], (uint8_t)a[3], {(uint8_t)a[1], 0, 0}};
+            ok = chl_link_alive(&sl, a[4]) == a[5];
+            kinds[10]++;
         }
         else if (!strcmp(kind, "cls") && k == 3)
         {
@@ -149,7 +155,7 @@ int main(int argc, char **argv)
         const int got = chl_blemidi_parse(pkt, len, collect, &r);
         if (got < 0 || (unsigned)got > len) { bad++; printf("BAD fuzz count %d for %u bytes\n", got, len); break; }
     }
-    printf("%d vectors (play %d, gen %d, mask %d, slot %d, cls %d, ble %d, act %d, coal %d, rel %d, ack %d), %d bad\n", n, kinds[0],
-           kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[8], kinds[9], bad);
+    printf("%d vectors (play %d, gen %d, mask %d, slot %d, cls %d, ble %d, act %d, coal %d, rel %d, ack %d, alive %d), %d bad\n", n,
+           kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[8], kinds[9], kinds[10], bad);
     return bad ? 1 : 0;
 }

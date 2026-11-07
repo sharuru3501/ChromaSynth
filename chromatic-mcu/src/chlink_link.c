@@ -53,6 +53,7 @@ static volatile int s_bad_ack = -1, s_bad_nack = -1, s_bad_expect = -1;
 static int s_phase = 0;                 // phase of the next symbol; kept equal to the ROM's (sync)
 static bool s_armed = false;            // HELLO sent and the ROM is on the keyboard screen
 static volatile uint32_t s_sent = 0, s_aborted = 0, s_dropped = 0, s_handshakes = 0;
+static volatile uint32_t s_disarm_fail = 0, s_disarm_stale = 0;   // gave up the link: a packet failed twice / the slot was not ours
 static volatile RomState s_last_state = RS_UNKNOWN;
 
 // Latency statistics (microseconds): queue wait = from "queued" (a BLE write arrived) to the first symbol being
@@ -232,6 +233,30 @@ static bool send_packet(const uint8_t *syms, int n, bool verify)
             return false;
         }
     }
+    // Sent twice and not taken either time: whoever reads these buttons now is not the ROM we linked with (it was reset
+    // without leaving the keyboard screen, or another game runs). Stop pressing buttons; the ROM's keyboard beacon links us again.
+    s_armed = false;
+    s_disarm_fail++;
+    return false;
+}
+
+// Before a keep-alive: is the slot still that of the ROM we linked with (chl_link_alive)? If not, give up the link without
+// pressing anything. No reply: carry on (may_send checks every symbol again).
+static bool still_linked(void)
+{
+    uint8_t g[8];
+    if (!ChLink_ReadGpdTimeout(g, GPD_TIMEOUT_MS))
+    {
+        return true;
+    }
+    chl_slot_t slot;
+    chl_slot_from_gpd(g, &slot);
+    if (chl_link_alive(&slot, s_phase ^ 1))
+    {
+        return true;
+    }
+    s_armed = false;
+    s_disarm_stale++;
     return false;
 }
 
@@ -388,7 +413,7 @@ static void link_task(void *arg)
                 break;
             }
         }
-        if (s_armed && (xTaskGetTickCount() - last_tx) >= pdMS_TO_TICKS(KEEPALIVE_MS))
+        if (s_armed && (xTaskGetTickCount() - last_tx) >= pdMS_TO_TICKS(KEEPALIVE_MS) && still_linked())
         {
             (void)do_release(true);   // a ping: counts as a packet, does not touch the note
             last_tx = xTaskGetTickCount();
@@ -506,6 +531,8 @@ static int cmd_link(int argc, char **argv)
                (unsigned)s_dropped, (unsigned)s_handshakes, (unsigned)uxQueueMessagesWaiting(s_q));
         printf("retransmitted %u (after a nack or a lost symbol), re-synced %u, stale note-offs not sent %u, sounding note %d\n",
                (unsigned)s_retries, (unsigned)s_resyncs, (unsigned)s_stale_off, s_cur_note == 0xFF ? -1 : (int)s_cur_note);
+        printf("gave up the link %u times (a packet failed twice) + %u (the slot was not ours before a keep-alive)\n",
+               (unsigned)s_disarm_fail, (unsigned)s_disarm_stale);
         if (s_bad_ack >= 0)
         {
             printf("last packet the ROM did not take: its ack was %c, nack %d; the last symbol sent had phase %c\n", s_bad_ack ? 'B' : 'A',

@@ -26,6 +26,8 @@ EntryPoint:
     ld hl, wRingHead
     ld bc, wClearEnd - wRingHead + 1
     call MemClear
+    ld a, 1                 ; owe the ESP32 one end beacon ($F5) at boot: if it was still linked to an
+    ld [wClBeacon], a       ; earlier run (the power was cut on the keyboard screen), it must stop now
     ld a, 60
     ld [wJoyNote], a
     ld hl, DefaultPatch

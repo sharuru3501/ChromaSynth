@@ -144,6 +144,12 @@ def enter_kbd():
     pb.tick(10)
 
 
+check("boot: the slot shows the end beacon {$F5, len 3} (an ESP32 still linked to an earlier run, e.g. after a power cut "
+      "on the keyboard screen, must stop sending)", cl.classify(cl.decode_slot(*slot())) == "left" and slot()[3] == 0x60, slot())
+writes_boot = len(up_write_ly)
+pb.tick(30)
+check("... written once (no more palette writes away from the keyboard screen)", len(up_write_ly) == writes_boot,
+      (writes_boot, len(up_write_ly)))
 press("a")  # a normal screen: A plays a note (the symbols below are only read on the keyboard screen)
 pb.tick(20)
 screens = [v("wScreen")]
