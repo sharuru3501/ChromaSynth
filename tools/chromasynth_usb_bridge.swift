@@ -9,6 +9,7 @@
 //   ./chromasynth_usb_bridge --input MPK          only inputs whose name contains "MPK"
 //   ./chromasynth_usb_bridge --port /dev/cu.usbmodemXXXX
 //   ./chromasynth_usb_bridge --dry-run            print the console lines instead of writing them (no hardware needed)
+//   ./chromasynth_usb_bridge --verbose            also print every line that is sent
 //   ./chromasynth_usb_bridge --selftest           check the MIDI -> console line conversion, then exit
 //
 // Opening the serial port resets the ESP32 (once), so after opening it waits for the boot, then sends `mode usb`
@@ -58,7 +59,7 @@ func consoleLines(for raw: [UInt8], running: inout UInt8) -> [String] {
 }
 
 func selftest() -> Never {
-    var fails = 0
+    var fails = selftestFlood()
     func check(_ name: String, _ got: [String], _ want: [String]) {
         if got != want { print("FAIL \(name): \(got) != \(want)"); fails += 1 } else { print("PASS \(name)") }
     }
@@ -85,6 +86,48 @@ func selftest() -> Never {
     r = 0
     check("sysex is skipped", consoleLines(for: [0xF0, 1, 2, 0xF7, 0x90, 60, 100], running: &r), ["m 90 3c 64"])
     exit(fails == 0 ? 0 : 1)
+}
+
+// ---------------------------------------------------------------- flood guard
+/// A person plays at most a few dozen note events a second. A MIDI loop (Live feeding its own IAC output back to itself) makes
+/// thousands. Over `limit` messages in one second the guard trips: everything is dropped until the flow has been quiet for `quiet`
+/// seconds. Pure (the clock is passed in), so it is tested without hardware.
+struct FloodGuard {
+    let limit: Int
+    let quiet: Double
+    var windowStart = 0.0
+    var count = 0
+    var tripped = false
+    var lastSeen = 0.0
+    var trips = 0
+    init(limit: Int = 60, quiet: Double = 3.0) { self.limit = limit; self.quiet = quiet }
+    /// true = forward this message
+    mutating func allow(at now: Double) -> Bool {
+        if tripped {
+            if now - lastSeen >= quiet { tripped = false; count = 0; windowStart = now } else { lastSeen = now; return false }
+        }
+        if now - windowStart >= 1.0 { windowStart = now; count = 0 }
+        count += 1
+        lastSeen = now
+        if count > limit { tripped = true; trips += 1; return false }
+        return true
+    }
+}
+
+func selftestFlood() -> Int {
+    var fails = 0
+    func check(_ name: String, _ ok: Bool) { if ok { print("PASS \(name)") } else { print("FAIL \(name)"); fails += 1 } }
+    var g = FloodGuard()
+    var okAll = true
+    for i in 0..<200 { if !g.allow(at: Double(i) * 0.05) { okAll = false } }      // 20 messages a second for 10 s: a fast player
+    check("20 messages a second never trips", okAll && g.trips == 0)
+    g = FloodGuard()
+    var forwarded = 0
+    for i in 0..<5000 { if g.allow(at: Double(i) * 0.0002) { forwarded += 1 } }    // 5000 messages a second: a loop
+    check("a loop (5000 messages a second) trips, and only about one second's worth gets through", g.tripped && forwarded <= 61)
+    check("it stays tripped while the flood goes on", !g.allow(at: 1.2))
+    check("it resumes after 3 s of quiet", g.allow(at: 4.5) && !g.tripped)
+    return fails
 }
 
 // ---------------------------------------------------------------- serial port
@@ -133,6 +176,7 @@ let args = CommandLine.arguments
 func option(_ flag: String) -> String? { if let i = args.firstIndex(of: flag), i + 1 < args.count { return args[i + 1] }; return nil }
 if args.contains("--selftest") { selftest() }
 let dry = args.contains("--dry-run")
+let verbose = args.contains("--verbose")
 let inputFilter = option("--input")
 
 if args.contains("--list") {
@@ -181,13 +225,25 @@ MIDIClientCreate("chromasynth_usb_bridge" as CFString, nil, nil, &client)
 var port = MIDIPortRef()
 var running: UInt8 = 0
 var sent = 0
+var guardState = FloodGuard()
+var announcedTrip = 0
 func handle(_ list: UnsafePointer<MIDIPacketList>) {
     for pkt in list.unsafeSequence() {
         let n = Int(pkt.pointee.length)
         let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
         for line in consoleLines(for: bytes, running: &running) {
+            if !guardState.allow(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) {
+                if guardState.trips != announcedTrip {
+                    announcedTrip = guardState.trips
+                    print("\nLOOP? More than \(guardState.limit) MIDI messages in a second: dropping everything until it is quiet for \(Int(guardState.quiet)) s. "
+                          + "In Live set the track's MIDI From to No Input (or untick Track for the IAC input ports in Settings > Tempo & MIDI).")
+                    send("m b0 7b 00", dry: dry)    // all notes off, so that nothing hangs
+                }
+                continue
+            }
             send(line, dry: dry)
             sent += 1
+            if verbose && !dry { print("-> \(line)") }
         }
     }
 }
