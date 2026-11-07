@@ -25,6 +25,9 @@ python3 tools/mcu_{mode,soak,longrun}_test.py   # 実機(コンソール経由)�
 
 ## ルール
 1. **小さく進める**: マイルストーン単位で、各ステップで `make` が通る状態でコミット。コミットは Conventional 風(`feat:`/`fix:`/`docs:`/`chore:`)。
+   - **PR にする**(ブランチ `feat/…`・`fix/…` → PR → ユーザーがマージ): ROM(`src/`・`inc/`)、本体 ESP32 のファームウェア(`chromatic-mcu/`)、外付けブリッジ(`firmware/`)、Mac の中継(`tools/*.swift`)の**挙動を変える**もの、リンクやセーブデータの形式を変えるもの、マイルストーン(ROADMAP の M 番号)の実装。PR の説明には、決めたことと理由、試験の結果、未確認の項目(実機・聴感)を書く。
+   - **main に直接 push**: docs だけ、コメントだけ、テストや試験スクリプトだけ、エージェント設定(`AGENTS.md`・`CLAUDE.md`・`.claude/`)、生成物の再生成で挙動が変わらないもの。
+   - 迷ったら PR。push・PR の作成はユーザーの指示があるときだけ。
 2. **`-Weverything` で警告ゼロ**、`rgbfix -v` 成功を維持。
 3. 生成ファイル(`src/{notetable,font,waves,tempo,divs,pattern,bend}.inc`)は手で編集しない。`tools/gen_*.py` を直して `make gen`。
 4. 割り込みハンドラは最小限(シリアル ISR はリングバッファに積むだけ)。重い処理はメインループ。
