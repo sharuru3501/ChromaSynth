@@ -11,6 +11,35 @@ SECTION "Voice", ROM0
 
 NoteOn:
     ld b, a
+    ld hl, wCurNote         ; remember what channel c was playing (for the slide)
+    call HLplusC
+    ld a, [hl]
+    ld [wWasOn], a
+    ld a, c
+    cp 3
+    jr nc, .voice
+    add a
+    add LOW(wOut)
+    ld l, a
+    ld h, HIGH(wOut)
+    ld a, [hl+]
+    ld [wPrevOut], a
+    ld a, [hl]
+    ld [wPrevOut + 1], a
+.voice:
+    push bc
+    call .dispatch          ; returns de = the period it triggered (CH1-3)
+    pop bc
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    cp b
+    ret nz                  ; the voice refused the note (out of range)
+    ld a, c
+    cp 3
+    ret nc
+    jp EffectsStart
+.dispatch:
     ld a, c
     and a
     jp z, VoicePulse1
@@ -20,6 +49,242 @@ NoteOn:
     jp z, VoiceWave
     dec a
     jp z, VoiceNoise
+    ret
+
+; ---- effects (CH1-3): arpeggio, slide, duty switching. Driven every frame by TickChannel.
+; c = channel 0..2, de = the period just triggered. Restarts the arpeggio and the duty
+; switching; starts a slide from the period that was playing if the note is legato.
+EffectsStart:
+    ld a, c                 ; wOut = the period now playing (the slide of the next note starts here)
+    add a
+    add LOW(wOut)
+    ld l, a
+    ld h, HIGH(wOut)
+    ld [hl], e
+    inc l
+    ld [hl], d
+    ld hl, wArpStep
+    call HLplusC
+    ld [hl], 0
+    ld a, P_ARPS
+    call PatchByte
+    and a
+    jr nz, .arps
+    inc a
+.arps:
+    ld b, a
+    ld hl, wArpTimer
+    call HLplusC
+    ld [hl], b
+    ld a, c
+    cp 2
+    jr nc, .glide
+    ld hl, wDutyPh
+    call HLplusC
+    ld [hl], 0
+    ld a, P_DSPD
+    call PatchByte
+    ld b, a
+    ld hl, wDutyTimer
+    call HLplusC
+    ld [hl], b
+.glide:
+    ld hl, wGlide           ; hl = &wGlide[c]
+    ld a, c
+    add a
+    add l
+    ld l, a
+    jr nc, .gp
+    inc h
+.gp:
+    xor a
+    ld [hl+], a
+    ld [hl-], a
+    ld a, [wWasOn]
+    and a
+    ret z                   ; nothing was sounding: no slide
+    ld a, P_SLID
+    call PatchByte
+    and a
+    ret z
+    ld a, [wPrevOut]        ; glide = previous period - new period
+    sub e
+    ld [hl+], a
+    ld a, [wPrevOut + 1]
+    sbc d
+    ld [hl], a
+    ret
+
+; c = channel 0..2, every frame while a note sounds: the arpeggio steps (it rewrites wBase and
+; makes TickChannel write the period) and CH1/2's duty switching. Keeps c. Clobbers a, b, de, hl.
+EffectsTick:
+    ld a, P_ARP1
+    call PatchByte
+    ld b, a
+    ld a, P_ARP2
+    call PatchByte
+    or b
+    jr z, .duty             ; no arpeggio
+    ld hl, wArpTimer
+    call HLplusC
+    dec [hl]
+    jr nz, .duty
+    ld a, P_ARPS
+    call PatchByte
+    and a
+    jr nz, .reload
+    inc a
+.reload:
+    ld [hl], a
+    ld hl, wArpStep
+    call HLplusC
+    ld a, [hl]
+    inc a
+    cp 3
+    jr c, .step
+    xor a
+.step:
+    ld [hl], a
+    and a
+    jr z, .semis            ; a = 0: the root
+    dec a
+    ld a, P_ARP1
+    jr z, .which
+    ld a, P_ARP2
+.which:
+    call PatchByte
+.semis:
+    ld b, a                 ; b = semitones above the root
+    ld hl, wCurNote
+    call HLplusC
+    ld a, [hl]
+    add b
+    ld b, a                 ; b = the note of this step
+    ld a, c
+    cp 2
+    ld a, NOTE_MAX
+    jr nz, .max
+    ld a, NOTE_MAX - 12
+.max:
+    cp b
+    jr c, .duty             ; above the range: this step keeps the last pitch
+    ld a, c
+    cp 2
+    jr nz, .period
+    ld a, b                 ; CH3 plays an octave lower at the same period
+    add 12
+    ld b, a
+.period:
+    call GetPeriod          ; de
+    ld a, c
+    add a
+    add LOW(wBase)
+    ld l, a
+    ld h, HIGH(wBase)
+    ld [hl], e
+    inc l
+    ld [hl], d
+    ld hl, wTickOn          ; write the new period this frame even without modulation
+    call HLplusC
+    ld [hl], 1
+.duty:
+    ld a, c
+    cp 2
+    ret nc
+    ld a, P_DSPD
+    call PatchByte
+    and a
+    ret z
+    ld b, a
+    ld a, P_LEN
+    call PatchByte
+    and a
+    ret nz                  ; a length is set: NRx1 holds it too, rewriting would restart it
+    ld hl, wDutyTimer
+    call HLplusC
+    dec [hl]
+    ret nz
+    ld [hl], b
+    ld hl, wDutyPh
+    call HLplusC
+    ld a, [hl]
+    xor 1
+    ld [hl], a
+    ld a, P_MAIN
+    jr z, .first
+    ld a, P_DUT2
+.first:
+    call PatchByte
+    rrca
+    rrca                    ; duty -> bits 7-6, length 0 (no length is set)
+    ld b, a
+    ld a, c
+    and a
+    ld a, b
+    jr nz, .nr21
+    ldh [rNR11], a
+    ret
+.nr21:
+    ldh [rNR21], a
+    ret
+
+; c = channel 0..2, hl = the period offset so far -> hl + the slide, which then decays by
+; glide >> P_SLID each frame (at least 1 toward 0). Keeps c. Clobbers a, b, de.
+GlideStep:
+    push hl
+    ld hl, wGlide
+    ld a, c
+    add a
+    add l
+    ld l, a
+    jr nc, .gp
+    inc h
+.gp:
+    ld e, [hl]
+    inc hl
+    ld d, [hl]              ; de = glide, hl = &glide + 1
+    ld a, d
+    or e
+    jr z, .done
+    ld a, P_SLID
+    call PatchByte
+    and a
+    jr nz, .shift
+    ld d, a                 ; the slide was switched off: drop it
+    ld e, a
+    jr .store
+.shift:
+    push hl
+    ld b, a
+    ld h, d
+    ld l, e
+.sh:
+    sra h
+    rr l
+    dec b
+    jr nz, .sh              ; hl = glide >> shift (arithmetic)
+    ld a, h
+    or l
+    jr nz, .step
+    inc l                   ; |step| < 1: move by 1 toward 0
+    bit 7, d
+    jr z, .step
+    ld hl, $FFFF
+.step:
+    ld a, e                 ; glide -= step
+    sub l
+    ld e, a
+    ld a, d
+    sbc h
+    ld d, a
+    pop hl
+.store:
+    ld [hl], d
+    dec hl
+    ld [hl], e
+.done:
+    pop hl
+    add hl, de
     ret
 
 NoteOff:
@@ -239,13 +504,14 @@ TrigHigh:
 
 ; a = patch byte offset -> a = that byte of channel c's patch. Keeps bc, de, hl.
 PatchByte:
-    ASSERT PATCH_SIZE == 16
+    ASSERT PATCH_SIZE == 32
     push hl
     ld l, a
     ld a, c
-    swap a                  ; c * PATCH_SIZE (16)
+    swap a
+    add a                   ; c * PATCH_SIZE (32)
     add l
-    add LOW(wPatch)         ; wPatch is 128-byte aligned: no carry
+    add LOW(wPatch)         ; wPatch is 256-byte aligned: no carry
     ld l, a
     ld h, HIGH(wPatch)
     ld a, [hl]
@@ -432,6 +698,7 @@ TickChannel:                ; c = channel 0..2
     ld a, [hl]
     and a
     ret z
+    call EffectsTick        ; arpeggio (may move wBase) and duty switching
     call VibOffset          ; hl = signed vibrato offset
     ld a, l
     ld [wTickOff], a
@@ -452,6 +719,9 @@ TickChannel:                ; c = channel 0..2
     ld a, [wTickOff + 1]
     adc h
     ld h, a                 ; hl = vibrato + bend
+    push de                 ; de = the base period
+    call GlideStep          ; + the slide
+    pop de
     ld a, h
     or l
     jr nz, .modulated
@@ -527,7 +797,8 @@ LenHigh:
 ; Keeps c. Clobbers a, b, d, e.
 VibOffset:
     ld a, c
-    swap a                  ; c * PATCH_SIZE (16)
+    swap a
+    add a                   ; c * PATCH_SIZE (32)
     add PATCH_VIBD
     add LOW(wPatch)
     ld l, a
@@ -772,13 +1043,13 @@ Mul8:
     jr .l
 
 ; ---------------------------------------------------------------- data
-DefaultPatch:                       ; byte order: see synth.inc
-    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH1
-    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH2
-    db 0, 0,  0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0      ; CH3
-    db 0, 15, 0, 2, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0      ; CH4: decays at pace 2
-    db 1, 2, 3, 4, 2, 1, 1, 0,  7, 7, 0, 0,  0, 0, 0, 0       ; MIDI: CH1-4 listen to MIDI ch 1-4, bend 2,
-                                                              ; velocity on, mod wheel on, sync off, master 7/7
+DefaultPatch:                       ; byte order: see synth.inc (16-21: arp1 arp2 arps slid dut2 dspd)
+    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 2, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH1
+    db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 2, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH2
+    db 0, 0,  0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 2, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH3
+    db 0, 15, 0, 2, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH4: decays at pace 2
+    db 1, 2, 3, 4, 2, 1, 1, 0,  7, 7, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; MIDI: CH1-4 listen to MIDI ch 1-4,
+                                                              ; bend 2, velocity on, mod wheel on, sync off, master 7/7
     ASSERT @ - DefaultPatch == NUM_PATCHES * PATCH_SIZE
 
 DirtyBits:  db %00000001, %00000010, %00000100, %00001000

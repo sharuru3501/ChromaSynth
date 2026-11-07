@@ -3,7 +3,7 @@
 ; Slot layout at $A000:
 ;   +0    "CSYN"   magic
 ;   +4    version  (SAVE_VERSION)
-;   +5    wPatch   (NUM_PATCHES * PATCH_SIZE = 80 bytes: 4 channels + the MIDI settings block)
+;   +5    wPatch   (NUM_PATCHES * PATCH_SIZE = 160 bytes: 4 channels + the MIDI settings block)
 ;   +45   wPattern (NUM_CH * SEQ_STRIDE bytes: 4 channels x 256, 192 ticks used)
 ;   +1069 wBpm
 ;   +1070 wSeqLen  (ticks)
@@ -12,7 +12,7 @@
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 5
+DEF SAVE_VERSION  EQU 6
 DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + NUM_CH * SEQ_STRIDE + 2
 
 SECTION "SRAM", ROM0

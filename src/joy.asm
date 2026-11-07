@@ -424,7 +424,7 @@ EditInput:
     pop de
     ret
 
-; c = delta (+1 / $FF). Moves wEditRow through the EDIT_ROWS rows (two pages of 8),
+; c = delta (+1 / $FF). Moves wEditRow through the EDIT_ROWS rows (pages of 8),
 ; skipping hidden rows (row 0 is never hidden). Crossing to the other page redraws the list.
 MoveRow:
     ld a, [wEditRow]
@@ -443,7 +443,7 @@ MoveRow:
     jr z, .try              ; max = 0 -> hidden
     ld a, [wEditRow]
     xor b
-    and 8
+    and $18
     jr z, .samePage
     ld a, $FF               ; the other page: every row and the page number in the header
     ld [wDirtyEdit], a
