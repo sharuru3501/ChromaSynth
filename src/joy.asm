@@ -1,7 +1,8 @@
 ; Joypad handling.
-;  All screens: START = next screen (play -> edit -> sequencer -> keyboard; not on the keyboard
-;               screen, which is left by holding SELECT+START),
-;               SELECT+START = sequencer play/stop,
+;  All screens: START+RIGHT / START+LEFT = next / previous screen, in a line (play - edit -
+;               sequencer - keyboard, stops at both ends; one step per press of LEFT/RIGHT).
+;               START alone does nothing (kept free on purpose).
+;               SELECT+START = sequencer play/stop (also on the keyboard screen),
 ;               SELECT tap = next channel (all screens; the roll shows it),
 ;               SELECT+A = save to SRAM, SELECT+B = load.
 ;  Play/edit:   A = gate on the selected channel.
@@ -20,9 +21,11 @@ SECTION "Joypad", ROM0
 ; (SCREEN_KBD) reads the pad as data and hides it from the UI:
 ;   symbol = exactly one of UP (phase A) / DOWN (phase B) held; RIGHT and SELECT not held;
 ;   data bits 3..0 = LEFT, START, B, A.
-; The ESP32 never presses SELECT or RIGHT. SELECT alone still reaches the UI (tap = next channel);
-; SELECT+START held for KBD_EXIT_FRAMES leaves the screen.
-DEF KBD_EXIT_FRAMES EQU 60
+; The ESP32 never presses SELECT or RIGHT, and it presses LEFT only together with UP or DOWN
+; (src/clink chl_buttons), in the same d-pad group of P1. So a frame with neither UP nor DOWN
+; is a person: there, START+LEFT (SELECT not held) leaves for the sequencer, and SELECT+START
+; reaches the UI (play/stop). Frames with UP or DOWN neither start nor reset the combo.
+; SELECT alone still reaches the UI (tap = next channel).
 
 ReadJoy:
     ld a, [wJoy]
@@ -38,41 +41,63 @@ ReadJoy:
     ld a, [wScreen]
     cp SCREEN_KBD
     jr z, .kbd
-    ld a, [wKbdExit]        ; $FF = just left the keyboard screen with SELECT+START still held
-    inc a
-    jr nz, .plain
+    xor a
+    ld [wKbdNav], a         ; the keyboard screen starts with no combo held
+    ld a, [wNavHide]        ; 1 = just changed screen with START+LEFT/RIGHT
+    and a
+    jr z, .plain
     ld a, b
-    and $0C
-    jr nz, .hide            ; wait until both are released, or the UI would toggle the sequencer
-    ld [wKbdExit], a        ; a = 0
+    and $F0
+    jr z, .unhide
+    ld a, b                 ; hide the d-pad until it is released, or the new screen would
+    and $0F                 ; see it held (auto-repeat) and the next combo would not be new
+    ld [wJoy], a
+    ret
+.unhide:
+    ld [wNavHide], a        ; a = 0
 .plain:
     ld a, b
     ld [wJoy], a
     ret
 .kbd:
     ld a, b
-    and $0C
-    cp $0C
-    jr nz, .noExit
-    ld a, [wKbdExit]
-    inc a
-    ld [wKbdExit], a
-    cp KBD_EXIT_FRAMES
-    jr c, .hide
-    xor a                   ; leave: back to the play screen
+    and $C0
+    jr nz, .symbolFrame     ; UP or DOWN: maybe a symbol; the person's combo waits
+    ld a, b
+    and $2C                 ; LEFT, START, SELECT
+    cp $28                  ; START+LEFT without SELECT
+    ld c, 0
+    jr nz, .combo
+    inc c
+.combo:
+    ld a, [wKbdNav]
+    ld e, a                 ; e = combo on the last person frame
+    ld a, c
+    ld [wKbdNav], a
+    and a
+    jr z, .person
+    ld a, e
+    and a
+    jr nz, .hide            ; still held from before: one step per press
+    xor a                   ; leave: back to the sequencer
     ld [wClN], a
     ld [wClHave], a
-    ld a, $FF
-    ld [wKbdExit], a
-    ld a, 1                 ; request = SCREEN_PLAY + 1
+    inc a
+    ld [wNavHide], a
+    ld a, SCREEN_SEQ + 1
     ld [wScreenReq], a
     jr .hide
-.noExit:
-    xor a
-    ld [wKbdExit], a
+.person:
+    ld a, b                 ; SELECT+START (no UP/DOWN): the UI toggles the sequencer
+    and $0C
+    cp $0C
+    jr nz, .hide
+    ld [wJoy], a
+    ret
+.symbolFrame:
     ld a, b
     and $14                 ; SELECT or RIGHT: never part of a symbol
-    jr nz, .hide
+    jr nz, .keepStart
     ld a, b
     and $C0
     ld c, 0
@@ -80,7 +105,7 @@ ReadJoy:
     jr z, .sym              ; UP only = phase A
     inc c
     cp $80
-    jr nz, .hide            ; neither: not a symbol
+    jr nz, .keepStart       ; UP+DOWN (the FPGA cancels it): not a symbol
 .sym:
     ld a, b
     and $03                 ; A, B
@@ -99,6 +124,15 @@ ReadJoy:
     ld [wClPh], a
     ld a, 1
     ld [wClHave], a
+.keepStart:
+    ld a, [wJoyPrev]        ; a frame with UP/DOWN neither presses nor releases the person's
+    and $08                 ; START (SELECT+START would toggle the sequencer again and again)
+    ld c, a
+    ld a, b
+    and $04
+    or c
+    ld [wJoy], a
+    ret
 .hide:
     ld a, b
     and $04                 ; only SELECT reaches the UI
@@ -185,26 +219,54 @@ HandleJoy:
     ld [wBUsed], a          ; the B release must not delete a note
     jp DoLoad               ; SELECT+B: load
 .noCombo:
-    bit PADB_START, d
-    jr z, .noStart
     ld a, [wJoy]
+    bit PADB_START, a
+    jr z, .noStart          ; START alone does nothing: it only modifies
     bit PADB_SELECT, a
-    jr z, .cycle
-    ld a, 1                 ; SELECT+START: sequencer play/stop
-    ld [wSelUsed], a
-    push de
+    jr z, .nav
+    bit PADB_START, d
+    jr z, .startHeld
+    push de                 ; SELECT+START: sequencer play/stop
     call SeqToggle
     pop de
-    jr .noStart
-.cycle:
-    ld a, [wScreen]
-    inc a
-    cp 4
-    jr c, .reqOk
+    jr .startHeld
+.nav:
+    ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
+    ld a, [wJoyPrev]
+    bit PADB_START, a
+    jr nz, .prevStart
     xor a
-.reqOk:
+.prevStart:
+    and (1 << PADB_LEFT) | (1 << PADB_RIGHT)
+    cpl
+    ld c, a
+    ld a, [wJoy]
+    and (1 << PADB_LEFT) | (1 << PADB_RIGHT)
+    and c
+    jr z, .startHeld
+    ld c, a
+    ld a, [wScreen]
+    bit PADB_LEFT, c
+    jr z, .next
+    and a
+    jr z, .startHeld        ; the first screen: stay
+    dec a
+    jr .request
+.next:
+    cp SCREEN_KBD
+    jr z, .startHeld        ; the last screen: stay
+    inc a
+.request:
     inc a                   ; request: target screen + 1
     ld [wScreenReq], a
+    ld a, 1
+    ld [wNavHide], a
+.startHeld:
+    ld a, 1                 ; a SELECT pressed under START is no channel tap
+    ld [wSelUsed], a
+    ld a, d                 ; the d-pad belongs to the navigation while START is held
+    and $0F
+    ld d, a
 .noStart:
     ; SELECT released without being used as a modifier: next channel
     ld a, [wJoyPrev]

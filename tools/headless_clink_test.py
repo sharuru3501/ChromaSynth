@@ -110,6 +110,18 @@ def press(btn, frames=4):
     pb.tick(3)
 
 
+def nav(d):
+    """START+LEFT / START+RIGHT: previous / next screen."""
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_press(d)
+    pb.tick(3)
+    pb.button_release(d)
+    pb.tick(2)
+    pb.button_release("start")
+    pb.tick(4)
+
+
 # ---------------------------------------------------------------- reference model sanity
 syms = cl.with_phases(cl.encode_general(0x90, 0x3C, 0x64), 0)
 allb = [cl.buttons(p, d) for p in (0, 1) for d in range(32)]
@@ -128,7 +140,7 @@ def enter_kbd():
     for _ in range(8):
         if v("wScreen") == 3:
             break
-        press("start")
+        nav("right")
     pb.tick(10)
 
 
@@ -136,9 +148,9 @@ press("a")  # a normal screen: A plays a note (the symbols below are only read o
 pb.tick(20)
 screens = [v("wScreen")]
 for _ in range(4):
-    press("start")
+    nav("right")
     screens.append(v("wScreen"))
-check("START cycles play -> edit -> sequencer -> keyboard, and does not leave the keyboard screen", screens == [0, 1, 2, 3, 3], screens)
+check("START+RIGHT goes play -> edit -> sequencer -> keyboard, and stops at the keyboard screen", screens == [0, 1, 2, 3, 3], screens)
 enter_kbd()
 check("on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 
@@ -151,7 +163,11 @@ check("the symbols (they press START, A, B, UP, DOWN, LEFT) never reach the UI: 
 press("a")
 check("a real A press on the keyboard screen plays nothing (it is not a symbol)", cur(v("wSelCh")) == 0, cur(v("wSelCh")))
 press("start")
-check("a real START on the keyboard screen does not change the screen", v("wScreen") == 3, v("wScreen"))
+check("a real START tap on the keyboard screen does not change the screen", v("wScreen") == 3, v("wScreen"))
+press("start", frames=60)
+check("a real START held 1 s on the keyboard screen does not change the screen", v("wScreen") == 3 and v("wSeqPlay") == 0, v("wScreen"))
+nav("right")
+check("START+RIGHT on the keyboard screen: stays (the last screen)", v("wScreen") == 3, v("wScreen"))
 pb.tick(30)
 
 # ---------------------------------------------------------------- HELLO
@@ -339,15 +355,41 @@ press("select")
 check("SELECT tap on the keyboard screen selects the next channel", v("wSelCh") == (ch0 + 1) % 4, (ch0, v("wSelCh")))
 mem[sym["wSelCh"]] = 0
 pb.button_press("select")
+pb.tick(3)
 pb.button_press("start")
-pb.tick(40)
-check("SELECT+START held 40 frames: still on the keyboard screen", v("wScreen") == 3)
-pb.tick(40)
-check("SELECT+START held 80 frames: back to the play screen", v("wScreen") == 0, v("wScreen"))
-pb.button_release("select")
+pb.tick(80)
+check("SELECT+START on the keyboard screen starts the sequencer once (held 80 frames: no repeat, no exit)",
+      v("wSeqPlay") == 1 and v("wScreen") == 3, (v("wSeqPlay"), v("wScreen")))
 pb.button_release("start")
-pb.tick(10)
+pb.tick(3)
+pb.button_release("select")
+pb.tick(6)
+check("... and SELECT was not a channel tap", v("wSelCh") == 0, v("wSelCh"))
+tap = lambda: (pb.button_press("select"), pb.tick(3), pb.button_press("start"), pb.tick(4), pb.button_release("start"), pb.tick(2), pb.button_release("select"), pb.tick(6))
+tap()
+check("SELECT+START again stops it", v("wSeqPlay") == 0, v("wSeqPlay"))
+nav("left")
+pb.tick(6)
+check("START+LEFT on the keyboard screen: back to the sequencer", v("wScreen") == 2, v("wScreen"))
 check("leaving did not start the sequencer or save", v("wSeqPlay") == 0)
+enter_kbd()
+check("re-entered the keyboard screen", v("wScreen") == 3)
+# The ESP32 presses LEFT and START only together with UP or DOWN: its symbols never leave the screen.
+general(*cl.HELLO)
+nasty = cl.with_phases([0b1100, 0b1111, 0b0100, 0b1000] * 6, next_phase())   # LEFT+START, all, START, LEFT
+send(nasty, hold_frames=2)
+pb.tick(40)                                    # the ROM drops the broken packet
+check("symbols with LEFT+START (any mix, 24 of them) never leave the keyboard screen or toggle the sequencer",
+      v("wScreen") == 3 and v("wSeqPlay") == 0, (v("wScreen"), v("wSeqPlay")))
+for ph, data in cl.with_phases(cl.encode_play(1, 64, 100), next_phase()):
+    hold(cl.buttons(ph, data) | {"start", "left"}, 3)   # a person holds START+LEFT while a packet arrives
+check("a person's START+LEFT during a packet: no exit while every frame has UP/DOWN", v("wScreen") == 3, v("wScreen"))
+hold({"start", "left"}, 4)                     # the packet ends: frames without UP/DOWN
+release_all(4)
+check("... the first frames without UP/DOWN leave for the sequencer", v("wScreen") == 2 and v("wClLinked") == 0,
+      (v("wScreen"), v("wClLinked")))
+check("... and the d-pad LEFT did not move the roll cursor or start anything", v("wSeqPlay") == 0)
+pb.tick(30)
 enter_kbd()
 check("re-entered the keyboard screen", v("wScreen") == 3)
 # ---------------------------------------------------------------- beacons (docs/BLE_MIDI.md section 3)
@@ -373,23 +415,20 @@ mem[sym["wTxHead"]] = (head + 3) & 0xFF
 pb.tick(3)
 check("a MIDI message (len 3) is in the slot", cl.decode_slot(*slot()).length == 3 and cl.classify(cl.decode_slot(*slot())) == "other", slot())
 # leave the keyboard screen while linked
-pb.button_press("select")
 pb.button_press("start")
-pb.tick(70)
-pb.button_release("select")
-pb.button_release("start")
+pb.tick(3)
+pb.button_press("left")
 pb.tick(4)
-check("leaving the keyboard screen unlinks", v("wScreen") == 0 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
+pb.button_release("left")
+pb.button_release("start")
+pb.tick(2)
+check("leaving the keyboard screen (START+LEFT) unlinks", v("wScreen") == 2 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
 check("... and leaves the end beacon {$F5, len 3} in the slot", cl.classify(cl.decode_slot(*slot())) == "left" and slot()[3] == 0x60, slot())
 writes_before = len(up_write_ly)
 pb.tick(60)
 check("... which is written once: no more palette writes while away from the keyboard screen", len(up_write_ly) == writes_before,
       (writes_before, len(up_write_ly)))
-for _ in range(8):
-    if v("wScreen") == 3:
-        break
-    press("start")
-pb.tick(3)
+enter_kbd()
 check("back on the keyboard screen: the beacon returns", v("wScreen") == 3 and cl.classify(cl.decode_slot(*slot())) == "kbd", slot())
 general(*cl.HELLO)
 check("HELLO links again", v("wClLinked") == 1)

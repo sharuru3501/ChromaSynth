@@ -77,6 +77,18 @@ def press(btn, frames=4):
     pb.tick(3)
 
 
+def nav(d):
+    """START+LEFT / START+RIGHT: previous / next screen."""
+    pb.button_press("start")
+    pb.tick(3)
+    pb.button_press(d)
+    pb.tick(3)
+    pb.button_release(d)
+    pb.tick(2)
+    pb.button_release("start")
+    pb.tick(4)
+
+
 # PyBoy runs the real boot ROM first; wait until it hands over to the cartridge
 for _ in range(2000):
     pb.tick(1)
@@ -115,9 +127,15 @@ pb.tick(4)
 
 # --- edit screen (CH2 rows: 0 DUTY 1 VOL 2 ENV, 3-5 hidden, 6 VIBD, 7 VIBS)
 patch2 = sym["wPatch"] + 8
-press("start")
+note0 = mem[sym["wJoyNote"]]
+press("start", frames=40)
+check("START alone (short or held) does nothing", mem[sym["wScreen"]] == 0 and mem[sym["wSeqPlay"]] == 0, (mem[sym["wScreen"]], mem[sym["wSeqPlay"]]))
+nav("left")
+check("START+LEFT on the play screen: stays (the first screen), and the d-pad does not move the note",
+      mem[sym["wScreen"]] == 0 and mem[sym["wJoyNote"]] == note0, (mem[sym["wScreen"]], mem[sym["wJoyNote"]], note0))
+nav("right")
 pb.tick(4)
-check("START -> edit screen", mem[sym["wScreen"]] == 1)
+check("START+RIGHT -> edit screen", mem[sym["wScreen"]] == 1)
 shot("04_edit_ch2")
 press("down")
 press("down")
@@ -265,9 +283,9 @@ def chord_grid():
     pb.tick(4)
 
 
-press("start")
+nav("right")
 pb.tick(4)
-check("START -> piano roll", v("wScreen") == 2, v("wScreen"))
+check("START+RIGHT -> piano roll", v("wScreen") == 2, v("wScreen"))
 settle()
 shot("09_roll")
 check("demo pattern (ticks): CH1 C4 + OFF after 6, A3 at bar 2, CH3 bass",
@@ -599,16 +617,18 @@ for _ in range(6):
 check("grid divisions wrap around (7 steps back to 1/8T)", (v("wDiv"), v("wDivTicks")) == (3, 4) or v("wDiv") == 2, (v("wDiv"), v("wDivTicks")))
 for i in range(256):
     mem[P + 256 + i] = 0
-press("start")
+nav("right")
 pb.tick(4)
-check("START from the sequencer -> keyboard screen", v("wScreen") == 3, v("wScreen"))
-pb.button_press("select")
-pb.button_press("start")
-pb.tick(70)
-pb.button_release("select")
-pb.button_release("start")
+check("START+RIGHT from the sequencer -> keyboard screen", v("wScreen") == 3, v("wScreen"))
+nav("right")
+check("START+RIGHT on the keyboard screen: stays (the last screen)", v("wScreen") == 3, v("wScreen"))
+nav("left")
 pb.tick(6)
-check("SELECT+START held on the keyboard screen -> back to play screen", v("wScreen") == 0, v("wScreen"))
+check("START+LEFT on the keyboard screen -> back to the sequencer", v("wScreen") == 2, v("wScreen"))
+nav("left")
+nav("left")
+pb.tick(6)
+check("START+LEFT twice more -> the play screen", v("wScreen") == 0, v("wScreen"))
 pb.tick(20)
 shot("12_play_again")
 
