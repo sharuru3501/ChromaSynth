@@ -303,11 +303,11 @@ DrawEditHeader:
     inc hl
     call TypeNamePtr
     call DrawString
-    ld hl, _SCRN0 + 18      ; page: P1 = patch rows 0-7, P2 = rows 8-15
+    ld hl, _SCRN0 + 18      ; page: P1 = patch rows 0-7, P2 = 8-15, P3 = 16-23
     ld a, 'P' - 32
     ld [hl+], a
     ld a, [wEditRow]
-    and 8
+    and $18
     rrca
     rrca
     rrca
@@ -315,7 +315,7 @@ DrawEditHeader:
     ld [hl], a
     ret
 
-; b = screen row 0..7 of the edit list; the page of wEditRow picks patch row b or b + 8
+; b = screen row 0..7 of the edit list; the page of wEditRow picks patch row b + 8 * page
 DrawEditRow:
     ld a, b
     swap a
@@ -326,7 +326,7 @@ DrawEditRow:
     add hl, de              ; hl = start of this row on the map
     push hl
     ld a, [wEditRow]
-    and 8
+    and $18
     or b
     ld b, a                 ; b = patch row
     call EntryPtr           ; hl = entry
@@ -429,9 +429,10 @@ EntryPtr:
 ; b = row -> hl = address of that patch byte for channel wSelCh. Keeps b. Clobbers a.
 PatchRowHL:
     ld a, [wSelCh]
-    swap a                  ; * PATCH_SIZE (16)
+    swap a
+    add a                   ; * PATCH_SIZE (32)
     add b
-    add LOW(wPatch)         ; wPatch is 128-byte aligned: no carry
+    add LOW(wPatch)         ; wPatch is 256-byte aligned: no carry
     ld l, a
     ld h, HIGH(wPatch)
     ret
@@ -583,9 +584,14 @@ sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0
 NoteNames:    db "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 
+INCLUDE "font.inc"
+
+; ---------------------------------------------------------------- parameter tables
+; In ROM bank 1 (the MBC5 boots with bank 1 at $4000 and nothing switches it).
+SECTION "Param tables", ROMX, BANK[1]
+
 ; Parameter tables: EDIT_ROWS rows per channel, [max, 4-char name, 0]. max 0 = hidden
-; (so a parameter can go up to 255, e.g. the CH3 length).
-; Row order must match the patch byte layout in synth.inc (row = patch byte).
+; (so a parameter can go up to 255, e.g. the CH3 length). Row = patch byte (synth.inc).
 MACRO PARAM
     db \1
     db \2, 0
@@ -610,6 +616,22 @@ PT_Pulse1:
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
+    PARAM 15, "ARP1"
+    PARAM 15, "ARP2"
+    PARAM 15, "ARPS"
+    PARAM 7, "SLID"
+    PARAM 3, "DUT2"
+    PARAM 15, "DSPD"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 PT_Pulse2:
     PARAM 3, "DUTY"
     PARAM 15, "VOL "
@@ -619,6 +641,22 @@ PT_Pulse2:
     PARAM 2, "PAN "
     PARAM 7, "VIBD"
     PARAM 7, "VIBS"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 15, "ARP1"
+    PARAM 15, "ARP2"
+    PARAM 15, "ARPS"
+    PARAM 7, "SLID"
+    PARAM 3, "DUT2"
+    PARAM 15, "DSPD"
+    PARAM 0, "    "
+    PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
@@ -644,6 +682,22 @@ PT_Wave:
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
+    PARAM 15, "ARP1"
+    PARAM 15, "ARP2"
+    PARAM 15, "ARPS"
+    PARAM 7, "SLID"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
 PT_Noise:
     PARAM 1, "WDTH"
     PARAM 15, "VOL "
@@ -657,6 +711,22 @@ PT_Noise:
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 7, "NDIV"
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
@@ -681,7 +751,26 @@ PT_Midi:
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+    PARAM 0, "    "
+PT_End:
 
     ASSERT PT_Pulse2 - PT_Pulse1 == EDIT_ROWS * 6
-
-INCLUDE "font.inc"
+    ASSERT PT_Wave - PT_Pulse2 == EDIT_ROWS * 6
+    ASSERT PT_Noise - PT_Wave == EDIT_ROWS * 6
+    ASSERT PT_Midi - PT_Noise == EDIT_ROWS * 6
+    ASSERT PT_End - PT_Midi == EDIT_ROWS * 6

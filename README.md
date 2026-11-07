@@ -40,5 +40,5 @@ chromatic-mcu/build.sh     # 本体の ESP32 用ファームウェア(ModRetro �
 | `tools/` | 生成スクリプト、PyBoy の試験、Mac の有線中継、実機の試験(`mcu_mode_test.py`、`mcu_soak_test.py`) |
 | `chromatic-mcu/` | 本体の ESP32 用のパッチとソース(純正のソースは入れない) |
 | `firmware/` | 外付け ESP32-S3 ブリッジ(リンクケーブル用。実機は未確認) |
-| `docs/` | 設計、ロードマップ、実機の確認記録 |
+| `docs/` | 操作マニュアル(`MANUAL.md`)、設計、ロードマップ、実機の確認記録 |
 | `AGENTS.md`, `CLAUDE.md` | 開発のルール(AI エージェント向けを兼ねる) |

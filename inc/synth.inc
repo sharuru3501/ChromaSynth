@@ -6,16 +6,16 @@ DEF NOTE_MIN EQU 36     ; C2
 DEF NOTE_MAX EQU 107    ; B7
 DEF NUM_CH   EQU 4
 
-; Patch: 16 bytes per channel in wPatch (see docs/ARCHITECTURE.md). The edit screen shows
-; them as two pages of 8 rows (row = byte). Only what the APU registers can do, plus the
-; vibrato. Bytes 12-15 are reserved (M9b).
-;        0     1     2    3    4   5   6    7    8   9   10  11
-;  CH1: duty  vol   edir epac len pan vibd vibs swt swd sws -
-;  CH2: duty  vol   edir epac len pan vibd vibs -   -   -   -
-;  CH3: wave  level -    -    len pan vibd vibs -   -   -   -
-;  CH4: width vol   edir epac len pan -    -    -   -   -   ndiv
-DEF PATCH_SIZE EQU 16
-DEF EDIT_ROWS  EQU 16       ; rows per channel on the edit screen (2 pages of 8)
+; Patch: 32 bytes per channel in wPatch (see docs/ARCHITECTURE.md). The edit screen shows
+; them as pages of 8 rows (row = byte; rows 24-31 are reserved). The APU's registers, plus
+; frame-by-frame effects of the kind GB games and LSDj use (vibrato, arpeggio, slide, duty).
+;        0     1     2    3    4   5   6    7    | 8   9   10  11   | 16   17   18   19   20   21
+;  CH1: duty  vol   edir epac len pan vibd vibs | swt swd sws -    | arp1 arp2 arps slid dut2 dspd
+;  CH2: duty  vol   edir epac len pan vibd vibs | -   -   -   -    | arp1 arp2 arps slid dut2 dspd
+;  CH3: wave  level -    -    len pan vibd vibs | -   -   -   -    | arp1 arp2 arps slid -    -
+;  CH4: width vol   edir epac len pan -    -    | -   -   -   ndiv | -    -    -    -    -    -
+DEF PATCH_SIZE EQU 32
+DEF EDIT_ROWS  EQU 32       ; rows per channel on the edit screen (pages of 8; the last page is empty)
 DEF P_MAIN EQU 0            ; duty (CH1/2), wave (CH3), LFSR width (CH4)
 DEF P_VOL  EQU 1            ; initial volume 0-15 (CH3: output level 0-2)
 DEF P_EDIR EQU 2            ; envelope direction (1 = up)          -> NRx2 bit 3
@@ -26,6 +26,12 @@ DEF P_SWT  EQU 8            ; CH1 sweep time / direction / shift -> NR10
 DEF P_SWD  EQU 9
 DEF P_SWS  EQU 10
 DEF P_NDIV EQU 11           ; CH4 noise divisor code 0-7 -> NR43 bits 2-0
+DEF P_ARP1 EQU 16           ; arpeggio: root, +arp1, +arp2 semitones, round and round (0 and 0 = off)
+DEF P_ARP2 EQU 17
+DEF P_ARPS EQU 18           ; frames per arpeggio step (0 counts as 1)
+DEF P_SLID EQU 19           ; slide from the sounding note to a legato one: 0 = off, 1 fast .. 7 slow
+DEF P_DUT2 EQU 20           ; CH1/2: the second duty, alternated with the first every P_DSPD frames
+DEF P_DSPD EQU 21           ; 0 = off (also off while P_LEN is set: NRx1 holds the duty and the length)
 DEF NUM_PATCHES EQU NUM_CH + 1  ; CH1-CH4 plus a MIDI settings block (the 5th "page")
 ; MIDI settings block (patch byte offsets within the block). A MIDI channel is
 ; 1-16, 0 = off. Several GB channels on the same MIDI channel play polyphonically.

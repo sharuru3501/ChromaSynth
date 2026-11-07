@@ -126,7 +126,7 @@ pb.button_release("a")
 pb.tick(4)
 
 # --- edit screen (CH2 rows: 0 DUTY 1 VOL 2 ENV, 3-5 hidden, 6 VIBD, 7 VIBS)
-patch2 = sym["wPatch"] + 16   # CH2 (16 bytes per channel)
+patch2 = sym["wPatch"] + 32   # CH2 (32 bytes per channel)
 note0 = mem[sym["wJoyNote"]]
 press("start", frames=40)
 check("START alone (short or held) does nothing", mem[sym["wScreen"]] == 0 and mem[sym["wSeqPlay"]] == 0, (mem[sym["wScreen"]], mem[sym["wSeqPlay"]]))
@@ -193,10 +193,19 @@ for _ in range(9):
 check("VIBD clamped at 7", mem[patch2 + 6] == 7, mem[patch2 + 6])
 press("down")
 press("down")
-check("CH2: down from row 7 skips the empty page 2 and wraps to row 0", mem[sym["wEditRow"]] == 0, mem[sym["wEditRow"]])
-press("up")
-check("... and up from row 0 wraps back to row 7", mem[sym["wEditRow"]] == 7, mem[sym["wEditRow"]])
+check("CH2: down from row 7 skips the empty page 2 -> row 16 (ARP1, page 3)", mem[sym["wEditRow"]] == 16, mem[sym["wEditRow"]])
+pb.tick(12)
+check("... the header shows P3", mem[0x9800 + 19] == ord("3") - 32, mem[0x9800 + 19])
+for _ in range(5):
+    press("down")
+check("... down to row 21 (DSPD)", mem[sym["wEditRow"]] == 21, mem[sym["wEditRow"]])
 press("down")
+check("... and down from row 21 wraps to row 0", mem[sym["wEditRow"]] == 0, mem[sym["wEditRow"]])
+press("up")
+check("... and up from row 0 wraps back to row 21", mem[sym["wEditRow"]] == 21, mem[sym["wEditRow"]])
+for _ in range(6):
+    press("up")
+check("... up from row 16 skips page 2 back to row 7", mem[sym["wEditRow"]] == 7, mem[sym["wEditRow"]])
 mem[patch2 + 2] = 0                  # back to a decaying envelope
 mem[patch2 + 3] = 0
 pb.tick(10)
@@ -206,23 +215,23 @@ check("SELECT in edit -> CH3, row 0", mem[sym["wSelCh"]] == 2 and mem[sym["wEdit
 pb.tick(10)
 shot("06_edit_ch3")
 press("right")
-check("CH3 wave -> 1", mem[sym["wPatch"] + 32] == 1, mem[sym["wPatch"] + 32])
+check("CH3 wave -> 1", mem[sym["wPatch"] + 64] == 1, mem[sym["wPatch"] + 64])
 press("down")
 press("down")
 check("CH3: down from LVL skips the hidden envelope rows -> row 4 (LEN)", mem[sym["wEditRow"]] == 4, mem[sym["wEditRow"]])
-mem[sym["wPatch"] + 32 + 4] = 254
+mem[sym["wPatch"] + 64 + 4] = 254
 press("right")
 press("right")
-check("CH3 LEN goes up to 255 and stops there (no wrap to 0)", mem[sym["wPatch"] + 32 + 4] == 255, mem[sym["wPatch"] + 32 + 4])
-mem[sym["wPatch"] + 32 + 4] = 0
+check("CH3 LEN goes up to 255 and stops there (no wrap to 0)", mem[sym["wPatch"] + 64 + 4] == 255, mem[sym["wPatch"] + 64 + 4])
+mem[sym["wPatch"] + 64 + 4] = 0
 sel_dpad("up", frames=16 + 4 * 30)            # held: auto-repeat, 10 at a time
-check("CH3 LEN: SELECT+UP held runs 0 -> 255 by tens and stops at 255", mem[sym["wPatch"] + 32 + 4] == 255,
-      mem[sym["wPatch"] + 32 + 4])
+check("CH3 LEN: SELECT+UP held runs 0 -> 255 by tens and stops at 255", mem[sym["wPatch"] + 64 + 4] == 255,
+      mem[sym["wPatch"] + 64 + 4])
 sel_dpad("down")
-check("... SELECT+DOWN: 255 -> 245", mem[sym["wPatch"] + 32 + 4] == 245, mem[sym["wPatch"] + 32 + 4])
+check("... SELECT+DOWN: 255 -> 245", mem[sym["wPatch"] + 64 + 4] == 245, mem[sym["wPatch"] + 64 + 4])
 pb.tick(12)
 shot("06_edit_ch3_len")
-mem[sym["wPatch"] + 32 + 4] = 0
+mem[sym["wPatch"] + 64 + 4] = 0
 press("up")
 press("up")
 press("select")
@@ -248,10 +257,18 @@ pb.tick(12)
 check("... the header is back to P1", mem[0x9800 + 19] == ord("1") - 32, mem[0x9800 + 19])
 press("up")
 pb.tick(12)
-check("CH1: up from row 0 -> row 10 (SWS, the last visible row of page 2)", mem[sym["wEditRow"]] == 10, mem[sym["wEditRow"]])
+check("CH1: up from row 0 -> row 21 (DSPD, the last visible row of page 3)", mem[sym["wEditRow"]] == 21, mem[sym["wEditRow"]])
+shot("07_edit_ch1_p3")
+for _ in range(6):
+    press("up")
+pb.tick(12)
+check("... up from row 16 -> row 10 (SWS on page 2: rows 11-15 are hidden)", mem[sym["wEditRow"]] == 10, mem[sym["wEditRow"]])
 shot("07_edit_ch1_p2")
+for _ in range(6):
+    press("down")
+check("... down from row 10 through page 3 to row 21", mem[sym["wEditRow"]] == 21, mem[sym["wEditRow"]])
 press("down")
-check("... down from row 10 wraps to row 0", mem[sym["wEditRow"]] == 0, mem[sym["wEditRow"]])
+check("... down from row 21 wraps to row 0", mem[sym["wEditRow"]] == 0, mem[sym["wEditRow"]])
 pb.tick(10)
 shot("07_edit_ch1")
 
@@ -288,7 +305,7 @@ check("vibrato base period = 1750", base == 1750, base)
 check("vibrato oscillates both sides", min(seen) < base < max(seen), (min(seen), max(seen)))
 check("vibrato depth bounded", max(seen) - base <= 10 and base - min(seen) <= 10, (min(seen), max(seen)))
 midi(0x81, 69, 0)
-mem[sym["wPatch"] + 16 + 6] = 0
+mem[sym["wPatch"] + 32 + 6] = 0
 midi(0x91, 69, 100)
 pb.tick(1)
 before = mem[sym["wOut"] + 2] | (mem[sym["wOut"] + 3] << 8)
@@ -299,12 +316,12 @@ midi(0x81, 69, 0)
 
 # --- APU parameters (M9a): envelope, length, pan, noise divisor
 W = sym["wPatch"]
-mem[W + 16 + 2], mem[W + 16 + 3] = 1, 5            # CH2: envelope up, pace 5
+mem[W + 32 + 2], mem[W + 32 + 3] = 1, 5            # CH2: envelope up, pace 5
 midi(0x91, 60, 127)
 pb.tick(1)
 check("CH2 NR22 = volume << 4 | up << 3 | pace", mem[0xFF17] == (15 << 4) | 8 | 5, hex(mem[0xFF17]))
 midi(0x81, 60, 0)
-mem[W + 16 + 2], mem[W + 16 + 3] = 0, 0
+mem[W + 32 + 2], mem[W + 32 + 3] = 0, 0
 pb.tick(2)
 mem[W + 4] = 48                                    # CH1: length 48/256 s (about 11 frames)
 midi(0x90, 60, 100)
@@ -326,7 +343,7 @@ midi(0x90, 60, 100)
 pb.tick(12)
 check("CH1 with LEN 0: keeps sounding (NR52 bit 0 set)", mem[sym["wLenBit"]] == 0 and mem[0xFF26] & 1 == 1, hex(mem[0xFF26]))
 midi(0x80, 60, 0)
-mem[W + 2 * 16 + 4] = 200                           # CH3: length 200/256 s
+mem[W + 2 * 32 + 4] = 200                           # CH3: length 200/256 s
 midi(0x92, 60, 100)
 pb.tick(1)
 check("CH3 LEN 200: enabled", mem[sym["wLenBit"] + 2] == 0x40)
@@ -335,19 +352,111 @@ check("... still sounding after 40 frames (0.67 s)", mem[0xFF26] & 4 == 4, hex(m
 pb.tick(15)
 check("... stopped after 55 frames (0.92 s)", mem[0xFF26] & 4 == 0, hex(mem[0xFF26]))
 midi(0x82, 60, 0)
-mem[W + 2 * 16 + 4] = 0
-mem[W + 5], mem[W + 16 + 5], mem[W + 3 * 16 + 5] = 1, 2, 1   # CH1 left, CH2 right, CH4 left
+mem[W + 2 * 32 + 4] = 0
+mem[W + 5], mem[W + 32 + 5], mem[W + 3 * 32 + 5] = 1, 2, 1   # CH1 left, CH2 right, CH4 left
 pb.tick(2)
 check("PAN -> NR51 (CH1 left, CH2 right, CH3 both, CH4 left)", mem[0xFF25] == 0b11010110, bin(mem[0xFF25]))
-mem[W + 5], mem[W + 16 + 5], mem[W + 3 * 16 + 5] = 0, 0, 0
+mem[W + 5], mem[W + 32 + 5], mem[W + 3 * 32 + 5] = 0, 0, 0
 pb.tick(2)
 check("PAN back to both -> NR51 = $FF", mem[0xFF25] == 0xFF, hex(mem[0xFF25]))
-mem[W + 3 * 16 + 11] = 5                            # CH4 noise divisor code 5
+mem[W + 3 * 32 + 11] = 5                            # CH4 noise divisor code 5
 midi(0x93, 80, 100)
 pb.tick(1)
 check("CH4 NDIV 5 -> NR43 bits 2-0", mem[0xFF22] & 7 == 5, hex(mem[0xFF22]))
 midi(0x83, 80, 0)
-mem[W + 3 * 16 + 11] = 0
+mem[W + 3 * 32 + 11] = 0
+pb.tick(4)
+
+# --- M9b effects: arpeggio, slide, duty switching (CH1-3; frame based)
+def period(ch, table="wOut"):
+    return mem[sym[table] + 2 * ch] | (mem[sym[table] + 2 * ch + 1] << 8)
+
+
+def periods(ch, frames):
+    seen = []
+    for _ in range(frames):
+        pb.tick(1)
+        seen.append(period(ch))
+    return seen
+
+
+ARP1, ARP2, ARPS, SLID, DUT2, DSPD = 16, 17, 18, 19, 20, 21
+mem[W + 32 + 6] = 0                                  # CH2 without vibrato
+midi(0x91, 62, 100)
+p_d = period(1, "wBase")
+midi(0x81, 62, 0)
+midi(0x91, 60, 100)
+p_c = period(1, "wBase")
+seen = periods(1, 20)
+check("no arpeggio (ARP1 = ARP2 = 0): one period only", set(seen) <= {p_c}, sorted(set(seen)))
+midi(0x81, 60, 0)
+mem[W + 32 + ARP1], mem[W + 32 + ARP2], mem[W + 32 + ARPS] = 2, 7, 2   # C, D, G
+midi(0x91, 60, 100)
+seen = periods(1, 24)
+check("CH2 arpeggio 2/7 every 2 frames: three periods, the root and +2 among them",
+      len(set(seen)) == 3 and p_c in seen and p_d in seen, sorted(set(seen)))
+runs = [len(list(g)) for _, g in __import__("itertools").groupby(seen[2:-2])]
+check("... each step lasts 2 frames", all(r == 2 for r in runs[1:-1]), runs)
+check("... the note number stays the root (the UI and the sequencer see C)", cur(1) == 60, cur(1))
+midi(0x81, 60, 0)
+mem[W + 32 + ARP1], mem[W + 32 + ARP2] = 0, 0
+mem[W + 64 + 6] = 0                                  # CH3 without vibrato
+mem[W + 64 + ARP1], mem[W + 64 + ARP2], mem[W + 64 + ARPS] = 12, 0, 1
+midi(0x92, 48, 100)
+seen = periods(2, 12)
+check("CH3 arpeggio +12 (octave): two periods", len(set(seen)) == 2, sorted(set(seen)))
+midi(0x82, 48, 0)
+mem[W + 64 + ARP1] = 0
+mem[W + 64 + 6] = 0
+pb.tick(2)
+# slide: CH1 legato C4 -> C5 glides; a detached note does not
+mem[W + 6] = 0
+mem[W + SLID] = 3
+midi(0x90, 60, 100)
+pb.tick(4)
+p60 = period(0, "wBase")
+midi(0x90, 72, 100)                                  # legato: no note-off in between
+p72 = period(0, "wBase")
+seen = periods(0, 40)
+check("SLID 3, legato: the first frames are between the old and the new period", p60 < seen[0] < p72, (p60, seen[0], p72))
+check("... it moves toward the new note without overshoot", all(a <= b for a, b in zip(seen, seen[1:])) and max(seen) <= p72,
+      seen[:8])
+check("... and arrives (within 40 frames)", seen[-1] == p72, (seen[-1], p72))
+midi(0x80, 72, 0)
+pb.tick(2)
+midi(0x90, 60, 100)                                  # detached (after a note-off): no slide
+pb.tick(1)
+check("SLID 3, after a note-off: no slide", period(0) == period(0, "wBase") and mem[sym["wGlide"]] | mem[sym["wGlide"] + 1] == 0,
+      (period(0), period(0, "wBase")))
+midi(0x80, 60, 0)
+mem[W + SLID] = 0
+midi(0x90, 60, 100)
+pb.tick(2)
+midi(0x90, 72, 100)
+pb.tick(1)
+check("SLID 0, legato: jumps at once", period(0) == period(0, "wBase") == p72, (period(0), p72))
+midi(0x80, 72, 0)
+# duty switching: CH1 DUTY 0 <-> DUT2 2 every 3 frames
+mem[W + 0], mem[W + DUT2], mem[W + DSPD] = 0, 2, 3
+midi(0x90, 60, 100)
+duties = []
+for _ in range(18):
+    pb.tick(1)
+    duties.append(mem[0xFF11] >> 6)
+check("DSPD 3: NR11's duty alternates 0 / 2", set(duties) == {0, 2}, duties)
+runs = [len(list(g)) for _, g in __import__("itertools").groupby(duties)]
+check("... every 3 frames", all(r == 3 for r in runs[1:-1]), runs)
+midi(0x80, 60, 0)
+mem[W + 4] = 60                                      # with a length the duty stays (NRx1 also holds the length)
+midi(0x90, 60, 100)
+duties = []
+for _ in range(9):
+    pb.tick(1)
+    duties.append(mem[0xFF11] >> 6)
+check("DSPD with LEN set: no switching (the duty stays 0)", set(duties) == {0}, duties)
+midi(0x80, 60, 0)
+mem[W + 4] = 0
+mem[W + 0], mem[W + DUT2], mem[W + DSPD] = 2, 0, 0
 pb.tick(4)
 
 # --- piano roll (12 ticks per beat, grid division selectable)
