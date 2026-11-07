@@ -97,6 +97,9 @@ def nav(d):
     pb.tick(4)
 
 
+pb.tick(5)
+check("boot: the MCU's classifier sees the end beacon (an ESP32 still linked to an earlier run stops)", mcu_view() == "left",
+      slot_bytes())
 for _ in range(8):
     if v("wScreen") == 3:
         break

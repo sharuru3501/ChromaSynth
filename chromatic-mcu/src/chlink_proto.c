@@ -88,6 +88,11 @@ chl_rom_state_t chl_classify(const chl_slot_t *slot)
     return CHL_ROM_OTHER;
 }
 
+int chl_link_alive(const chl_slot_t *slot, int last_phase)
+{
+    return chl_classify(slot) == CHL_ROM_OTHER && chl_verify_ack(slot, last_phase);
+}
+
 static int data_bytes(uint8_t status)
 {
     if (status >= 0xF8) return 0;

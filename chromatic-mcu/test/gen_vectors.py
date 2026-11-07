@@ -39,6 +39,14 @@ for ln in (0, 1, 2, 3):
         h = ln << 5
         sl = cl.decode_slot(b0, 0, 0, h)
         out.append("cls %d %d %s" % (ln, b0, {"kbd": 1, "left": 2, "other": 0}[cl.classify(sl)]))
+# is the link still alive before a keep-alive: "alive <len> <b0> <ack> <nack> <last phase> <expected>"
+for ln in (0, 3):
+    for b0 in (0x90, 0xF4, 0xF5):
+        for ack in (0, 1):
+            for nack in (0, 1):
+                for last in (0, 1):
+                    sl = cl.Slot(length=ln, seq=0, ack=ack, nack=nack, data=(b0, 0, 0))
+                    out.append("alive %d %d %d %d %d %d" % (ln, b0, ack, nack, last, 1 if cl.link_alive(sl, last) else 0))
 # BLE MIDI packets: "ble <n> <bytes> <m> <messages as st d1 d2>"
 def ble(pkt, exp):
     out.append("ble %d %s %d %s" % (len(pkt), " ".join(map(str, pkt)), len(exp), " ".join("%d %d %d" % m for m in exp)))

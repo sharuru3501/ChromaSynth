@@ -49,6 +49,9 @@ typedef enum
 } chl_rom_state_t;
 
 chl_rom_state_t chl_classify(const chl_slot_t *slot);
+// Before a keep-alive: 1 if the slot is still that of the ROM the MCU linked with (no beacon, the ack of the MCU's last
+// symbol, no nack). Anything else (another or a reset ROM, a stray symbol): stop instead of pressing buttons in a game.
+int chl_link_alive(const chl_slot_t *slot, int last_phase);
 
 // ---------------------------------------------------------------- BLE MIDI packets (docs/BLE_MIDI.md section 2)
 typedef void (*chl_midi_cb_t)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);

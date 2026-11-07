@@ -96,6 +96,14 @@ def classify(slot):
     return "other"
 
 
+def link_alive(slot, last_phase):
+    """Before a keep-alive: is the ROM still the one the MCU linked with? A linked ROM writes, every frame, the ack of the
+    last symbol it took (after the MCU's last packet: its last phase) with nack = 0, and no beacon. Anything else - another
+    ROM or a reset ROM, a beacon, a stray symbol - and the MCU stops rather than press buttons in a game; the ROM's own link
+    timeout brings the keyboard beacon back and the MCU links again."""
+    return classify(slot) == "other" and verify_ack(slot, last_phase)
+
+
 def ble_packet(messages, ts=0x1234, running=False, sysex_between=False):
     """A BLE MIDI packet: header (bit 7 set, timestamp bits 12..7), then [timestamp low][message]...
     messages = [(status, d1, d2 or None)]. running=True drops the status byte of a message that repeats the
