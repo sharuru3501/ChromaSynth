@@ -73,6 +73,10 @@ ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクト�
 - 手順(ユーザーの確認後): SRAM がバックアップと一致 → `--page 2 --delete 2` → `--write`(PR #1 のブランチ `d672f9a` のビルド、SHA-256 `b152f454…`)。
 - 結果: ページ 2 は `MENU#` + `CHROMASYNTH`、空き 4032KB。ページ 2 の吸い出しに新しい ROM が完全に同じ内容で入っている(バンク 2)。**ページ 1(LSDJ)と SRAM は、バックアップと完全に一致。**
 
+## 4.11 M9a(APU の音色パラメータ)の ROM に入れ替えた結果(2026-11-07)
+- 手順(ユーザーの確認後): SRAM がバックアップと一致 → `--page 2 --delete 2` → `--write`(PR #2 のブランチ `c014d91` のビルド、SHA-256 `75496b0a…`)。今回から ems-flasher は `~/Documents/ChromaticBackup/tools/ems-flasher/` の保管版を使った。
+- 結果: ページ 2 は `MENU#` + `CHROMASYNTH`、空き 4032KB。ページ 2 の吸い出しに新しい ROM が完全に同じ内容で入っている(バンク 2)。**ページ 1(LSDJ)と SRAM は、バックアップと完全に一致。**
+
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
 - **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
