@@ -370,6 +370,31 @@ EditInput:
     ld a, [wJoy]
     bit PADB_B, a
     ret nz
+    bit PADB_SELECT, a
+    jr z, .rows
+    ; SELECT + UP/DOWN: the value +10 / -10 (the same idea as the sequencer's SELECT + UP/DOWN = BPM)
+    ld a, d
+    and $F0
+    ret z
+    ld a, 1
+    ld [wSelUsed], a        ; any d-pad under SELECT: its release is no channel tap
+    ld a, d
+    and (1 << PADB_UP) | (1 << PADB_DOWN)
+    ret z                   ; SELECT + LEFT/RIGHT: nothing (kept free)
+    bit PADB_UP, d
+    jr z, .tenDown
+    push de
+    ld c, 10
+    call ChangeValue
+    pop de
+    ret
+.tenDown:
+    push de
+    ld c, -10
+    call ChangeValue
+    pop de
+    ret
+.rows:
     bit PADB_UP, d
     jr z, .noUp
     push de
@@ -399,28 +424,40 @@ EditInput:
     pop de
     ret
 
-; c = delta (+1 / $FF). Moves wEditRow, skipping hidden rows (row 0 is never hidden).
+; c = delta (+1 / $FF). Moves wEditRow through the EDIT_ROWS rows (two pages of 8),
+; skipping hidden rows (row 0 is never hidden). Crossing to the other page redraws the list.
 MoveRow:
     ld a, [wEditRow]
     ld b, a                 ; b = old row
 .try:
     ld a, [wEditRow]
     add c
-    and 7
+    and EDIT_ROWS - 1
     ld [wEditRow], a
     push bc
     ld b, a
     call EntryPtr
     pop bc
     ld a, [hl]
-    inc a
-    jr z, .try              ; max = $FF -> hidden
+    and a
+    jr z, .try              ; max = 0 -> hidden
+    ld a, [wEditRow]
+    xor b
+    and 8
+    jr z, .samePage
+    ld a, $FF               ; the other page: every row and the page number in the header
+    ld [wDirtyEdit], a
+    ld a, [wDirty]
+    or DIRTY_HEADER
+    ld [wDirty], a
+    ret
+.samePage:
     ld a, b
     call MarkEditRow
     ld a, [wEditRow]
     jp MarkEditRow
 
-; c = delta (+1 / $FF). Changes the selected parameter, clamped to 0..max.
+; c = signed delta (+1, -1, +10, -10). Changes the selected parameter, clamped to 0..max.
 ChangeValue:
     ld a, [wEditRow]
     ld b, a
@@ -428,22 +465,36 @@ ChangeValue:
     call EntryPtr
     pop bc
     ld a, [hl]
-    ld e, a                 ; e = max
+    ld e, a                 ; e = max (up to 255)
     call PatchRowHL         ; hl -> value
     ld a, [hl]
+    bit 7, c
+    jr nz, .down
+    cp e
+    ret nc                  ; already at the maximum
     add c
-    ld d, a
-    ld a, e
-    cp d
-    ret c                   ; new value > max (or underflowed to $FF)
-    ld a, d
+    jr c, .toMax            ; past 255
+    cp e
+    jr c, .store
+    jr z, .store
+.toMax:
+    ld a, e                 ; a big step stops at the maximum
+    jr .store
+.down:
+    and a
+    ret z                   ; already 0
+    add c                   ; c < 0: carry = no underflow
+    jr c, .store
+    xor a                   ; a big step stops at 0
+.store:
     ld [hl], a
     ld a, b
     jp MarkEditRow
 
-; a = parameter row -> flag it for redraw. Keeps bc.
+; a = parameter row -> flag its screen row (row & 7) for redraw. Keeps bc.
 MarkEditRow:
     push bc
+    and 7
     ld c, a
     ld hl, DirtyBits
     call HLplusC

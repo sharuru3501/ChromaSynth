@@ -11,7 +11,7 @@ SECTION "MIDI tx ring", WRAM0, ALIGN[8]
 wTx:            ds 256
 
 ; Aligned so that "base + small offset" never carries into the high byte.
-SECTION "Patch", WRAM0, ALIGN[6]
+SECTION "Patch", WRAM0, ALIGN[7]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
 ; Pattern: wPattern[channel * 256 + tick]. 256-byte aligned: HIGH(wPattern)+channel
@@ -72,6 +72,7 @@ wMidiRR:        db          ; last GB channel that was stolen for a new note
 wVoiceVol:      ds NUM_CH   ; volume nibble last used per channel (after velocity; debug/test)
 wBend:          ds NUM_CH   ; pitch bend per GB channel: MIDI MSB 0..127, 64 = centre
 wTickOn:        ds NUM_CH   ; 1 = this channel's period was last written with a modulation offset
+wLenBit:        ds NUM_CH   ; $40 = the length counter is on for this channel (OR it into every NRx4 write)
 wTickOff:       dw          ; scratch: vibrato offset while the bend offset is computed
 wBendP:         db          ; scratch: (2048 - period) >> 3
 wBendSign:      db

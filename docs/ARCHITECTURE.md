@@ -24,9 +24,11 @@ BLE は後付けでブリッジ側(ESP32)に実装する。
 | `sram.asm` | パッチ・パターンの保存(MBC5+SRAM) |
 
 ## データ構造
-- Patch(実装済み, `wPatch`): 1chあたり8バイト×4ch。レイアウトは `inc/synth.inc` と `src/ui.asm` のパラメータ表(`PT_*`)が定義元。
-  - CH1: duty vol env swt swd sws vibd vibs / CH2: duty vol env - - - vibd vibs / CH3: wave level - - - - vibd vibs / CH4: width vol env - - - - -
-  - `wPatch` は32バイト境界に置き、オフセット加算が桁上げしない前提でコードを書いている。
+- Patch(実装済み, `wPatch`): 1chあたり16バイト×4ch + MIDI 設定の 16 バイト。レイアウトは `inc/synth.inc`(`P_*` の定数)と `src/ui.asm` のパラメータ表(`PT_*`、行 = バイト)が定義元。バイト 12-15 は M9b 用に空けてある。
+  - 共通: 0 main(duty/wave/width) 1 vol 2 edir 3 epac 4 len 5 pan 6 vibd 7 vibs / CH1: 8-10 sweep / CH4: 11 ndiv
+  - `wPatch` は128バイト境界に置き、オフセット加算が桁上げしない前提でコードを書いている。
+  - 音の長さ(LEN)を使うチャンネルは `wLenBit` に `$40` を持ち、NRx4 を書くたび(ビブラートなどの非トリガの書き込みも)にこのビットを立てる(0 で書くとレングスカウンタが止まるため)。
+  - パンニング(NR51)と全体の音量(NR50)は、`VoiceTick` の後の `ApplyMixer` が毎フレーム音色から書く。
 - ビブラート: 毎フレーム(VoiceTick)、発音中の CH1-3 の period を三角波で ±off。off は (2048-period) に比例させて音程に依存せず一定のセント幅になるよう近似。
 - 画面: Play / Edit / Roll の3画面。画面切替は VBlank 直後に LCD を一瞬オフにして BG マップを作り直す。
 - ピアノロールの描画(`src/roll.asm`): VBlank は約1140サイクルしかないので2段構え。
