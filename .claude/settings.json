@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make)",
+      "Bash(make gen)",
+      "Bash(make check-mcu)",
+      "Bash(make check-bridge)",
+      "Bash(make check-usb-bridge)",
+      "Bash(make -C firmware/test *)",
+      "Bash(python3 tools/headless_test.py*)",
+      "Bash(python3 tools/headless_save_test.py*)",
+      "Bash(python3 tools/headless_midi_test.py*)",
+      "Bash(python3 tools/headless_clink_test.py*)",
+      "Bash(python3 tools/headless_mcu_proto_test.py*)",
+      "Bash(python3 tools/test_bridge_ref.py*)",
+      "Bash(python3 tools/mcu_mode_test.py --mock*)",
+      "Bash(chromatic-mcu/build.sh*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ]
+  }
+}

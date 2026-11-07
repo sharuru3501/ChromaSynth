@@ -1,6 +1,14 @@
 # BLE MIDI(本体の ESP32 でワイヤレスに音を鳴らす)の設計
 
-**状態: 実装・ホストテスト・ビルドまで済み(2026-11-06)。本体には書いていない。実機では何も動かしていない。** 実装は §8。
+> **現状(2026-11-07 時点。この枠だけ読めば足りることが多い)**
+> - 本体の ESP32 は **v12**(`chromatic-mcu/patches` 0001〜0009)。OSD の System > MIDI MODE で **OFF / BLE / USB** を切り替える。
+> - **BLE**: Mac(Audio MIDI 設定で接続)→ Ableton Live から弾けて、ChromaSynth のキーボード画面で鳴る(USB-C を抜いた完全ワイヤレスでも確認)。**USB**: Mac の中継 `tools/start_usb_bridge.sh`(出力 "ChromaSynth USB")で鳴る。Live は MIDI From = All Ins、MIDI To = ChromaSynth USB。
+> - 遅延は耳まで約 200 ms の見込み(シンボルのプロトコルが支配的。BLE と USB でほぼ同じ)。単音のみ。CC などノート以外は MCU が ROM に送っていない。
+> - 試験(耳なし、数字で判定)はすべて通過: 265〜1,001 音で再送・再同期・中断 0、BLE の起動・停止で漏れなし、洪水・放置 5 分(§9.8〜9.10)。
+> - 未確認: BLE 接続中の長時間、切断・再接続、ベロシティの聴感、ROM→DAW の上り、電池の持ち。候補: `CHLINK_BLE_TRIM`(−95 KB、Mac での接続確認が要る、§9.9)。
+>
+> 節の案内: 仕様は §2・§3・§9.1〜9.2。§1・§4〜§8・§9.3 以降は設計時の検討と日付つきの記録(書かれた「未確認」「未書き込み」は当時のもの)。
+
 目的: Mac(Ableton Live のコンピュータ MIDI キーボードなど)から Bluetooth MIDI で本体の ESP32 に MIDI ノートを送り、
 [CHROMATIC_LINK.md](CHROMATIC_LINK.md) のリンクで ChromaSynth を鳴らす。ケーブルは使わない。
 

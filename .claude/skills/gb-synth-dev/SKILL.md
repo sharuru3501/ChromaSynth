@@ -33,7 +33,7 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - ISR は SB をリングバッファへ積み SC を再アーム。パースはメインループ(`DrainMidi`/`MidiByte`)。
 - ランニングステータス対応済み。リアルタイム(F8 clock, FA start, FC stop)は現状無視 → DAW同期で実装。
 - MIDI OUT(DAW同期): マイコンがクロックを刻むたびに GB が SB に載せた送信バイトが返る。送信キューを SB にロードしておく。
-- BLE MIDI: GBカート側からは無線を扱えないため、**ESP32 等のブリッジ**が BLE MIDI ⇄ リンクポートを変換する。最後に実装。
+- 実機の MIDI は本体内蔵 ESP32 経由(ケーブルなしリンク、`src/clink.asm`)。ESP32・リンク・カードの作業は `chromatic-hw` スキル。
 
 ## パッチ/UI メモ
 - パッチ値は NR12 などにほぼ直接対応(env は bit3=方向, 下位3bit=ペース)。CH3 の level は 0/1/2 → NR32 $20/$40/$60。
@@ -57,7 +57,7 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 ## 描画/VBlank メモ
 - VBlank=LY144-153(約1140サイクル)。1行コピーは展開済みで約120サイクル、16個のOAM書き込みで約160-290サイクル。
 - 超過するとSameBoy/実機では書き込みが捨てられ、更新されなかったタイルが画面に残る(PyBoyでは再現しない)。必ず LY で測る。
-- `jr` の届かない遠い分岐は `jp`。`add LOW(label)` で下位バイトだけ足す索引は、そのラベルが十分大きい境界(ALIGN)にある時だけ桁上げなしで使える。
+- `add LOW(label)` で下位バイトだけ足す索引は、そのラベルが十分大きい境界(ALIGN)にある時だけ桁上げなしで使える。
 - 反転フォント: タイル番号に128を足す(`TILE_INV`)。ピアノロール用タイルは `tools/gen_font.py` の `ROLL_TILES` で絵を定義。
 - スプライト: OAMはVBlank中のみ書ける。起動時にOAMをクリアしないとゴミスプライトが出る(`BuildScreen`)。
 
@@ -72,22 +72,13 @@ description: Game Boy (DMG/CGB) APU・RGBDSアセンブリ・リンクポートM
 - ベンドの 16bit 符号付きオフセットは「ビブラート + ベンド」を足して `wBase` に加える。0 に戻ったら素の周期を1回だけ書く(`wTickOn`)。
 - 重い計算は主ループ側(VBlank外)。MIDI の処理は VBlank に入らない。
 
-## リンク/ブリッジメモ
-- GB はスレーブ(SC=$80)。マスター(ブリッジ)は、GB が SB/SC を再設定し終える**前に**次のバイトを始めてはいけない。ISR は約100サイクルなので、バイト間隔は250 µs 以上にする。
-- 返信は1転送遅れる(ISR が次の返信を SB に置き、次の転送で出る)。送信キューが空なら `$FD`(アイドル)を返す。
-- PyBoy はシリアルを模擬できない(SB は常に `$FF` と読める)。ISR のテストは、`SerialISR+5`(`ldh a,[rSB]` の直後)に A を注入するフックと、`SerialISR.send` で B を読むフックで行う。
-- 状態を壊さない: ISR 以外で呼ぶルーチンは、呼び出し元が使うレジスタ(特に `HandleJoy` の `d` = 今フレームの新規押下)を保存する(`RollChannelChanged` が `d` を壊してパターンに音が置かれた実例)。
-
-## ファームウェア(ESP32-S3)メモ
-- 判断・計算は `firmware/core/`(純粋な C)に集め、ESP-IDF との境界(`main/`)は薄くする。そうすればホストの gcc で全部テストできる。
-- 参照実装(Python)→正解トレース→C の差分ファジング。Python 側の算術を整数µsにして、丸めまで一致させる。
-- ESP-IDF の API は推測で書かず、公式ヘッダ(GitHub の esp-idf)で宣言を確認する。確認できなかった名前は `TODO(verify)` を付ける。**実際にビルドすると、設定の既定値で気づけなかった問題が出る**(例: esp_tinyusb の既定では USB タスクが core 1 で、リンク駆動タスクと衝突する)。ビルド後は `managed_components/` のヘッダの既定値を読む。
-- ESP-IDF は `~/esp/esp-idf`(v5.5.6)。シェルごとに `. ~/esp/esp-idf/export.sh`。ESP-IDF 本体とツールで約 6 GB 使う(ディスクが逼迫しがちな環境)。
-- USB-MIDI は `esp_tinyusb`。SPI は `mode = 3`、`spics_io_num = -1`、`SPI_TRANS_USE_TXDATA/RXDATA`、`spi_device_polling_transmit`。実周波数は `spi_device_get_actual_freq`(kHz)。
+## レジスタ保存メモ
+- ISR 以外で呼ぶルーチンは、呼び出し元が使うレジスタ(特に `HandleJoy` の `d` = 今フレームの新規押下)を保存する(`RollChannelChanged` が `d` を壊してパターンに音が置かれた実例)。
+- シリアル ISR のテスト方法(PyBoy はシリアルを模擬できない)は `chromatic-hw` スキルの「リンクポートメモ」。
 
 ## 検証
 - `tools/headless_test.py`(PyBoy): パッド操作、`wRing` へのMIDI直接注入、RAM状態assert、スクリーンショット保存。PyBoy は最初に本物のブートROMを走らせるので PC>=0x100 まで待つ。
 - VRAM は VBlank 中のみ書ける。UI は VBlank 直後に1フレーム1行まで更新する設計(`UpdateUI`)。
 - CH3 は同じ period で パルスより1オクターブ低い。ノートを+12 してから period テーブルを引く。
 - `make` 警告ゼロ + `rgbfix -v` 成功は最低条件。
-- 音は SameBoy で聴感確認。MIDI は実機ブリッジが無いうちはエミュレータのリンク入力が無いので、`wRing` にバイトを直接積むテストモードを用意して確認する(予定)。
+- 音は SameBoy で聴感確認(自動化できないのでユーザーに依頼)。MIDI のヘッドレステストは `wRing` にバイトを直接積む(`headless_midi_test.py`)。
