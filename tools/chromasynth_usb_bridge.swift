@@ -227,7 +227,9 @@ var running: UInt8 = 0
 var sent = 0
 var guardState = FloodGuard()
 var announcedTrip = 0
-func handle(_ list: UnsafePointer<MIDIPacketList>) {
+var sourceNames: [Int: String] = [:]      // connection ref -> the MIDI input's name (for --verbose: who is playing?)
+func handle(_ list: UnsafePointer<MIDIPacketList>, from ref: UnsafeMutableRawPointer? = nil) {
+    let who = ref.flatMap { sourceNames[Int(bitPattern: $0)] } ?? "ChromaSynth USB"
     for pkt in list.unsafeSequence() {
         let n = Int(pkt.pointee.length)
         let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
@@ -243,11 +245,11 @@ func handle(_ list: UnsafePointer<MIDIPacketList>) {
             }
             send(line, dry: dry)
             sent += 1
-            if verbose && !dry { print("-> \(line)") }
+            if verbose && !dry { print("-> \(line)   [\(who)]") }
         }
     }
 }
-MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in handle(list) }
+MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, ref in handle(list, from: ref) }
 // A virtual MIDI OUTPUT PORT of its own, "ChromaSynth USB": it shows up in Live's "MIDI To" list like "ChromaSynth Bluetooth", with
 // no IAC bus and no feedback loop (it is a destination only: nothing in it can come back to Live as an input).
 var virtualDest = MIDIEndpointRef()
@@ -263,7 +265,8 @@ func connectSources() {
         if n.contains("ChromaSynth") { continue }                          // never the Bluetooth ChromaSynth (that is the BLE path)
         if let f = inputFilter { if !n.contains(f) { continue } }          // an explicit --input picks exactly what matches, IAC buses included
         else if n.contains("IAC") { continue }                            // by default not the virtual IAC buses: use --input IAC to play from Live
-        MIDIPortConnectSource(port, src, nil)
+        sourceNames[Int(src)] = n
+        MIDIPortConnectSource(port, src, UnsafeMutableRawPointer(bitPattern: Int(src)))
         connected.insert(src)
         print("listening to: \(n)")
     }
