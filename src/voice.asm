@@ -154,6 +154,7 @@ VoicePulse2:
 ; Keeps c, de.
 PulseRegs:
     call LenSetup           ; a = length load
+    and %00111111           ; CH1/2 count 6 bits: bits 7-6 of NRx1 are the duty, not the length
     ld b, a
     ld a, P_MAIN
     call PatchByte
