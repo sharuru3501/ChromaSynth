@@ -32,6 +32,7 @@ AGENTS.md のルール 13〜15 の詳細。安全に関わる要点(書き込み
    - ユーザーが留守中の書き込みを明示的に許したときだけ `chromatic-mcu/flash_verify.sh`(書く → 試験 → 失敗なら確認済みのイメージを自動で書き戻す)。
    - ゲームを動かしたまま・カートリッジの SRAM に触れる状態で書かない。接続できないときは完全な電源の入れ直し(USB を抜いて 10 秒、カートを挿し、USB を繋いでから電源 ON)。
    - USB シリアルのポートを開くと ESP32 がリセットされ、BLE の接続が切れる。OFF モードでは起動から約 20 秒でライトスリープに入り、コンソールが応答しなくなる。
+   - 確認済みのイメージは `~/Documents/ChromaticBackup/mcu_fw/`、カード用の ems-flasher(バグ修正済み)は `~/Documents/ChromaticBackup/tools/ems-flasher/`。新しく確認済みになったイメージは、一時フォルダでなくここに置く。
    - 実機の試験(耳なし、数字で判定): `tools/mcu_mode_test.py`、`mcu_soak_test.py`、`mcu_longrun_test.py`(`mcu_mode_test.py` だけ `--mock` で実機なしの自己確認ができる)。
 5. **スマートカード(EMS 64M)**: ページ 1 は LSDj、**ページ 1 とバックアップ(`~/Documents/ChromaticBackup/lsdj_card/`)は壊さない**。書くのはページ 2 だけ。SRAM は全 ROM で共有なので ChromaSynth の保存(SELECT+A)は LSDj の曲データを壊す。書き込みは必ずユーザーの確認を取り、書いた後にページ 1 を再度吸い出して一致を確認する。
 6. **カードの上で動かす実機試験では、SELECT+A / SELECT+B が出る組み合わせのボタンを MCU から送らない**(FPGA が反対のペアを消すので、残りのボタンだけが ROM に届く点も考える)。試験の後は SRAM を読み出してバックアップと比べる(`docs/CARTRIDGE.md` §4.6)。
