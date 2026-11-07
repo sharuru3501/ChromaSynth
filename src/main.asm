@@ -55,7 +55,11 @@ EntryPoint:
     ld [wRollNote], a
     ld a, 72
     ld [wRollTop], a
-    call LoadAll            ; restore the last save if there is one (else keep defaults)
+    xor a
+    ld [wSlot], a
+    ld [wConfirm], a
+    call ScanSlots
+    call LoadAll            ; restore slot 1 if it holds a save (else keep defaults)
 
     ; --- LCD off (only legal during VBlank), build the screen
 .waitVBlank:

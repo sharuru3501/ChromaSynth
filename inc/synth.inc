@@ -62,7 +62,14 @@ DEF MSG_SAVED  EQU 1
 DEF MSG_LOADED EQU 2
 DEF MSG_NODATA EQU 3
 DEF MSG_FAIL   EQU 4
+DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothing written
+DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
+
+; Save slots (src/sram.asm): the last 8 KB bank of the 128 KB SRAM, 8 slots of 1 KB.
+DEF NUM_SLOTS  EQU 8
+DEF SLOT_SIZE  EQU 1024
+DEF SLOT_BANK  EQU 15
 
 ; D-pad auto-repeat (frames)
 DEF REPEAT_DELAY EQU 16

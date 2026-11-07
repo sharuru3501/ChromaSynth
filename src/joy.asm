@@ -6,7 +6,7 @@
 ;               SELECT tap = next channel (all screens; the roll shows it),
 ;               SELECT+A = save to SRAM, SELECT+B = load.
 ;  Play/edit:   A = gate on the selected channel.
-;  Play screen : d-pad = note (+-1 / +-octave).
+;  Play screen : d-pad = note (+-1 / +-octave), SELECT+LEFT/RIGHT = save slot.
 ;  Edit screen : UP/DOWN = parameter row, LEFT/RIGHT = value,
 ;                hold B + d-pad = change the audition note.
 INCLUDE "hardware.inc"
@@ -219,6 +219,25 @@ HandleJoy:
     ld [wBUsed], a          ; the B release must not delete a note
     jp DoLoad               ; SELECT+B: load
 .noCombo:
+    ld a, [wScreen]         ; play screen: SELECT+LEFT/RIGHT = save slot -/+
+    and a
+    jr nz, .noSlot
+    ld a, [wJoy]
+    bit PADB_SELECT, a
+    jr z, .noSlot
+    ld a, d
+    and (1 << PADB_LEFT) | (1 << PADB_RIGHT)
+    jr z, .noSlot
+    ld c, a
+    push de
+    call SlotStep
+    pop de
+    ld a, 1
+    ld [wSelUsed], a        ; no channel tap on release
+    ld a, d
+    and ~((1 << PADB_LEFT) | (1 << PADB_RIGHT)) & $FF
+    ld d, a                 ; and the pad must not also change the audition note
+.noSlot:
     ld a, [wJoy]
     bit PADB_START, a
     jr z, .noStart          ; START alone does nothing: it only modifies

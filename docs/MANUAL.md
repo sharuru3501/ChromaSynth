@@ -3,7 +3,7 @@
 画面・ボタン操作・音色パラメータ(PATCH 画面の略称)の一覧です。設計の話は [ARCHITECTURE.md](ARCHITECTURE.md)、MIDI の仕様は [MIDI.md](MIDI.md)、状態は [ROADMAP.md](ROADMAP.md)。
 ボタン名: 十字キー(↑↓←→)、A、B、START、SELECT。
 
-> **注意**: SELECT+A(保存)はカードの SRAM に書く。SRAM は LSDj と共有なので、LSDj の曲データを壊す。バックアップの手順は [CARTRIDGE.md](CARTRIDGE.md)。
+> **注意**: 保存はカードの SRAM(LSDj と共有)の**最後の 8KB だけ**に書く(§1 の保存スロット)。LSDj のデータがあるスロットには書かない。ただし実機での確認は未なので、最初の保存の前後で SRAM をバックアップと比べる([CARTRIDGE.md](CARTRIDGE.md))。
 
 ## 1. 画面と移動
 画面は一直線に並んでいる: **プレイ ⇄ PATCH(音色編集) ⇄ シーケンサー(ピアノロール) ⇄ キーボード**。端で止まる。
@@ -13,10 +13,15 @@
 | START+→ / START+← | 次 / 前の画面(START を押したまま ←→ を続けて押せば何枚でも移れる)。START だけでは何もしない |
 | SELECT を単押し | 次のチャンネル(CH1→CH2→CH3→CH4。PATCH 画面は、その次に MIDI ページ) |
 | SELECT+START | シーケンサーの再生 / 停止(どの画面でも) |
-| SELECT+A | 保存(SRAM) |
-| SELECT+B | 読み込み |
+| SELECT+←/→(プレイ画面) | 保存スロットを切り替え(1〜8) |
+| SELECT+A | 現在のスロットへ保存 |
+| SELECT+B | 現在のスロットから読み込み |
 
-結果は画面の最下行に `SAVED` / `LOADED` / `NO SAVE DATA` / `SAVE FAILED` と出る。起動時に保存データがあれば自動で読み込む。**自動保存はしない**。
+**保存スロット**: 音色・パターン・BPM・ループ長をひとまとめに、8 か所に保存できる。現在のスロットと、そこに保存があるか(`USED` / `FREE`)はプレイ画面の `SLOT n` の行に出る。
+- すでに保存があるスロットへ SELECT+A を押すと、`SEL+A:OVERWRITE` と出る。**約 1.5 秒以内にもう一度** SELECT+A を押すと上書きする(間違えて消さないため)。
+- スロットに LSDj のデータなど、ChromaSynth の保存でないものが入っていたら、書かずに `SLOT IN USE` と出る。
+- 結果は画面の最下行に `SAVED n` / `LOADED n` / `NO SAVE DATA n` / `SAVE FAILED n` などと出る(n はスロット番号)。
+- 起動時はスロット 1 に保存があれば自動で読み込む(最後に使ったスロットは覚えない)。**自動保存はしない**。
 
 ## 2. プレイ画面
 - A: 選んだチャンネルを鳴らす(離すと止まる)。

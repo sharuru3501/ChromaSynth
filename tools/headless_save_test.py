@@ -2,7 +2,9 @@
 """SRAM save/load test using PyBoy (pip install pyboy pillow). Run `make` first.
 
 Uses a temp copy of the ROM so the emulator's .ram file never touches build/.
-Covers: save, reboot restore, SELECT+B load, no-save case, corrupted checksum.
+Covers: save, reboot restore, SELECT+B load, no-save case, corrupted checksum,
+the 8 slots (SELECT+LEFT/RIGHT on the play screen), overwrite confirmation, foreign data in a slot.
+Slots live in the last 8 KB bank of the 128 KB SRAM (bank 15, 1 KB each); nothing else may be written.
 """
 import pathlib
 import re
@@ -51,6 +53,14 @@ def combo(pb, held, btn):
     pb.tick(3)
 
 
+BANK15 = 15 * 8192
+SLOT = 1024
+
+
+def slot_off(n):
+    return BANK15 + n * SLOT
+
+
 P = sym["wPattern"]
 patch = sym["wPatch"]
 
@@ -80,7 +90,9 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
-    check("slot has magic CSYN v6", raw[:5] == b"CSYN\x06", raw[:5])
+    check("slot 1 has magic CSYN v7", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x07", raw[slot_off(0):slot_off(0) + 5])
+    check("nothing outside bank 15 was written", set(raw[:BANK15]) <= {0, 0xFF} and len(set(raw[:BANK15])) == 1, set(raw[:BANK15]))
+    check("slots 2-8 are untouched", len(set(raw[slot_off(1):])) == 1, set(raw[slot_off(1):]))
 
     # --- reboot: restored automatically
     pb = boot(rom)
@@ -101,7 +113,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # --- corrupted data: checksum must reject it
     data = bytearray(raw)
-    data[40] ^= 0xFF
+    data[slot_off(0) + 40] ^= 0xFF
     ram.write_bytes(bytes(data))
     pb = boot(rom)
     mem = pb.memory
@@ -113,10 +125,92 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # --- wrong version must be ignored too
     data = bytearray(raw)
-    data[4] = 0x7F
+    data[slot_off(0) + 4] = 0x7F
     ram.write_bytes(bytes(data))
     pb = boot(rom)
     check("other save version ignored", pb.memory[P + 257] == 0)
+    pb.stop(save=False)
+
+    # --- slots: SELECT+LEFT/RIGHT on the play screen
+    ram.write_bytes(raw)
+    pb = boot(rom)
+    mem = pb.memory
+    check("boot: slot 1 selected, used bitmap = slot 1", mem[sym["wSlot"]] == 0 and mem[sym["wSlotUsed"]] == 1,
+          (mem[sym["wSlot"]], mem[sym["wSlotUsed"]]))
+    note0 = mem[sym["wJoyNote"]]
+    combo(pb, "select", "right")
+    check("SELECT+RIGHT -> slot 2", mem[sym["wSlot"]] == 1, mem[sym["wSlot"]])
+    check("... without moving the audition note or changing channel", mem[sym["wJoyNote"]] == note0 and mem[sym["wSelCh"]] == 0)
+    combo(pb, "select", "left")
+    combo(pb, "select", "left")
+    check("SELECT+LEFT stops at slot 1", mem[sym["wSlot"]] == 0)
+    for _ in range(9):
+        combo(pb, "select", "right")
+    check("SELECT+RIGHT stops at slot 8", mem[sym["wSlot"]] == 7, mem[sym["wSlot"]])
+    for _ in range(7):
+        combo(pb, "select", "left")
+    combo(pb, "select", "right")             # slot 2 (empty)
+    combo(pb, "select", "b")
+    check("empty slot: SELECT+B -> NO SAVE DATA", mem[sym["wMsg"]] == 3 and mem[P + 257] == 77, mem[sym["wMsg"]])
+    mem[P + 257] = 11
+    mem[sym["wBpm"]] = 100
+    combo(pb, "select", "a")
+    check("empty slot: SELECT+A saves at once", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    check("used bitmap = slots 1 and 2", mem[sym["wSlotUsed"]] == 3, mem[sym["wSlotUsed"]])
+    pb.tick(100)
+    # a used slot asks first
+    mem[P + 257] = 12
+    combo(pb, "select", "a")
+    check("used slot: first SELECT+A only asks", mem[sym["wMsg"]] == 6 and mem[sym["wConfirm"]] == 2, (mem[sym["wMsg"]], mem[sym["wConfirm"]]))
+    pb.stop(save=True)
+    r2 = ram.read_bytes()
+    check("... and nothing was overwritten yet", r2[slot_off(1) + 165 + 192 + 1] == 11, r2[slot_off(1) + 165 + 192 + 1])
+    pb = boot(rom)
+    mem = pb.memory
+    combo(pb, "select", "right")
+    combo(pb, "select", "b")
+    check("slot 2 restored after reboot", mem[sym["wMsg"]] == 2 and mem[P + 257] == 11 and mem[sym["wBpm"]] == 100,
+          (mem[sym["wMsg"]], mem[P + 257], mem[sym["wBpm"]]))
+    mem[P + 257] = 12
+    combo(pb, "select", "a")
+    pb.tick(100)                              # the question expires
+    check("the question expires", mem[sym["wConfirm"]] == 0)
+    combo(pb, "select", "a")
+    combo(pb, "select", "a")
+    check("used slot: second SELECT+A overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    mem[P + 257] = 0
+    combo(pb, "select", "b")
+    check("slot 2 holds the new data", mem[P + 257] == 12, mem[P + 257])
+    combo(pb, "select", "left")
+    combo(pb, "select", "b")
+    check("slot 1 still holds the first save", mem[P + 257] == 77 and mem[sym["wBpm"]] == 133, (mem[P + 257], mem[sym["wBpm"]]))
+    pb.stop(save=True)
+
+    # --- foreign data (LSDj) in a slot is never overwritten
+    data = bytearray(ram.read_bytes())
+    foreign = bytes((i * 7 + 3) & 0xFF for i in range(SLOT))
+    data[slot_off(2):slot_off(2) + SLOT] = foreign
+    ram.write_bytes(bytes(data))
+    pb = boot(rom)
+    mem = pb.memory
+    check("foreign slot is not counted as a save", mem[sym["wSlotUsed"]] == 3, mem[sym["wSlotUsed"]])
+    combo(pb, "select", "right")
+    combo(pb, "select", "right")
+    combo(pb, "select", "a")
+    check("foreign slot: SELECT+A -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
+    pb.stop(save=True)
+    check("foreign slot: the bytes are unchanged", ram.read_bytes()[slot_off(2):slot_off(2) + SLOT] == foreign)
+    # one differing byte at the very end of an otherwise empty slot is foreign too
+    data = bytearray(ram.read_bytes())
+    data[slot_off(3):slot_off(3) + SLOT] = b"\x00" * SLOT
+    data[slot_off(3) + SLOT - 1] = 0x42
+    ram.write_bytes(bytes(data))
+    pb = boot(rom)
+    mem = pb.memory
+    for _ in range(3):
+        combo(pb, "select", "right")
+    combo(pb, "select", "a")
+    check("almost-empty slot: SELECT+A -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
     pb.stop(save=False)
 
 # --- a cart without SRAM: the read-back check must report failure, not "SAVED"

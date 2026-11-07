@@ -12,6 +12,7 @@ INCLUDE "synth.inc"
 
 DEF ROW_CH0    EQU 3
 DEF ROW_STATUS EQU _SCRN0 + 9 * 32
+DEF ROW_SLOT   EQU _SCRN0 + 11 * 32
 
 SECTION "UI", ROM0
 
@@ -84,6 +85,12 @@ BuildScreen:
     call DrawString
     ld hl, ROW_STATUS + 9
     ld de, sRx
+    call DrawString
+    ld hl, ROW_SLOT
+    ld de, sSlot
+    call DrawString
+    ld hl, ROW_SLOT + 12
+    ld de, sSlotHint
     call DrawString
     ld hl, _SCRN0 + 15 * 32
     ld de, sHelp1
@@ -233,7 +240,19 @@ DrawStatus:
     call DrawNoteName
     ld a, [wLastRx]
     ld hl, ROW_STATUS + 12
-    jp DrawHex
+    call DrawHex
+    ld a, [wSlot]           ; slot number and whether it holds a save
+    add '1' - 32
+    ld [ROW_SLOT + 5], a
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    ld de, sSlotFree
+    jr z, .mark
+    ld de, sSlotUsed
+.mark:
+    ld hl, ROW_SLOT + 7
+    jp DrawString
 
 ; c = channel -> de = TypeNames + c * 5. Keeps hl, c.
 TypeNamePtr:
@@ -459,7 +478,12 @@ DrawMsg:
     ld e, a
     ld d, [hl]
     ld hl, _SCRN0 + 17 * 32
-    jp DrawString
+    call DrawString
+    inc hl                  ; every message ends with the slot number
+    ld a, [wSlot]
+    add '1' - 32
+    ld [hl], a
+    ret
 .restore:
     ld a, [wScreen]
     cp SCREEN_SEQ
@@ -578,7 +602,13 @@ sMsgSaved:    db "SAVED", 0
 sMsgLoaded:   db "LOADED", 0
 sMsgNoData:   db "NO SAVE DATA", 0
 sMsgFail:     db "SAVE FAILED", 0
-MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail
+sMsgInUse:    db "SLOT IN USE", 0
+sMsgConfirm:  db "SEL+A:OVERWRITE", 0
+MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail, sMsgInUse, sMsgConfirm
+sSlot:        db "SLOT", 0
+sSlotUsed:    db "USED", 0
+sSlotFree:    db "FREE", 0
+sSlotHint:    db "SEL+LR", 0
 sStop:        db "STOP", 0
 sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0
