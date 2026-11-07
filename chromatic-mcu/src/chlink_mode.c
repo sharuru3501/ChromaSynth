@@ -24,6 +24,7 @@ LV_IMG_DECLARE(img_a_right);
 LV_IMG_DECLARE(img_b_left);
 
 static QueueHandle_t s_q;
+static TaskHandle_t s_mode_task = NULL;
 static volatile ChMidiMode s_mode = CHM_OFF;      // requested (shown by the menu)
 static volatile ChMidiMode s_applied = CHM_OFF;   // what the mode task has finished setting up
 static volatile uint32_t s_switches = 0;
@@ -145,18 +146,29 @@ static int cmd_m(int argc, char **argv)
     return 0;
 }
 
+static int cmd_tasks(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    printf("least free stack, bytes: link %u of 3072, mode %u of 4096, console (this task) %u, NimBLE host %u (0 = stopped)\n",
+           (unsigned)ChLinkLink_StackFree(), s_mode_task ? (unsigned)uxTaskGetStackHighWaterMark(s_mode_task) : 0u,
+           (unsigned)uxTaskGetStackHighWaterMark(NULL), (unsigned)ChLinkBle_HostStackFree());
+    return 0;
+}
+
 void ChMode_Init(void)
 {
     s_q = xQueueCreate(4, sizeof(ChMidiMode));
     const esp_console_cmd_t cmds[] = {
         {.command = "mode", .help = "MIDI mode: mode [off|ble|usb]", .func = &cmd_mode},
         {.command = "m", .help = "wired MIDI message (hex): m 90 3c 64", .func = &cmd_m},
+        {.command = "tasks", .help = "least free stack of our tasks (bytes)", .func = &cmd_tasks},
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
     {
         (void)esp_console_cmd_register(&cmds[i]);
     }
-    (void)xTaskCreate(mode_task, "chlink_mode", 6144, NULL, 5, NULL);
+    (void)xTaskCreate(mode_task, "chlink_mode", 4096, NULL, 5, &s_mode_task);   // measured: about 1.8 KB used at the BLE start (`tasks`)
 }
 
 // ---------------------------------------------------------------- OSD menu item (System > MIDI MODE)

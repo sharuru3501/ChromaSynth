@@ -11,3 +11,4 @@ bool ChLinkLink_Midi(uint8_t b0, uint8_t b1, uint8_t b2);
 // The MIDI mode turns the link on (auto: sends only while the ROM shows the keyboard screen) or off (nothing is
 // sent, nothing is polled, queued notes are dropped), so that the ESP32 can light-sleep again.
 void ChLinkLink_SetEnabled(bool on);
+uint32_t ChLinkLink_StackFree(void);   // the least free stack the link task has ever had, in bytes

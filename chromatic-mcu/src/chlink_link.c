@@ -43,10 +43,13 @@ typedef enum { MODE_OFF, MODE_AUTO, MODE_FORCE } Mode;
 typedef enum { RS_UNKNOWN, RS_KBD, RS_LEFT, RS_OTHER } RomState;
 
 static QueueHandle_t s_q;
+static TaskHandle_t s_task = NULL;
 static volatile Mode s_mode = MODE_OFF;   // the MIDI mode (src/chlink_mode.c) turns it on: nothing is sent or polled until then
 static volatile uint16_t s_hold_ms = 36;   // 20 ms loses symbols, 30 ms works; 36 keeps a margin (about 2 ROM frames + 3 ms)
 static uint8_t s_cur_note = 0xFF;          // the note the ROM is sounding (the last note-on not yet released); 0xFF = none
 static volatile uint32_t s_retries = 0, s_resyncs = 0, s_stale_off = 0;
+// What the ROM said when a packet was not taken (for the rare retransmission): its ack / nack and the phase we expected
+static volatile int s_bad_ack = -1, s_bad_nack = -1, s_bad_expect = -1;
 static int s_phase = 0;                 // phase of the next symbol; kept equal to the ROM's (sync)
 static bool s_armed = false;            // HELLO sent and the ROM is on the keyboard screen
 static volatile uint32_t s_sent = 0, s_aborted = 0, s_dropped = 0, s_handshakes = 0;
@@ -188,6 +191,9 @@ static Verdict verify_last(void)
     {
         return V_OK;
     }
+    s_bad_ack = slot.ack;
+    s_bad_nack = slot.nack;
+    s_bad_expect = s_phase ^ 1;
     return V_BAD;                  // a symbol was lost (a half packet is pending, or the phase is behind) or the check failed
 }
 
@@ -400,6 +406,11 @@ static bool queue_cmd(uint8_t kind, uint8_t a, uint8_t b, uint8_t c)
     return xQueueSend(s_q, &cmd, 0) == pdTRUE;
 }
 
+uint32_t ChLinkLink_StackFree(void)
+{
+    return s_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_task) : 0;
+}
+
 void ChLinkLink_SetEnabled(bool on)
 {
     if (s_q == NULL)
@@ -495,6 +506,11 @@ static int cmd_link(int argc, char **argv)
                (unsigned)s_dropped, (unsigned)s_handshakes, (unsigned)uxQueueMessagesWaiting(s_q));
         printf("retransmitted %u (after a nack or a lost symbol), re-synced %u, stale note-offs not sent %u, sounding note %d\n",
                (unsigned)s_retries, (unsigned)s_resyncs, (unsigned)s_stale_off, s_cur_note == 0xFF ? -1 : (int)s_cur_note);
+        if (s_bad_ack >= 0)
+        {
+            printf("last packet the ROM did not take: its ack was %c, nack %d; the last symbol sent had phase %c\n", s_bad_ack ? 'B' : 'A',
+                   s_bad_nack, s_bad_expect ? 'B' : 'A');
+        }
         uint8_t g[8];
         if (ChLink_ReadGpdTimeout(g, 500))
         {
@@ -595,5 +611,5 @@ void ChLinkLink_Start(void)
     {
         (void)esp_console_cmd_register(&cmds[i]);
     }
-    (void)xTaskCreate(link_task, "chlink_link", 4096, NULL, 17, NULL);
+    (void)xTaskCreate(link_task, "chlink_link", 3072, NULL, 17, &s_task);   // measured: about 1.1 KB used at most (`tasks`)
 }

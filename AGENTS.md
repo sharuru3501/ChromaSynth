@@ -22,6 +22,9 @@ python3 tools/headless_clink_test.py  # 本体内蔵 ESP32 とのケーブルな
 python3 tools/headless_mcu_proto_test.py  # MCU 側の C の符号化器(chromatic-mcu/)で ROM を鳴らす結合テスト(要 cc)
 make check-mcu                        # MCU 側プロトコル中核の C を Python 参照実装と突き合わせる(ESP32 不要)
 make check-usb-bridge                 # Mac の有線 MIDI 中継(tools/chromasynth_usb_bridge.swift)の変換の自己試験(要 swiftc)
+python3 tools/mcu_mode_test.py --cycles 6 --no-sleep-test   # 実機(コンソール): モード切り替え、BLE の起動・停止で漏れなし、`m` の規則(--mock で実機なしの自己確認)
+python3 tools/mcu_soak_test.py --seconds 90               # 実機: 人間らしいメロディと速い連打を有線で流し、再送・中断・メモリの減りを数字で判定
+chromatic-mcu/flash_verify.sh <新> <sha> <確認済み> <sha>   # 書き込み → 試験 → 失敗なら確認済みを自動で書き戻す(留守中の書き込み用。アプリの枠だけ)
 python3 tools/test_bridge_ref.py      # ブリッジ参照実装の単体テスト(標準ライブラリのみ)
 make firmware                         # ESP32-S3 ファームウェアのビルド(要 ESP-IDF)
 make check-bridge                     # 上記 + firmware の C 中核テスト(正解トレース照合・ASan・構文検査)。ESP32 不要

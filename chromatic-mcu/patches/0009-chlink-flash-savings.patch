@@ -1,0 +1,15 @@
+diff --git a/sdkconfig.defaults b/sdkconfig.defaults
+index 3e8e345..f77bce5 100644
+--- a/sdkconfig.defaults
++++ b/sdkconfig.defaults
+@@ -25,3 +25,10 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+ CONFIG_BTDM_CTRL_BLE_MAX_CONN=1
+ CONFIG_BT_NIMBLE_NVS_PERSIST=n
+ CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
++# chlink: flash savings that change no behaviour (about 40 KB): assertion messages and the error-name table only matter when
++# something prints them, and logging is compiled out (CONFIG_LOG_DEFAULT_LEVEL_NONE). A failed assert still aborts and reboots.
++CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
++CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
++CONFIG_LV_USE_ASSERT_NULL=n
++CONFIG_LV_USE_ASSERT_MALLOC=n
++CONFIG_LV_USE_ASSERT_STYLE=n

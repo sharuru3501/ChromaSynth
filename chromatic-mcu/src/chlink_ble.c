@@ -30,6 +30,7 @@ static volatile bool s_started = false, s_connected = false;
 static volatile uint32_t s_writes = 0, s_msgs = 0, s_notes = 0, s_queue_full = 0, s_connects = 0;
 static volatile uint8_t s_last_note = 0xFF;   // the note the keyboard is holding (for all-notes-off)
 static volatile int s_start_rc = -1;
+static TaskHandle_t s_host_task = NULL;       // for `tasks` (the host task is ours: we pass host_task to nimble_port_freertos_init)
 static volatile bool s_stopping = false;      // set while the stack is being stopped: no new advertising
 static volatile uint16_t s_conn_handle = 0;
 // Diagnostics for `ble`: where does a central stall?
@@ -203,6 +204,7 @@ static void on_sync(void)
 static void host_task(void *p)
 {
     (void)p;
+    s_host_task = xTaskGetCurrentTaskHandle();
     nimble_port_run();
     nimble_port_freertos_deinit();
 }
@@ -261,6 +263,12 @@ void ChLinkBle_Start(void)
 // Starts (on) or fully stops (off) the BLE stack. Off frees its memory and lets the ESP32 light-sleep again: the BLE
 // controller must be shut down for that. Call it from a task with a big enough stack (the mode task), never from the
 // NimBLE host task itself.
+uint32_t ChLinkBle_HostStackFree(void)
+{
+    TaskHandle_t t = s_started ? s_host_task : NULL;
+    return t ? (uint32_t)uxTaskGetStackHighWaterMark(t) : 0;
+}
+
 bool ChLinkBle_Enable(bool on)
 {
     if (on == s_started)
@@ -287,6 +295,7 @@ bool ChLinkBle_Enable(bool on)
         }
         s_connected = false;
         s_started = false;
+        s_host_task = NULL;
         return rc == 0;
     }
     s_stopping = false;
@@ -320,5 +329,10 @@ void ChLinkBle_Start(void)
 bool ChLinkBle_Enable(bool on)
 {
     return !on;
+}
+
+uint32_t ChLinkBle_HostStackFree(void)
+{
+    return 0;
 }
 #endif

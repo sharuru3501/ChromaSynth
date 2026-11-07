@@ -201,6 +201,8 @@ def main():
           (sent, s["sent"], s["aborted"], s["dropped"], s["stale"]))
     print("INFO  note-on packets %s, queue wait avg %s us, packet avg %s us (max %s us); heap %s -> %s B (lowest %s)" %
           (s["notes"], s["wait_avg"], s["pkt_avg"], s["pkt_max"], h0, h1, low1))
+    print("INFO  since boot: retransmitted %s, re-synced %s, aborted %s (a packet that took about 1 s is a retransmission with a re-sync)" %
+          (s["retrans"], s["resync"], s["aborted"]))
     if s0["armed"]:
         check("no packet was aborted", s["aborted"] == s0["aborted"], "%s -> %s" % (s0["aborted"], s["aborted"]))
         check("the ROM took every packet: no retransmission, no re-sync", (s["retrans"] or 0) == (s0["retrans"] or 0) and (s["resync"] or 0) == (s0["resync"] or 0),
