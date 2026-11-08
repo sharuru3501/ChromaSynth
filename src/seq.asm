@@ -40,7 +40,8 @@ SeqToggle:
     jr z, .stop
     xor a
     ld [wSeqTick], a
-    inc a
+    call SongRestart        ; from the first chain step (or the edited pattern in loop mode)
+    ld a, 1
     ld [wFollow], a         ; the roll scrolls along with the playhead
     call GetTickLen
     dec d                   ; acc = len - 1 frame: the first tick fires next frame
@@ -120,8 +121,8 @@ SeqStep:
 .ch:
     ld a, [wSeqCur]
     ld l, a
-    ld a, c
-    add HIGH(wPattern)
+    ld a, [wPlayBase]
+    add c
     ld h, a
     ld a, [hl]
     and a
@@ -151,6 +152,11 @@ SeqStep:
     cp [hl]
     jr c, .store
     xor a                   ; reached the loop end
+    ld [wSeqTick], a
+    ld a, [wSongMode]
+    and a
+    call nz, SongNext       ; the chain goes on with its next pattern
+    ld a, [wSeqTick]
 .store:
     ld [wSeqTick], a
     ld a, [wFollow]         ; the view follows the playhead until the user moves the cursor
@@ -181,8 +187,10 @@ MarkSeqStatus:
 ; ---------------------------------------------------------------- cell helpers
 ; b = tick -> hl = address of that cell in the selected channel. Clobbers a.
 CellHL:
+    ld a, [wEditBase]
+    ld h, a
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add h
     ld h, a
     ld l, b
     ret

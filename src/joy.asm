@@ -241,7 +241,7 @@ HandleJoy:
 .noSlot:
     ld a, [wJoy]
     bit PADB_START, a
-    jr z, .noStart          ; START alone does nothing: it only modifies
+    jp z, .noStart          ; START alone does nothing: it only modifies
     bit PADB_SELECT, a
     jr z, .nav
     bit PADB_START, d
@@ -263,13 +263,23 @@ HandleJoy:
     ld a, [wScreen]
     cp SCREEN_SLOT
     jr z, .fromSlot
-    bit PADB_DOWN, c
-    jr z, .startHeld
+    cp SCREEN_SONG
+    jr z, .fromSong
     ld [wScreenBack], a
+    bit PADB_DOWN, c
     ld a, SCREEN_SLOT
+    jr nz, .request         ; START+DOWN: the slot list
+    bit PADB_UP, c
+    jr z, .startHeld
+    ld a, SCREEN_SONG       ; START+UP: the song screen
     jr .request
 .fromSlot:
     bit PADB_UP, c
+    jr z, .startHeld
+    ld a, [wScreenBack]
+    jr .request
+.fromSong:
+    bit PADB_DOWN, c
     jr z, .startHeld
     ld a, [wScreenBack]
     jr .request
@@ -277,6 +287,8 @@ HandleJoy:
     ld a, [wScreen]
     cp SCREEN_SLOT
     jr z, .startHeld        ; the slot list is left with START+UP only
+    cp SCREEN_SONG
+    jr z, .startHeld        ; the song screen with START+DOWN only
     ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
     ld a, [wJoyPrev]
     bit PADB_START, a
@@ -357,6 +369,8 @@ HandleJoy:
     jr z, .play
     cp SCREEN_SLOT
     jp z, SlotInput
+    cp SCREEN_SONG
+    jp z, SongInput
     cp SCREEN_SEQ
     jp z, SeqInput
     call EditInput

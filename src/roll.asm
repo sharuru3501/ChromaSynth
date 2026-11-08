@@ -106,8 +106,10 @@ RollRefreshAll:
 ; The selected channel changed: put the cursor on its first note (if it has
 ; one) and centre the pitch window on it, so the channel is visible at once.
 RollChannelChanged:
+    ld a, [wEditBase]
+    ld b, a
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add b
     ld b, a
     ld c, 0                 ; c = tick
 .scan:
@@ -338,8 +340,10 @@ MarkAllRender:
 ; bar/beat marks stay where they are when the grid division changes.
 ; Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
+    ld a, [wEditBase]
+    ld b, a
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add b
     ld b, a                 ; b = high byte of this channel's pattern
     ld a, [wPageTick]
     ld c, a                 ; c = tick where the current column starts
@@ -748,7 +752,7 @@ BlackKeys:
     db 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0
 ChanLabels: db "1P", "2P", "3W", "4N"
 
-; Status line into wStatusBuf: PLAY/STOP  bpm  grid division  cursor pitch
+; Status line into wStatusBuf: PLAY/STOP  bpm  grid division  cursor pitch  edited pattern
 BuildStatus:
     ld hl, wStatusBuf
     ld b, 20
@@ -765,7 +769,7 @@ BuildStatus:
     ld de, sPlay
 .state:
     call DrawString
-    ld hl, wStatusBuf + 5
+    ld hl, wStatusBuf + 4
     ld a, [wBpm]
     call DrawDec3
     ld a, [wDiv]            ; label = DivLabels + 6 * index
@@ -779,9 +783,15 @@ BuildStatus:
     add hl, de
     ld d, h
     ld e, l
-    ld hl, wStatusBuf + 9
+    ld hl, wStatusBuf + 8
     call DrawString
-    ld hl, wStatusBuf + 15
+    ld hl, wStatusBuf + 18  ; the edited pattern: P1-P4
+    ld a, 'P' - 32
+    ld [hl+], a
+    ld a, [wEditPat]
+    add '1' - 32
+    ld [hl], a
+    ld hl, wStatusBuf + 14
     ld a, [wRollNote]
     jp DrawNoteName
 

@@ -14,10 +14,14 @@ wTx:            ds 256
 SECTION "Patch", WRAM0, ALIGN[8]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
-; Pattern: wPattern[channel * 256 + tick]. 256-byte aligned: HIGH(wPattern)+channel
-; is the high byte and the tick is the low byte (no 16-bit arithmetic anywhere).
-SECTION "Pattern", WRAM0, ALIGN[8]
-wPattern:       ds NUM_CH * SEQ_STRIDE
+; Patterns: pattern p, channel c, tick t at wPatterns + p * 1024 + c * 256 + t. All of the
+; switchable WRAM bank ($D000-$DFFF; bank 1, which is what both a DMG and a CGB map there).
+; A pattern's base page is HIGH(wPatterns) + p * 4; the channel page is base + c and the tick
+; is the low byte, so no 16-bit arithmetic is needed anywhere. wEditBase / wPlayBase hold the
+; base page of the pattern being edited / played.
+SECTION "Patterns", WRAMX[$D000]
+wPattern:                                       ; = pattern 0
+wPatterns:      ds NUM_PATS * NUM_CH * SEQ_STRIDE
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
@@ -91,6 +95,14 @@ wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
 wSeqLen:        db          ; loop length in ticks (48/96/144/192)
+wEditBase:      db          ; base page of the pattern shown / edited on the piano roll
+wPlayBase:      db          ; base page of the pattern the sequencer plays
+wEditPat:       db          ; the edited pattern's number
+wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
+wChainPos:      db          ; chain step being played
+wChain:         ds CHAIN_LEN ; pattern numbers, CHAIN_END after the last step
+wSongCur:       db          ; song screen: the cursor's chain step
+wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, bit n = chain row n-1)
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)

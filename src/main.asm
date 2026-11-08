@@ -34,10 +34,19 @@ EntryPoint:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call MemCopy
+    ld a, 1
+    ld [$FF70], a           ; SVBK: WRAM bank 1 at $D000 (a DMG has plain RAM there)
     ld hl, DefaultPattern
     ld de, wPattern
     ld bc, NUM_CH * SEQ_STRIDE
     call MemCopy
+    ld hl, wPattern + NUM_CH * SEQ_STRIDE   ; the other patterns start empty
+    ld bc, (NUM_PATS - 1) * NUM_CH * SEQ_STRIDE
+    call MemClear
+    ld a, HIGH(wPatterns)
+    ld [wEditBase], a
+    ld [wPlayBase], a
+    call ChainReset
     ld a, 120
     ld [wBpm], a
     ld a, 2 * TICKS_PER_BAR ; the demo is two bars long

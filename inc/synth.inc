@@ -66,12 +66,15 @@ DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothin
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
 
-; Save slots (src/sram.asm): the last 8 KB bank of the 128 KB SRAM, 8 slots of 1 KB.
+; Save slots (src/sram.asm): the last two 8 KB banks of the 128 KB SRAM, 4 slots of 4 KB.
+DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x SEQ_TICKS ticks)
+DEF CHAIN_LEN  EQU 32      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
+DEF CHAIN_END  EQU $FF
 DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
 DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
-DEF NUM_SLOTS  EQU 8
-DEF SLOT_SIZE  EQU 1024
-DEF SLOT_BANK  EQU 15
+DEF NUM_SLOTS  EQU 4
+DEF SLOT_SIZE  EQU 4096    ; two slots per 8 KB SRAM bank
+DEF SLOT_BANK0 EQU 14      ; slots 0-1 in bank 14, slots 2-3 in bank 15
 
 ; D-pad auto-repeat (frames)
 DEF REPEAT_DELAY EQU 16
@@ -80,6 +83,7 @@ DEF REPEAT_RATE  EQU 4
 DEF SCREEN_PLAY EQU 0
 DEF SCREEN_EDIT EQU 1
 DEF SCREEN_SEQ  EQU 2
+DEF SCREEN_SONG EQU 5       ; song screen: START+UP opens it, START+DOWN goes back
 DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN opens it from play/edit/sequencer, START+UP goes back
 DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/clink.asm)
 

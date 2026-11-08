@@ -807,7 +807,7 @@ for _ in range(5):
     chord_grid()            # 1/48, 1/4, 1/4T, 1/8, 1/8T
 check("five more B+A: 1/8T (4 ticks per cell)", (v("wDiv"), v("wDivTicks")) == (3, 4), (v("wDiv"), v("wDivTicks")))
 settle()
-status = [mem[sym["wStatusBuf"] + i] for i in range(9, 14)]
+status = [mem[sym["wStatusBuf"] + i] for i in range(8, 13)]
 check("status line shows the division label '1/8T'", status[:4] == [ord(c) - 32 for c in "1/8T"], status)
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
 check("ruler at 1/8T: bar 1 at column 0, beat dots every 3 columns (12 ticks / 4)",

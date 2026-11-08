@@ -60,6 +60,8 @@ BuildScreen:
     jr z, .kbd
     cp SCREEN_SLOT
     jp z, .slot
+    cp SCREEN_SONG
+    jp z, BuildSong
     jp .edit
 .slot:
     ld hl, _SCRN0 + 4
@@ -206,6 +208,8 @@ UpdateUI:
     jr z, .play
     cp SCREEN_SLOT
     jp z, UpdateSlot
+    cp SCREEN_SONG
+    jp z, UpdateSong
     jp UpdateEdit
 .play:
     ld a, [wDirty]
@@ -333,6 +337,9 @@ UpdateSlot:
     ld hl, wDirtySlot
     and [hl]
     ld [hl], a
+    ld a, c
+    cp NUM_SLOTS
+    ret nc                  ; (the dirty byte starts with all bits set)
     ld b, c                 ; b = slot
     ld a, c
     swap a
