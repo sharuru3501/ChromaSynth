@@ -490,7 +490,7 @@ T_EMP_W, T_NOTE_HEAD, T_NOTE_BODY, T_CUR_EMP, T_CUR_NOTE = 64, 68, 69, 70, 71
 
 
 def cell(ch, tick):
-    return mem[P + ch * 256 + tick]
+    return mem[1, P + ch * 512 + tick]   # pattern 1 lives in WRAM bank 1, 512 bytes per channel
 
 
 def grid(row, col):
@@ -529,8 +529,8 @@ settle()
 shot("09_roll")
 check("demo pattern (ticks): CH1 C4 + OFF after 6, A3 at bar 2, CH3 bass",
       cell(0, 0) == 60 and cell(0, 6) == 0xFF and cell(0, 12) == 64 and cell(0, 48) == 57 and cell(2, 0) == 48)
-state = (v("wSeqLen"), v("wRollNote"), v("wRollTick"), v("wRollCell"), v("wRollTop"), v("wDiv"), v("wDivTicks"))
-check("defaults: 2 bars, cursor C4 tick 0, window top C5, grid 1/16 (3 ticks)", state == (96, 60, 0, 0, 72, 4, 3), state)
+state = (v("wSeqBars"), v("wRollNote"), v("wRollTick"), v("wRollCell"), v("wRollTop"), v("wDiv"), v("wDivTicks"))
+check("defaults: 2 bars, cursor C4 tick 0, window top C5, grid 1/16 (3 ticks)", state == (2, 60, 0, 0, 72, 4, 3), state)
 # top = 72 -> grid row r shows pitch 72 - r: C4 (60) is row 12, E4 (64) row 8, G4 (67) row 5
 check("grid: cursor on the C4 note head", grid(12, 0) == T_CUR_NOTE, grid(12, 0))
 check("grid: note body follows the head (a 6-tick note spans two 1/16 columns)", grid(12, 1) == T_NOTE_BODY, grid(12, 1))
@@ -667,7 +667,7 @@ release("a", frames=4)
 press("b")
 check("deleting the first note keeps the neighbour", cell(1, 0) == 0 and cell(1, 6) == 60)
 for i in range(256):
-    mem[P + 256 + i] = 0     # clean up CH2
+    mem[1, P + 512 + i] = 0     # clean up CH2
 press("select")             # CH3 (bass): the cursor jumps to its first note
 check("channel switch: cursor on the first bass note", (v("wRollNote"), v("wRollTick"), v("wRollTop")) == (48, 0, 56),
       (v("wRollNote"), v("wRollTick"), v("wRollTop")))
@@ -684,14 +684,14 @@ check("SELECT+UP: BPM 121", v("wBpm") == 121, v("wBpm"))
 tap_while("select", "down")
 check("SELECT+DOWN: BPM 120", v("wBpm") == 120, v("wBpm"))
 tap_while("select", "left")
-check("SELECT+LEFT: loop length 1 bar (48 ticks)", v("wSeqLen") == 48, v("wSeqLen"))
+check("SELECT+LEFT: loop length 1 bar", v("wSeqBars") == 1, v("wSeqBars"))
 tap_while("select", "left")
-check("loop length clamps at 1 bar", v("wSeqLen") == 48)
+check("loop length clamps at 1 bar", v("wSeqBars") == 1)
 tap_while("select", "right")
 tap_while("select", "right")
-check("SELECT+RIGHT x2: loop length 3 bars", v("wSeqLen") == 144, v("wSeqLen"))
+check("SELECT+RIGHT x2: loop length 3 bars", v("wSeqBars") == 3, v("wSeqBars"))
 tap_while("select", "left")
-check("loop length 2 bars again", v("wSeqLen") == 96)
+check("loop length 2 bars again", v("wSeqBars") == 2)
 check("combos did not change screen/channel", v("wScreen") == 2 and v("wSelCh") == 0)
 
 # ---- playback at the 1/16 grid
@@ -836,7 +836,7 @@ check("grid: the three notes are heads in columns 0, 1, 2",
 # play it: a note-on every 4 ticks (a third of a beat)
 mem[sym["wRollTick"]] = 0
 pb.tick(2)
-mem[sym["wSeqLen"]] = 48
+mem[sym["wSeqBars"]] = 1
 tap_while("select", "start")
 events = {}
 prev = cur(1)
@@ -849,13 +849,13 @@ tap_while("select", "start")
 check("triplet playback: note-ons land on ticks 0, 4 and 8 of the beat",
       events.get(0, [None])[0] == 60 and events.get(4, [None])[0] == 61 and events.get(8, [None])[0] == 62,
       {k: events[k] for k in sorted(events)[:6]})
-mem[sym["wSeqLen"]] = 96
+mem[sym["wSeqBars"]] = 2
 # one more full cycle returns to 1/16 (7 divisions)
 for _ in range(6):
     chord_grid()
 check("grid divisions wrap around (7 steps back to 1/8T)", (v("wDiv"), v("wDivTicks")) == (3, 4) or v("wDiv") == 2, (v("wDiv"), v("wDivTicks")))
 for i in range(256):
-    mem[P + 256 + i] = 0
+    mem[1, P + 512 + i] = 0
 nav("right")
 pb.tick(4)
 check("START+RIGHT from the sequencer -> keyboard screen", v("wScreen") == 3, v("wScreen"))

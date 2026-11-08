@@ -1,25 +1,25 @@
 ; Save/load a song (patches, chain, patterns, BPM) to cartridge SRAM (MBC5, 128 KB on the Smart Card).
 ;
 ; The SRAM is shared with every ROM on the card (LSDj uses it from the bottom), so ChromaSynth
-; only touches the LAST TWO 8 KB banks (SLOT_BANK0, +1) as NUM_SLOTS slots of SLOT_SIZE bytes:
-;   slot n: bank SLOT_BANK0 + n / 2, address $A000 + (n mod 2) * SLOT_SIZE
+; only touches the LAST FOUR 8 KB banks as NUM_SLOTS slots of one bank each:
+;   slot n: bank SLOT_BANK0 + n, address $A000
 ;   +0    "CSYN"   magic
 ;   +4    version  (SAVE_VERSION)
 ;   +5    wPatch   (NUM_PATCHES * PATCH_SIZE = 160 bytes: 4 channels + the MIDI settings block)
 ;   +165  wChain   (CHAIN_LEN bytes)
-;   +197  wBpm
-;   +198  wSeqLen  (ticks)
-;   +199  the patterns: NUM_PATS x NUM_CH x SEQ_TICKS bytes (only the 192 used ticks of a channel)
-;   +3271 checksum = (sum of the data bytes) xor $A5
-;   +3272 name     (NAME_LEN bytes, indices into NameChars; not in the checksum)
+;   +181  wBpm
+;   +182  wSeqBars  (loop length)
+;   +183  the patterns, one after the other: NUM_PATS x NUM_CH x NUM_SEGS x SEQ_TICKS bytes
+;   +6327 checksum = (sum of the data bytes) xor $A5
+;   +6328 name     (NAME_LEN bytes, indices into NameChars; not in the checksum)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 8
-DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + NUM_PATS * NUM_CH * SEQ_TICKS
+DEF SAVE_VERSION  EQU 9
+DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + NUM_PATS * NUM_CH * NUM_SEGS * SEQ_TICKS
 
 SECTION "SRAM", ROM0
 
@@ -39,15 +39,9 @@ SramClose:
 ; Selects the selected slot's bank. -> hl = start of the slot (SRAM must be open). Clobbers a.
 SlotBase:
     ld a, [wSlot]
-    srl a
     add SLOT_BANK0
     ld [rRAMB], a           ; the slot's bank (SRAM must be open)
-    ld a, [wSlot]
-    and 1
-    swap a                  ; * 16: SLOT_SIZE / 256
-    add HIGH(_SRAM)
-    ld h, a
-    ld l, 0
+    ld hl, _SRAM
     ret
 
 ; -> a = 1 << wSlot. Clobbers b.
@@ -290,7 +284,7 @@ SaveAll:
     call SramOpen
     call SlotBase
     call SlotWritable       ; (clobbers de)
-    jr c, .inUse
+    jp c, .inUse
     call SlotBase
     ld d, h
     ld e, l                 ; de = destination
@@ -308,11 +302,15 @@ SaveAll:
     ld hl, wBpm
     ld bc, 1
     call CopySum
-    ld hl, wSeqLen
+    ld hl, wSeqBars
     ld bc, 1
     call CopySum
+    ld a, 1                 ; pattern bank 1..NUM_PATS
+.bank:
+    push af
+    ld [$FF70], a           ; SVBK
     ld a, HIGH(wPatterns)
-.pat:
+.pat:                       ; the pages of the bank: channel c, segment g = page c * 2 + g
     push af
     ld h, a
     ld l, 0
@@ -320,8 +318,14 @@ SaveAll:
     call CopySum
     pop af
     inc a
-    cp HIGH(wPatterns) + NUM_PATS * NUM_CH
+    cp HIGH(wPatterns) + NUM_CH * NUM_SEGS
     jr nz, .pat
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .bank
+    ld a, [wEditBank]       ; the piano roll reads the edited pattern's bank
+    ld [$FF70], a
     ld a, [wSaveSum]
     xor $A5
     ld [de], a
@@ -365,9 +369,13 @@ LoadAll:
     ld de, wBpm
     ld bc, 1
     call CopyBytes
-    ld de, wSeqLen
+    ld de, wSeqBars
     ld bc, 1
     call CopyBytes
+    ld a, 1
+.bank:
+    push af
+    ld [$FF70], a           ; SVBK
     ld a, HIGH(wPatterns)
 .pat:
     push af
@@ -377,8 +385,14 @@ LoadAll:
     call CopyBytes
     pop af
     inc a
-    cp HIGH(wPatterns) + NUM_PATS * NUM_CH
+    cp HIGH(wPatterns) + NUM_CH * NUM_SEGS
     jr nz, .pat
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .bank
+    ld a, [wEditBank]
+    ld [$FF70], a
     inc hl                  ; the checksum, then the name
     ld de, wName
     ld bc, NAME_LEN

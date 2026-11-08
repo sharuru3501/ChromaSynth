@@ -34,23 +34,38 @@ EntryPoint:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call MemCopy
-    ld a, 1
-    ld [$FF70], a           ; SVBK: WRAM bank 1 at $D000 (a DMG has plain RAM there)
-    ld hl, DefaultPattern
-    ld de, wPattern
+    ld a, 1                 ; every pattern bank starts empty ...
+.clearBank:
+    push af
+    ld [$FF70], a           ; SVBK
+    ld hl, wPatterns
     ld bc, NUM_CH * SEQ_STRIDE
-    call MemCopy
-    ld hl, wPattern + NUM_CH * SEQ_STRIDE   ; the other patterns start empty
-    ld bc, (NUM_PATS - 1) * NUM_CH * SEQ_STRIDE
     call MemClear
-    ld a, HIGH(wPatterns)
-    ld [wEditBase], a
-    ld [wPlayBase], a
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .clearBank
+    ld a, 1                 ; ... except pattern 1: the demo
+    ld [$FF70], a
+    ld hl, DefaultPattern
+    ld de, wPatterns
+    ld b, NUM_CH
+.demoCh:
+    push bc
+    ld bc, 256
+    call MemCopy            ; (a channel's first 256 ticks; its second page stays empty)
+    inc d                   ; de -> the next channel's first page
+    pop bc
+    dec b
+    jr nz, .demoCh
+    ld a, 1
+    ld [wEditBank], a
+    ld [wPlayBank], a
     call ChainReset
     ld a, 120
     ld [wBpm], a
-    ld a, 2 * TICKS_PER_BAR ; the demo is two bars long
-    ld [wSeqLen], a
+    ld a, 2                 ; the demo is two bars long
+    ld [wSeqBars], a
     ld a, DEFAULT_DIV       ; piano-roll grid: 1/16
     call SetDivision
     ld a, 127

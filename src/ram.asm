@@ -14,14 +14,20 @@ wTx:            ds 256
 SECTION "Patch", WRAM0, ALIGN[8]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
-; Patterns: pattern p, channel c, tick t at wPatterns + p * 1024 + c * 256 + t. All of the
-; switchable WRAM bank ($D000-$DFFF; bank 1, which is what both a DMG and a CGB map there).
-; A pattern's base page is HIGH(wPatterns) + p * 4; the channel page is base + c and the tick
-; is the low byte, so no 16-bit arithmetic is needed anywhere. wEditBase / wPlayBase hold the
-; base page of the pattern being edited / played.
-SECTION "Patterns", WRAMX[$D000]
-wPattern:                                       ; = pattern 0
-wPatterns:      ds NUM_PATS * NUM_CH * SEQ_STRIDE
+; Patterns: pattern p lives in its own WRAM bank (p + 1, selected with SVBK = $FF70) at $D000:
+; channel c, segment g (4 bars each), tick t at wPatterns + c * 512 + g * 256 + t. The page is
+; HIGH(wPatterns) + c * 2 + g and the tick is the low byte, so no 16-bit arithmetic is needed.
+; SVBK is always the edited pattern's bank (wEditBank) except inside SeqStep, which reads the
+; played pattern's bank and puts the edited one back. (Needs a CGB: a DMG has no banks.)
+SECTION "Patterns 1", WRAMX[$D000], BANK[1]
+wPattern:
+wPatterns:      ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 2", WRAMX[$D000], BANK[2]
+                ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 3", WRAMX[$D000], BANK[3]
+                ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 4", WRAMX[$D000], BANK[4]
+                ds NUM_CH * SEQ_STRIDE
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
@@ -90,13 +96,19 @@ wBendSign:      db
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
 wSeqPlay:       db          ; 1 = sequencer running
-wSeqTick:       db          ; next tick to play (0..wSeqLen-1)
+wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS-1)
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
-wSeqLen:        db          ; loop length in ticks (48/96/144/192)
-wEditBase:      db          ; base page of the pattern shown / edited on the piano roll
-wPlayBase:      db          ; base page of the pattern the sequencer plays
+wSeqBars:       db          ; loop length in bars (1..MAX_BARS)
+wSeqSeg:        db          ; segment (4 bars) of the next tick to play
+wSeqCurSeg:     db          ; segment of the tick that was played last (playhead)
+wRollSeg:       db          ; piano-roll cursor: segment (wRollTick / wRollCell count inside it)
+wPageSeg:       db          ; segment of the visible page
+wBCSeg:         db          ; BuildCols scratch
+wRCSeg:         db          ; RollChannelChanged scratch
+wEditBank:      db          ; WRAM bank of the pattern shown / edited on the piano roll (1..NUM_PATS)
+wPlayBank:      db          ; WRAM bank of the pattern the sequencer plays
 wEditPat:       db          ; the edited pattern's number
 wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
 wChainPos:      db          ; chain step being played

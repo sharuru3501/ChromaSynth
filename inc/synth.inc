@@ -66,15 +66,15 @@ DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothin
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
 
-; Save slots (src/sram.asm): the last two 8 KB banks of the 128 KB SRAM, 4 slots of 4 KB.
-DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x SEQ_TICKS ticks)
-DEF CHAIN_LEN  EQU 32      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
+; Save slots (src/sram.asm): the last four 8 KB banks of the 128 KB SRAM, 4 slots of 8 KB.
+DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x up to 8 bars); pattern p lives in WRAM bank p + 1
+DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
 DEF CHAIN_END  EQU $FF
 DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
 DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
 DEF NUM_SLOTS  EQU 4
-DEF SLOT_SIZE  EQU 4096    ; two slots per 8 KB SRAM bank
-DEF SLOT_BANK0 EQU 14      ; slots 0-1 in bank 14, slots 2-3 in bank 15
+DEF SLOT_SIZE  EQU 8192    ; one 8 KB SRAM bank per slot
+DEF SLOT_BANK0 EQU 12      ; slot n in bank 12 + n (banks 12-15)
 
 ; D-pad auto-repeat (frames)
 DEF REPEAT_DELAY EQU 16
@@ -90,8 +90,10 @@ DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/cl
 ; Time base: 12 ticks per beat (quarter note); see docs/ROLL_DESIGN.md.
 DEF TICKS_PER_BEAT EQU 12
 DEF TICKS_PER_BAR  EQU 48
-DEF SEQ_TICKS  EQU 192      ; ticks per channel (4 bars of 4/4)
-DEF SEQ_STRIDE EQU 256      ; wPattern bytes per channel (HIGH(wPattern)+ch, LOW = tick)
+DEF SEQ_TICKS  EQU 192      ; ticks per segment (4 bars of 4/4); a position is (segment, tick)
+DEF SEQ_STRIDE EQU 512      ; pattern bytes per channel: two 256-byte pages, one per segment of SEQ_TICKS ticks
+DEF NUM_SEGS   EQU 2        ; segments per pattern: a pattern is up to 8 bars (2 x 4 bars)
+DEF MAX_BARS   EQU 8
 DEF SEQ_PAGE   EQU 16       ; grid columns per piano-roll page
 DEF ROLL_ROWS  EQU 16       ; pitch rows visible
 DEF ROLL_COL0  EQU 2        ; first grid column (cols 0-1 = key labels)

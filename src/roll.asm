@@ -106,14 +106,18 @@ RollRefreshAll:
 ; The selected channel changed: put the cursor on its first note (if it has
 ; one) and centre the pitch window on it, so the channel is visible at once.
 RollChannelChanged:
-    ld a, [wEditBase]
-    ld b, a
     ld a, [wSelCh]
-    add b
+    add a
+    add HIGH(wPatterns)     ; the channel's first page (segment 0)
     ld b, a
+    xor a
+    ld [wRCSeg], a
+.seg:
     ld c, 0                 ; c = tick
 .scan:
-    ld h, b
+    ld a, [wRCSeg]
+    add b
+    ld h, a
     ld l, c
     ld a, [hl]
     and a
@@ -125,9 +129,18 @@ RollChannelChanged:
     ld a, c
     cp SEQ_TICKS
     jr c, .scan
+    ld a, [wRCSeg]          ; the next segment
+    inc a
+    ld [wRCSeg], a
+    cp NUM_SEGS
+    jr c, .seg
     jp RollRefreshAll       ; empty channel: leave the cursor where it is
 .found:
     ld [wRollNote], a
+    ld d, a
+    ld a, [wRCSeg]
+    ld [wRollSeg], a
+    ld a, d
     ld d, a                 ; d = pitch
     ld a, [wDivTicks]
     ld e, a
@@ -191,6 +204,10 @@ RollCursorMoved:
 ; -> carry set if the page or the pitch window changed.
 RollScrollFix:
     ld d, 0
+    ld a, [wRollSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .newPage         ; another segment
     ld a, [wRollCell]
     ld b, a
     ld a, [wPageCell]
@@ -265,6 +282,8 @@ RollSetPage:
 ; Show the page that contains the cursor cell: page = wRollCell / wPageCols.
 ; Clobbers a, b, c.
 RollPageFromCell:
+    ld a, [wRollSeg]
+    ld [wPageSeg], a
     ld a, [wPageCols]
     ld c, a
     ld a, [wRollCell]
@@ -283,6 +302,10 @@ RollPageFromCell:
 RollFollow:
     ld a, [wSeqCur]
     ld b, a
+    ld a, [wSeqCurSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .move            ; the playhead is in another segment
     ld a, [wPageTick]
     ld c, a
     ld a, b
@@ -305,6 +328,8 @@ RollFollow:
     inc d
     jr .l
 .done:
+    ld a, [wSeqCurSeg]
+    ld [wPageSeg], a
     ld a, d
     call RollSetPage
     jp RollRefreshAll
@@ -340,21 +365,31 @@ MarkAllRender:
 ; bar/beat marks stay where they are when the grid division changes.
 ; Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
-    ld a, [wEditBase]
-    ld b, a
     ld a, [wSelCh]
-    add b
+    add a
+    add HIGH(wPatterns)
     ld b, a                 ; b = high byte of this channel's pattern
     ld a, [wPageTick]
     ld c, a                 ; c = tick where the current column starts
     ld d, 0                 ; d = pitch sounding at c
     ld e, c
-.back:                      ; look backwards for the last event before the page
+    ld a, [wPageSeg]
+    ld [wBCSeg], a
+.back:                      ; look backwards for the last event before the page (across segments)
     ld a, e
     and a
-    jr z, .init
+    jr nz, .step
+    ld a, [wBCSeg]
+    and a
+    jr z, .init             ; the very start of the pattern
+    dec a
+    ld [wBCSeg], a
+    ld e, SEQ_TICKS         ; the end of the previous segment
+.step:
     dec e
-    ld h, b
+    ld a, [wBCSeg]
+    add b
+    ld h, a
     ld l, e
     ld a, [hl]
     and a
@@ -362,8 +397,11 @@ BuildCols:
     cp CELL_OFF
     jr z, .init
     ld d, a
-.init:                      ; beat phase of the first column: tick mod 12, tick / 12
-    ld a, c
+.init:                      ; b = the channel's page in the page's segment from here on
+    ld a, [wPageSeg]
+    add b
+    ld b, a
+    ld a, c                 ; beat phase of the first column: tick mod 12, tick / 12
     ld e, 0
 .mod:
     cp TICKS_PER_BEAT
@@ -373,7 +411,9 @@ BuildCols:
     jr .mod
 .modDone:
     ld [wBCPhase], a
-    ld a, e
+    ld a, [wPageSeg]
+    swap a                  ; a segment is 16 beats
+    add e
     ld [wBCBeat], a         ; absolute beat number (bar = beat / 4)
     xor a
     ld [wBCCol], a
@@ -401,9 +441,7 @@ BuildCols:
     and a                   ; ruler tile: only beat columns inside the loop get a mark
     ld a, 0
     jr z, .rulerSet
-    ld a, c
-    ld hl, wSeqLen
-    cp [hl]
+    call InLoop
     ld a, 0
     jr nc, .rulerSet        ; after the loop end: blank
     ld a, [wBCFlag]
@@ -502,11 +540,58 @@ BuildCols:
     ld hl, wRulerBuf + 18
     ld a, 'P' - 32 + TILE_INV   ; inverted tab, like the channel label
     ld [hl+], a
-    ld a, [wRollPage]
+    push hl
+    ld a, [wPageSpan]       ; the page number counts on through the segments
+    ld e, a
+    ld a, SEQ_TICKS
+    ld c, 0
+.pps:
+    sub e
+    inc c                   ; c = pages in a segment (a page span divides SEQ_TICKS)
+    and a
+    jr nz, .pps
+    ld a, [wPageSeg]
+    and a
+    ld a, 0
+    jr z, .firstSeg
+    ld a, c
+.firstSeg:
+    ld hl, wRollPage
+    add [hl]
+    pop hl
     inc a
     call NibbleTile
     add TILE_INV
     ld [hl], a
+    ret
+
+; c = tick inside the page's segment -> carry set if that position is before the loop end.
+; Keeps bc, de.
+InLoop:
+    push de
+    ld a, [wSeqBars]
+    dec a
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, LoopEndTab
+    add hl, de
+    ld a, [wPageSeg]
+    cp [hl]
+    jr c, .inside           ; an earlier segment than the loop's last one
+    jr nz, .outside         ; a later one
+    inc hl
+    ld a, c
+    cp [hl]                 ; the last segment: tick < ticks played in it
+    pop de
+    ret
+.inside:
+    scf
+    pop de
+    ret
+.outside:
+    and a
+    pop de
     ret
 
 ; Store the current column (wBCPitch, wBCHead | wBCFlag) and move to the next one.
@@ -615,6 +700,10 @@ RenderRow:
     ld a, [wRollNote]
     cp b
     jr nz, .noCursor
+    ld a, [wRollSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .noCursor        ; the cursor is in another segment
     ld a, [wPageCell]
     ld d, a
     ld a, [wRollCell]
@@ -940,6 +1029,10 @@ RollPlayheadCalc:
     ld a, [wSeqPlay]
     and a
     jr z, .hide
+    ld a, [wSeqCurSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .hide            ; the playhead is in another segment
     ld a, [wPageTick]
     ld c, a
     ld a, [wSeqCur]

@@ -1,6 +1,6 @@
 ; Song: up to NUM_PATS patterns (each 4 channels x SEQ_TICKS ticks) and a chain of up to
 ; CHAIN_LEN steps that says which pattern plays next. All channels always play the same
-; pattern (one tick counter, one loop length: wSeqLen).
+; pattern (one tick counter, one loop length: wSeqBars).
 ;   wSongMode 0 = loop the edited pattern (the way it always was), 1 = play the chain
 ;   wEditBase / wPlayBase = base page of the edited / played pattern (src/ram.asm)
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
@@ -15,7 +15,7 @@ INCLUDE "synth.inc"
 DEF ROW_SONG_INFO  EQU _SCRN0 + 2 * 32
 DEF ROW_SONG_CHAIN EQU _SCRN0 + 6 * 32
 DEF CHAIN_COLS     EQU 6
-DEF CHAIN_ROWS     EQU 6        ; ceil(CHAIN_LEN / CHAIN_COLS)
+DEF CHAIN_ROWS     EQU 3        ; ceil(CHAIN_LEN / CHAIN_COLS)
 
 SECTION "Song", ROMX, BANK[1]
 
@@ -35,51 +35,18 @@ ChainReset:
     ld [wEditPat], a
     ret
 
-; a = pattern number -> a = its base page.
-PatBase:
-    add a
-    add a
-    add HIGH(wPatterns)
-    ret
-
-; A song was loaded: a damaged chain is repaired (an unknown number ends it, step 0 plays), the
-; first pattern is edited, loop mode. Clobbers a, b, hl.
-SongLoaded:
-    ld hl, wChain
-    ld b, CHAIN_LEN
-.fix:
-    ld a, [hl]
-    cp NUM_PATS
-    jr c, .ok
-    ld a, CHAIN_END
-    ld [hl], a
-.ok:
-    inc hl
-    dec b
-    jr nz, .fix
-    ld a, [wChain]
-    cp NUM_PATS
-    jr c, .keep
-    xor a
-    ld [wChain], a          ; a song has at least one step
-.keep:
-    xor a
-    ld [wSongMode], a
-    ld [wChainPos], a
-    jp SongSetEdit
-
 ; The sequencer starts: the first chain step (song mode) or the edited pattern (loop mode).
 SongRestart:
     xor a
     ld [wChainPos], a
     ld a, [wSongMode]
     and a
-    ld a, [wEditBase]
+    ld a, [wEditBank]
     jr z, .set
     ld a, [wChain]
-    call PatBase
+    inc a                   ; pattern number -> its WRAM bank
 .set:
-    ld [wPlayBase], a
+    ld [wPlayBank], a
     jr SongMarkPos
 
 ; Redraw the chain row of the step that is playing (its [ ] marks).
@@ -118,20 +85,21 @@ SongNext:
     jr c, .play
     xor a                   ; (step 0 is never the end; a damaged chain plays pattern 1)
 .play:
-    call PatBase
-    ld [wPlayBase], a
+    inc a                   ; pattern number -> its WRAM bank
+    ld [wPlayBank], a
     jr SongMarkPos          ; the new step gets them
 
 ; a = pattern number (0..NUM_PATS-1): edit it. In loop mode it is played from now on too.
 SongSetEdit:
     ld [wEditPat], a
-    call PatBase
-    ld [wEditBase], a
+    inc a
+    ld [wEditBank], a
+    ld [$FF70], a           ; the piano roll reads this bank
     ld a, [wSongMode]
     and a
     jr nz, .mark
-    ld a, [wEditBase]
-    ld [wPlayBase], a
+    ld a, [wEditBank]
+    ld [wPlayBank], a
     ld a, [wSeqPlay]        ; another pattern plays from now on: a note of the old one would
     and a                   ; never get its note-off
     call nz, SeqSilence
@@ -140,6 +108,32 @@ SongSetEdit:
     or 1
     ld [wDirtySong], a
     jp MarkSeqStatus
+
+; A song was loaded: a damaged chain is repaired (an unknown number ends it, step 0 plays), the
+; first pattern is edited, loop mode. Clobbers a, b, hl.
+SongLoaded:
+    ld hl, wChain
+    ld b, CHAIN_LEN
+.fix:
+    ld a, [hl]
+    cp NUM_PATS
+    jr c, .ok
+    ld a, CHAIN_END
+    ld [hl], a
+.ok:
+    inc hl
+    dec b
+    jr nz, .fix
+    ld a, [wChain]
+    cp NUM_PATS
+    jr c, .keep
+    xor a
+    ld [wChain], a          ; a song has at least one step
+.keep:
+    xor a
+    ld [wSongMode], a
+    ld [wChainPos], a
+    jp SongSetEdit
 
 ; ---------------------------------------------------------------- the song screen
 ; Called with the LCD off after the screen was cleared.
@@ -171,7 +165,7 @@ BuildSong:
     ld hl, _SCRN0 + 16 * 32
     ld de, sSongHelp4
     call DrawString
-    ld a, %01111111         ; the info rows and the six chain rows
+    ld a, %00001111         ; the info rows and the three chain rows
     ld [wDirtySong], a
     ret
 
