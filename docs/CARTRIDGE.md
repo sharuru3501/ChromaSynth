@@ -93,6 +93,11 @@ ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクト�
 - 書いた ROM: ブランチ `feat/m9b-effects`(`fb1abdb`)のビルド、SHA-256 `6393ad9d14b2eb9b…`。結果: ページ 2 に ROM がそのまま入っている(バンク 2、オフセット 0x8000)。**ページ 1(LSDj)と SRAM はバックアップと完全に一致。** 再吸い出しは `~/Documents/ChromaticBackup/lsdj_card/after_m9b/`。
 - 注意: M9b は `SAVE_VERSION` 6。保存形式が変わったので、実機で SELECT+A は押さない(共有 SRAM)。音の確認(聴感)は未。
 
+## 4.16 M13(曲の名前)の ROM に入れ替えた結果(2026-11-08)
+- 書く前: SRAM の LSDj の部分(バンク 15 の外)が元のバックアップと一致、バンク 15 が M12 の試験後の状態(スロット 1・2)と一致。2 回とも。
+- 書いた ROM: ブランチ `feat/track-names` のビルド、SHA-256 `07fb8f11…`。結果: ページ 2 に ROM がそのまま入っている(バンク 2)。**ページ 1(LSDj)は完全に一致。SRAM は変わっていない**(保存済みのスロットも無事)。再吸い出しは `after_m13/`。
+- 未確認: 実機での名前の入力と保存。
+
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
 - **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
