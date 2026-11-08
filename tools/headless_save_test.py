@@ -245,9 +245,9 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(20)
     # every row must have been drawn (marker on row of slot 3, USED on it, FREE on slot 1)
     def row(n):
-        return bytes(mem[0x9800 + (2 + n) * 32 + i] for i in range(10))
-    check("slot 3's row: marker and USED", row(2)[0] == ord(">") - 32 and row(2)[5:9] == bytes(ord(c) - 32 for c in "USED"), row(2))
-    check("slot 1's row: no marker, FREE", row(0)[0] == 0 and row(0)[5:9] == bytes(ord(c) - 32 for c in "FREE"), row(0))
+        return bytes(mem[0x9800 + (2 + n) * 32 + i] for i in range(18))
+    check("slot 3's row: marker and USED", row(2)[0] == ord(">") - 32 and row(2)[14:18] == bytes(ord(c) - 32 for c in "USED"), row(2))
+    check("slot 1's row: no marker, FREE", row(0)[0] == 0 and row(0)[14:18] == bytes(ord(c) - 32 for c in "FREE"), row(0))
     pb.button_press("up"); pb.tick(3); pb.button_release("up"); pb.tick(20)
     check("the marker moved to slot 2's row", row(1)[0] == ord(">") - 32 and row(2)[0] == 0, (row(1), row(2)))
     pb.button_press("a"); pb.tick(3); pb.button_release("a"); pb.tick(10)
@@ -261,6 +261,56 @@ with tempfile.TemporaryDirectory() as tmp:
     check("B on a used slot asks first", mem[sym["wMsg"]] == 6, mem[sym["wMsg"]])
     pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(10)
     check("... the second B overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    pb.stop(save=False)
+
+
+# --- song names: SELECT+UP/DOWN edits the character, LEFT/RIGHT moves the cursor; saved with the slot
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    ram = pathlib.Path(str(rom) + ".ram")
+    NAME = sym["wName"]
+    CACHE = sym["wSlotNames"]
+    pb = boot(rom)
+    mem = pb.memory
+    combo(pb, "start", "down")
+    pb.tick(20)
+    check("a new song has a blank name", bytes(mem[NAME:NAME + 8]) == bytes(8))
+    combo(pb, "select", "up")                          # ' ' -> 'A'
+    combo(pb, "select", "up")                          # -> 'B'
+    check("SELECT+UP steps the first character", mem[NAME] == 2, mem[NAME])
+    check("... without moving the slot or changing channel", mem[sym["wSlot"]] == 0 and mem[sym["wSelCh"]] == 0)
+    pb.button_press("right"); pb.tick(3); pb.button_release("right"); pb.tick(5)
+    check("RIGHT moves the cursor", mem[sym["wNameCur"]] == 1, mem[sym["wNameCur"]])
+    combo(pb, "select", "down")                        # ' ' -> '-' (wraps below the first)
+    check("SELECT+DOWN wraps below the first character", mem[NAME + 1] == 37, mem[NAME + 1])
+    for _ in range(12):
+        pb.button_press("right"); pb.tick(3); pb.button_release("right"); pb.tick(3)
+    check("the cursor stops at the last character", mem[sym["wNameCur"]] == 7, mem[sym["wNameCur"]])
+    pb.tick(10)
+    name_row = bytes(mem[0x9800 + 11 * 32 + 5 + i] for i in range(8))
+    check("the name row shows 'B-'", name_row[:2] == bytes([ord("B") - 32, ord("-") - 32]), name_row)
+    cur_row = bytes(mem[0x9800 + 12 * 32 + 5 + i] for i in range(8))
+    check("the cursor mark is under the 8th character", cur_row == bytes(7) + bytes([ord("+") - 32]), cur_row)
+    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(30)
+    check("B saves the song with its name", mem[sym["wMsg"]] == 1 and mem[CACHE] == 2 and mem[CACHE + 1] == 37, (mem[sym["wMsg"]], mem[CACHE]))
+    row0 = bytes(mem[0x9800 + 2 * 32 + 5 + i] for i in range(2))
+    check("the slot row shows the name", row0 == bytes([ord("B") - 32, ord("-") - 32]), row0)
+    pb.stop(save=True)
+    raw = ram.read_bytes()
+    check("the name is stored after the checksum", raw[slot_off(0) + 936:slot_off(0) + 938] == bytes([2, 37]), raw[slot_off(0) + 936:slot_off(0) + 940])
+    pb = boot(rom)
+    mem = pb.memory
+    check("boot: the slot list cache has the name", mem[CACHE] == 2 and mem[CACHE + 1] == 37, (mem[CACHE], mem[CACHE + 1]))
+    check("boot: slot 1 loaded with its name", mem[NAME] == 2 and mem[NAME + 1] == 37, (mem[NAME], mem[NAME + 1]))
+    pb.stop(save=False)
+    # an out-of-range name byte (corrupt / foreign) becomes blank, not garbage
+    data = bytearray(raw)
+    data[slot_off(0) + 936] = 200
+    ram.write_bytes(bytes(data))
+    pb = boot(rom)
+    mem = pb.memory
+    check("an out-of-range name byte is blanked", mem[NAME] == 0 and mem[CACHE] == 0, (mem[NAME], mem[CACHE]))
     pb.stop(save=False)
 
 # --- a cart without SRAM: the read-back check must report failure, not "SAVED"

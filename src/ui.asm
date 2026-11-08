@@ -65,18 +65,25 @@ BuildScreen:
     ld hl, _SCRN0 + 4
     ld de, sSlotTitle
     call DrawString
-    ld hl, _SCRN0 + 14 * 32
+    ld hl, _SCRN0 + 13 * 32
     ld de, sSlotHelp1
     call DrawString
-    ld hl, _SCRN0 + 15 * 32
+    ld hl, _SCRN0 + 14 * 32
     ld de, sSlotHelp2
+    call DrawString
+    ld hl, _SCRN0 + 15 * 32
+    ld de, sSlotHelp4
     call DrawString
     ld hl, _SCRN0 + 16 * 32
     ld de, sSlotHelp3
     call DrawString
     ld a, $FF
     ld [wDirtySlot], a
-    ret
+    ld a, 1
+    ld [wDirtyName], a
+    ld hl, _SCRN0 + 11 * 32
+    ld de, sNameLabel
+    jp DrawString
 .kbd:
     call .play              ; the channel rows and status line are the play screen's
     ld hl, _SCRN0 + 4
@@ -288,7 +295,30 @@ UpdateSlot:
     ld [wDirty], a          ; the other play-screen bits mean nothing here
     ld a, [wDirtySlot]
     and a
+    jr nz, .rows
+    ld a, [wDirtyName]      ; the name and its cursor
+    and a
     ret z
+    xor a
+    ld [wDirtyName], a
+    ld hl, _SCRN0 + 11 * 32 + 5
+    ld de, wName
+    call DrawName
+    ld hl, _SCRN0 + 12 * 32 + 5
+    ld b, NAME_LEN
+    xor a
+.clearCur:
+    ld [hl+], a
+    dec b
+    jr nz, .clearCur
+    ld a, [wNameCur]
+    ld e, a
+    ld d, 0
+    ld hl, _SCRN0 + 12 * 32 + 5
+    add hl, de
+    ld [hl], '+' - 32       ; under the character being edited
+    ret
+.rows:
     ld c, 0
 .find:
     rra
@@ -324,6 +354,23 @@ UpdateSlot:
     ld [hl+], a
     inc hl
     inc hl
+    push bc
+    push hl                 ; the name of slot b (cached): 8 tiles at col 5
+    ld a, b
+    add a
+    add a
+    add a
+    add LOW(wSlotNames)
+    ld e, a
+    ld d, HIGH(wSlotNames)
+    call DrawName           ; -> hl past the name (col 13)
+    inc hl                  ; col 14: USED / FREE
+    ld d, h
+    ld e, l
+    pop hl
+    pop bc
+    ld h, d
+    ld l, e
     ld a, 1                 ; mask of slot b
     inc b
     dec b
@@ -342,6 +389,27 @@ UpdateSlot:
     ld de, sSlotUsed
 .draw:
     jp DrawString
+
+; hl = dest tiles, de = NAME_LEN name indices -> NAME_LEN tiles; hl returns past them.
+DrawName:
+    ld b, NAME_LEN
+.next:
+    ld a, [de]
+    inc de
+    push de
+    push hl
+    ld e, a
+    ld d, 0
+    ld hl, NameChars
+    add hl, de
+    ld a, [hl]
+    sub 32
+    pop hl
+    ld [hl+], a
+    pop de
+    dec b
+    jr nz, .next
+    ret
 
 ; c = channel -> de = TypeNames + c * 5. Keeps hl, c.
 TypeNamePtr:
@@ -702,7 +770,12 @@ sSlotList:    db "ST+DOWN:SLOT LIST", 0
 sSlotTitle:   db "SAVE SLOTS", 0
 sSlotHelp1:   db "UD:PICK  A:LOAD", 0
 sSlotHelp2:   db "B:SAVE (TWICE:OVER)", 0
+sSlotHelp4:   db "LR:POS  SEL+UD:CHAR", 0
 sSlotHelp3:   db "ST+UP:BACK", 0
+sNameLabel:   db "NAME", 0
+NameChars:    db " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+NameCharsEnd:
+    ASSERT NameCharsEnd - NameChars == NAME_CHARS
 sStop:        db "STOP", 0
 sPlay:        db "PLAY", 0
 TypeNames:    db "PUL1", 0, "PUL2", 0, "WAVE", 0, "NOIS", 0, "MIDI", 0
