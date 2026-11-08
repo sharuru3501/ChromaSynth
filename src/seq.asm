@@ -114,6 +114,13 @@ SeqTick:
 
 ; Play the current tick on all channels, then advance.
 SeqStep:
+    ld a, [wSongWrap]
+    and a
+    jr z, .noWrap
+    xor a
+    ld [wSongWrap], a
+    call SeqSilence         ; a note of the pattern that just ended must not carry into the next
+.noWrap:
     ld a, [wSeqTick]
     ld [wSeqCur], a
     ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)

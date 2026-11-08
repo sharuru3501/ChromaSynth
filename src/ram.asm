@@ -100,6 +100,7 @@ wPlayBase:      db          ; base page of the pattern the sequencer plays
 wEditPat:       db          ; the edited pattern's number
 wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
 wChainPos:      db          ; chain step being played
+wSongWrap:      db          ; 1 = the chain just moved on: release the notes before the next pattern's first tick
 wChain:         ds CHAIN_LEN ; pattern numbers, CHAIN_END after the last step
 wSongCur:       db          ; song screen: the cursor's chain step
 wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, bit n = chain row n-1)

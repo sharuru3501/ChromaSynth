@@ -278,6 +278,36 @@ with tempfile.TemporaryDirectory() as tmp:
     check("stopped: the marks are gone", row[3:6] == tiles(" 2 "), row)
     pb.stop(save=False)
 
+
+# --- a note that is still sounding at the end of a chain step does not carry into the next pattern
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    for i in range(4 * 1024):
+        mem[PAT + i] = 0
+    mem[PAT + 0] = 36                  # pattern 1: a bass note on channel 1 that nothing ends
+    mem[PAT + 1024 + 256 + 0] = 72     # pattern 2: a note on channel 2 only
+    mem[sym["wSeqLen"]] = 48
+    mem[sym["wBpm"]] = 240             # a bar = 60 frames
+    mem[CHAIN:CHAIN + 3] = bytes([0, 1, 0xFF])
+    combo(pb, "start", "up")
+    combo(pb, "select", "up")
+    combo(pb, "start", "down")
+    combo(pb, "select", "start")
+    pb.tick(20)
+    check("pattern 1's bass note sounds", mem[sym["wCurNote"]] == 36, mem[sym["wCurNote"]])
+    for _ in range(40):
+        pb.tick(2)
+        if v("wChainPos") == 1:
+            break
+    pb.tick(12)
+    check("in pattern 2 the old bass note is gone and channel 2 plays", v("wChainPos") == 1 and mem[sym["wCurNote"]] == 0 and mem[sym["wCurNote"] + 1] == 72,
+          (v("wChainPos"), mem[sym["wCurNote"]], mem[sym["wCurNote"] + 1]))
+    pb.stop(save=False)
+
 # --- saving and loading a whole song
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"

@@ -89,6 +89,8 @@ SongMarkPos:
 
 ; The pattern ended in song mode: the next chain step (back to the first after the last).
 SongNext:
+    ld a, 1
+    ld [wSongWrap], a       ; (SeqStep releases the old pattern's notes before tick 0 of the next)
     call SongMarkPos        ; the old step loses its marks
     ld a, [wChainPos]
     inc a
