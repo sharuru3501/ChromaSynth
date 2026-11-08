@@ -498,9 +498,14 @@ def grid(row, col):
     return mem[G + row * 20 + 2 + col]
 
 
+def shown_map():
+    """Base of the BG map that is on screen: the piano roll swaps between $9800 and $9C00 (LCDC bit 3)."""
+    return 0x9C00 if mem[0xFF40] & 8 else 0x9800
+
+
 def vram(row, col):
     """Tile actually in VRAM (BG map) at grid row 0..15 / column 0..15."""
-    return mem[0x9800 + (1 + row) * 32 + 2 + col]
+    return mem[shown_map() + (1 + row) * 32 + 2 + col]
 
 
 def v(name):
@@ -508,7 +513,7 @@ def v(name):
 
 
 def settle():
-    pb.tick(10)  # rendering and copying are spread over a few frames
+    pb.tick(14)  # a full redraw is built in the hidden map (8 frames of copying), then shown
 
 
 def chord_grid():
@@ -695,6 +700,7 @@ check("loop length 2 bars again", v("wSeqBars") == 2)
 check("combos did not change screen/channel", v("wScreen") == 2 and v("wSelCh") == 0)
 
 # ---- playback at the 1/16 grid
+settle()                    # (a loop length change redraws the roll in the hidden map first)
 tap_while("select", "start")
 check("SELECT+START starts playback", v("wSeqPlay") == 1)
 check("...still on the roll", v("wScreen") == 2)
@@ -730,7 +736,8 @@ check("playhead moves smoothly with the tick (X = 24 + dt*8/3)", len(samples) > 
       (exact, len(samples)))
 # the sprite really lands on every beat line: X = 24 + 32 * beat at 1/16 (4 columns of 8 px per beat)
 shown = {sh for _, _, _, sh in samples}
-check("playhead sprite lands exactly on the beat lines (X = 24, 56, 88, 120)", {24, 56, 88, 120} <= shown, sorted(shown)[:12])
+check("playhead sprite lands exactly on the beat lines (X = 56, 88, 120; 24 is tick 0, over before sampling starts)", {56, 88, 120} <= shown, sorted(shown)[:12])
+pb.tick(14)                  # (a page that just turned is built in the hidden map first, the playhead waits for it)
 check("playhead sprite is placed in OAM", mem[0xFE00] == 24 and mem[0xFE01] == v("wPlayShown"), (mem[0xFE00], mem[0xFE01]))
 check("16 playhead sprites stacked on the grid rows", mem[0xFE00 + 15 * 4] == 24 + 15 * 8 and mem[0xFE02] == 72)
 check("playhead line sits at the left edge of its cell (on the beat line)", mem[0x8000 + 72 * 16] == 0xC0 and mem[0x8000 + 72 * 16 + 1] == 0x00)

@@ -613,6 +613,7 @@ SeqPlace:
     call CellHL
     ld a, [wRollNote]
     ld [hl], a              ; note-on
+    call LoopCoverNote      ; a note past the loop end makes the loop longer
     ld a, [wDivTicks]
     add b                   ; a = end of the cell
     cp SEQ_TICKS
@@ -631,6 +632,33 @@ SeqPlace:
     ld c, a
     ld a, [wRollNote]
     jp NoteOn
+
+; A note was placed at the cursor: if its bar is after the loop end, the loop grows to
+; include it (up to MAX_BARS), so what you enter is what plays. Keeps b. Clobbers a, c, hl.
+LoopCoverNote:
+    ld a, [wRollTick]
+    ld c, 0                 ; c = bar inside the segment (tick / TICKS_PER_BAR)
+.bar:
+    cp TICKS_PER_BAR
+    jr c, .have
+    sub TICKS_PER_BAR
+    inc c
+    jr .bar
+.have:
+    ld a, [wRollSeg]
+    add a
+    add a                   ; a segment is 4 bars
+    add c
+    inc a                   ; bar number, 1-based
+    ld hl, wSeqBars
+    cp [hl]
+    ret c                   ; inside the loop already
+    ret z
+    ld [hl], a
+    push bc
+    call RollRefreshAll     ; the ruler and the status line show the new length
+    pop bc
+    ret
 
 ; A held (not newly pressed): LEFT/RIGHT = length, UP/DOWN = transpose.
 SeqNoteEdit:

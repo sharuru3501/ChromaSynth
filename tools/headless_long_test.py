@@ -101,9 +101,9 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wRollTick"]] = 0
     tap(pb, "left")                      # out of segment 2 ...
     tap(pb, "right")                     # ... and back in: the ruler is rebuilt
-    pb.tick(25)
-    ruler = bytes(mem[0x9800 + i] for i in range(20))
-    check("the ruler tab says page 5 (4 pages of segment 1 came first)", ruler[19] == ord("5") - 32 + 0x80, ruler)
+    pb.tick(30)
+    ruler = bytes(mem[(0x9C00 if mem[0xFF40] & 8 else 0x9800) + i] for i in range(20))
+    check("the ruler tab says the edited pattern: P1", ruler[18] == ord("P") - 32 + 0x80 and ruler[19] == ord("1") - 32 + 0x80, ruler)
     check("the ruler numbers the bars on: bar 5 over the first column", ruler[2] == ord("5") - 32, ruler[:6])
     tap(pb, "left")
     check("LEFT at cell 0 of segment 2: back to the last cell of segment 1", (v("wRollSeg"), v("wRollCell"), v("wRollTick")) == (0, 63, 189),
@@ -157,6 +157,84 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(9):
         combo(pb, "select", "left")
     check("SELECT+LEFT: and at 1 bar", v("wSeqBars") == 1, v("wSeqBars"))
+    pb.stop(save=False)
+
+
+# --- a full redraw is built in the hidden map and swapped in: no frame shows half old, half new rows
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+
+    def picture():
+        base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
+        return bytes(mem[base + r * 32 + c] for r in range(18) for c in range(20))
+
+    old = picture()
+    mem[sym["wRollNote"]] = mem[sym["wRollTop"]]      # the cursor on the top row: B+UP scrolls the pitch window
+    pb.button_press("b")
+    pb.button_press("up")
+    seen = []
+    for _ in range(20):
+        pb.tick(1)
+        seen.append(picture())
+    pb.button_release("up")
+    pb.button_release("b")
+    pb.tick(20)
+    new = picture()
+    pb.tick(40)                                        # the hidden map catches up in the background
+    check("the pitch scroll changed the picture", old != new)
+    check("on the way, every frame shows the old picture or the new one (no tearing)", all(f == old or f == new for f in seen),
+          sum(1 for f in seen if f != old and f != new))
+    check("both maps hold the new picture afterwards (the old one is brought up to date)",
+          bytes(mem[0x9800 + r * 32 + c] for r in range(18) for c in range(20)) ==
+          bytes(mem[0x9C00 + r * 32 + c] for r in range(18) for c in range(20)))
+    pb.stop(save=False)
+
+# --- the status line shows the loop length; a note placed after the loop end lengthens the loop
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+
+    def shown_row(r):
+        base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
+        return bytes(mem[base + r * 32 + c] for c in range(20))
+
+    st = shown_row(17)
+    check("the status line ends with the loop length: L2", st[18] == ord("L") - 32 and st[19] == ord("2") - 32, st)
+    check("the ruler ends with the pattern: P1", shown_row(0)[18:20] == bytes([ord("P") - 32 + 0x80, ord("1") - 32 + 0x80]), shown_row(0))
+    mem[sym["wRollSeg"]] = 0
+    mem[sym["wRollCell"]] = 32                 # bar 3 at 1/16 (16 cells a bar)... cell 32 = tick 96 = bar 3
+    mem[sym["wRollTick"]] = 96
+    mem[sym["wRollNote"]] = 64
+    tap(pb, "a")
+    pb.tick(30)
+    check("a note in bar 3 makes the loop 3 bars", v("wSeqBars") == 3, v("wSeqBars"))
+    st = shown_row(17)
+    check("... and the status line says L3", st[19] == ord("3") - 32, st)
+    mem[sym["wRollSeg"]] = 1
+    mem[sym["wRollCell"]] = 20                 # segment 2, tick 60 = bar 6 of the pattern
+    mem[sym["wRollTick"]] = 60
+    tap(pb, "a")
+    pb.tick(20)
+    check("a note in bar 6 makes it 6 bars", v("wSeqBars") == 6, v("wSeqBars"))
+    mem[sym["wRollSeg"]] = 0
+    mem[sym["wRollCell"]] = 0
+    mem[sym["wRollTick"]] = 6
+    tap(pb, "a")
+    pb.tick(10)
+    check("a note inside the loop leaves the length alone", v("wSeqBars") == 6, v("wSeqBars"))
     pb.stop(save=False)
 
 # --- playback across the segment edge

@@ -44,6 +44,23 @@ wColPitch:      ds SEQ_PAGE
 wColHead:       ds SEQ_PAGE
 
 ; Previous column summary, kept so that an edit only redraws the rows that changed.
+; The roll is drawn into the map that is NOT shown and the two maps are swapped (LCDC bit 3) when
+; it is complete, so a scroll or a page change never shows half old / half new rows.
+SECTION "Roll flags H", WRAM0
+wMaskV:         dw              ; bit r = row r waits to be copied to the shown map
+wMaskH:         dw              ; the same for the hidden map
+wShown:         db              ; 0 = $9800 is shown, 1 = $9C00
+wBuild:         db              ; 1 = a full redraw is being built in the hidden map
+wBuildReady:    db              ; 1 = every row of that redraw has been rendered
+wDirtyH:        db              ; bit 0 = ruler, bit 1 = status line must be copied to the hidden map
+wCopyMap:       db              ; HIGH of the map the copy routines write to
+wRowBudget:     db              ; rows left to draw this frame (edit screen)
+wCopyInit:      db              ; the copy budget at the start of the frame
+wShSeg:         db              ; the page that is ON SCREEN (the live wPage* may already be the next one)
+wShTick:        db
+wShSpan:        db
+wShDiv:         db
+
 SECTION "Roll old cols", WRAM0, ALIGN[5]
 wColOld:        ds SEQ_PAGE * 2
 
