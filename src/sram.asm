@@ -10,6 +10,8 @@
 ;   +933  wBpm
 ;   +934  wSeqLen  (ticks)
 ;   +935  checksum = (sum of the data bytes) xor $A5
+;   +936  name     (NAME_LEN bytes, indices into NameChars; not in the checksum. Slots saved before
+;                   names existed hold $00 there = a blank name, so SAVE_VERSION stays 7)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into this bank) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
@@ -83,6 +85,75 @@ SlotStep:
     ld [hl], a
     ret
 
+; hl = NAME_LEN name bytes -> wSlotNames for slot wSlot (bytes out of range become blank).
+CacheName:
+    ld a, [wSlot]
+    add a
+    add a
+    add a
+    add LOW(wSlotNames)     ; wSlotNames is 64-byte aligned: no carry
+    ld e, a
+    ld d, HIGH(wSlotNames)
+    ld b, NAME_LEN
+.copy:
+    ld a, [hl+]
+    cp NAME_CHARS
+    jr c, .ok
+    xor a
+.ok:
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .copy
+    ret
+
+; Clamp wName to valid indices.
+SanitizeName:
+    ld hl, wName
+    ld b, NAME_LEN
+.next:
+    ld a, [hl]
+    cp NAME_CHARS
+    jr c, .ok
+    xor a
+    ld [hl], a
+.ok:
+    inc hl
+    dec b
+    jr nz, .next
+    ret
+
+; c = +1 / -1: the character under the name cursor (wraps through NameChars).
+NameChar:
+    ld a, [wNameCur]
+    ld e, a
+    ld d, 0
+    ld hl, wName
+    add hl, de
+    ld a, [hl]
+    add c
+    cp NAME_CHARS
+    jr c, .set
+    bit 7, a
+    ld a, NAME_CHARS - 1    ; below 0
+    jr nz, .set
+    xor a                   ; past the last
+.set:
+    ld [hl], a
+    jr MarkName
+
+; c = +1 / -1: move the name cursor (clamped).
+NameCursor:
+    ld a, [wNameCur]
+    add c
+    cp NAME_LEN
+    ret nc                  ; -1 from 0 wraps to $FF, +1 from the end hits NAME_LEN
+    ld [wNameCur], a
+MarkName:
+    ld a, 1
+    ld [wDirtyName], a
+    ret
+
 ; a = new slot. Slot screen: marks the old and the new row for redraw, drops a pending "again".
 SlotGoto:
     push af
@@ -102,6 +173,20 @@ SlotGoto:
 
 ; Slot screen input. d = buttons newly pressed.
 SlotInput:
+    ld a, [wJoy]
+    bit PADB_SELECT, a
+    jr z, .plain
+    ld a, d                 ; SELECT + UP/DOWN: the character under the name cursor
+    and (1 << PADB_UP) | (1 << PADB_DOWN)
+    ret z
+    ld a, 1
+    ld [wSelUsed], a        ; no channel tap on release
+    ld c, 1
+    bit PADB_UP, d
+    jr nz, NameChar
+    ld c, $FF
+    jr NameChar
+.plain:
     bit PADB_A, d
     jp nz, DoLoad
     bit PADB_B, d
@@ -115,11 +200,19 @@ SlotInput:
     jr SlotGoto
 .down:
     bit PADB_DOWN, d
-    ret z
+    jr z, .lr
     cp NUM_SLOTS - 1
     ret nc
     inc a
     jr SlotGoto
+.lr:
+    ld c, $FF               ; LEFT / RIGHT: the name cursor
+    bit PADB_LEFT, d
+    jr nz, NameCursor
+    ld c, 1
+    bit PADB_RIGHT, d
+    ret z
+    jr NameCursor
 
 ; hl = slot start (SRAM open). -> carry set if the slot may NOT be written: it is neither a
 ; ChromaSynth save (any version) nor entirely $00 or $FF. Clobbers a, bc, de, hl.
@@ -227,6 +320,10 @@ SaveAll:
     ld a, [wSaveSum]
     xor $A5
     ld [de], a
+    inc de
+    ld hl, wName
+    ld bc, NAME_LEN
+    call CopyBytes
     call SlotBase
     call ValidateSave
     jr c, .fail
@@ -234,6 +331,8 @@ SaveAll:
     ld hl, wSlotUsed
     or [hl]
     ld [hl], a
+    ld hl, wName
+    call CacheName
     call SramClose
     ld a, MSG_SAVED
     ret
@@ -272,6 +371,11 @@ LoadAll:
     ld de, wSeqLen
     ld bc, 1
     call CopyBytes
+    inc hl                  ; the checksum, then the name
+    ld de, wName
+    ld bc, NAME_LEN
+    call CopyBytes
+    call SanitizeName
     call SramClose
     and a                   ; clear carry
     ret
@@ -285,6 +389,9 @@ ScanSlots:
     call SramOpen
     xor a
     ld [wSlotUsed], a
+    ld hl, wSlotNames
+    ld bc, NUM_SLOTS * NAME_LEN
+    call MemClear
     ld a, [wSlot]
     push af
     xor a
@@ -293,6 +400,9 @@ ScanSlots:
     call SlotBase
     call ValidateSave
     jr c, .empty
+    ld de, SAVE_DATA_LEN + 1
+    add hl, de              ; hl = the name
+    call CacheName
     call SlotMask
     ld hl, wSlotUsed
     or [hl]
@@ -383,6 +493,7 @@ DoLoad:
     ld a, $FF
     ld [wDirtyEdit], a
     call RollRefreshAll     ; piano roll: rebuild columns and redraw every row
+    call MarkName
     ld a, MSG_LOADED
     ; fall through
 

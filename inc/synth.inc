@@ -67,6 +67,8 @@ DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
 
 ; Save slots (src/sram.asm): the last 8 KB bank of the 128 KB SRAM, 8 slots of 1 KB.
+DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
+DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
 DEF NUM_SLOTS  EQU 8
 DEF SLOT_SIZE  EQU 1024
 DEF SLOT_BANK  EQU 15

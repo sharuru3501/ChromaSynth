@@ -117,6 +117,9 @@ wSlot:          db          ; selected save slot 0..NUM_SLOTS-1
 wSlotUsed:      db          ; bit n = slot n holds a valid save (cached; scanned at boot, kept up to date)
 wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)
 wScreenBack:    db          ; the screen START+UP returns to from the slot screen
+wName:          ds NAME_LEN ; the song's name (indices into NameChars), saved with it
+wNameCur:       db          ; name editing cursor 0..NAME_LEN-1
+wDirtyName:     db          ; 1 = redraw the name rows of the slot screen
 wConfirm:       db          ; slot + 1 while "SEL+A again to overwrite" is waiting, else 0
 wBCPitch:       db          ; BuildCols scratch
 wBCHead:        db
@@ -151,3 +154,7 @@ wKbdNav:        db          ; 1 = START+LEFT was held on the last person frame o
 wNavHide:       db          ; 1 = changed screen with START+LEFT/RIGHT: hide the d-pad until released
 wClBeacon:      db          ; 1 = the slot shows the keyboard screen (beacon or link): an end beacon is owed when we leave
 wClearEnd:      db
+
+; Names of the saved slots, cached so the slot list never reads SRAM inside VBlank.
+SECTION "Slot names", WRAM0, ALIGN[6]
+wSlotNames:     ds NUM_SLOTS * NAME_LEN
