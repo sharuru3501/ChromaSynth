@@ -114,6 +114,7 @@ MidiRealtime:
     ld [wSeqPlay], a
     ld [wExtTicks], a
     call SeqSilence
+    call SongMarkPos
     jp MarkSeqStatus
 .clock:
     ld a, [wSeqPlay]

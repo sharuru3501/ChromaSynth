@@ -36,7 +36,7 @@ def boot(rom):
         pb.tick(1)
         if pb.register_file.PC >= 0x100:
             break
-    pb.tick(10)
+    pb.tick(60)           # the boot (4 slot scans + a load) takes a few frames
     return pb
 
 
@@ -230,6 +230,52 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "start")
     pb.tick(150)
     check("loop mode: the edited pattern plays over and over", v("wPlayBase") == HI and v("wChainPos") == 0, (v("wPlayBase"), v("wChainPos")))
+    pb.stop(save=False)
+
+
+# --- switching the pattern while it plays must not leave a note hanging; the playing step is marked
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    tiles = lambda s_: bytes(ord(c) - 32 for c in s_)
+    for i in range(4 * 1024):
+        mem[PAT + i] = 0
+    mem[PAT + 0] = 60                  # pattern 1: a note at tick 0 that nothing ends
+    mem[sym["wSeqLen"]] = 48
+    combo(pb, "start", "up")
+    combo(pb, "select", "start")
+    pb.tick(60)
+    check("pattern 1 plays and its note sounds", v("wSeqPlay") == 1 and mem[sym["wCurNote"]] == 60, (v("wSeqPlay"), mem[sym["wCurNote"]]))
+    combo(pb, "select", "right")       # edit pattern 2 while pattern 1 plays (loop mode)
+    check("the edited pattern plays now", v("wPlayBase") == HI + 4, v("wPlayBase"))
+    check("the old pattern's note was released (no hanging note)", all(mem[sym["wCurNote"] + c] == 0 for c in range(4)), [mem[sym["wCurNote"] + c] for c in range(4)])
+    combo(pb, "select", "left")
+    pb.tick(60)
+    check("back on pattern 1 its note sounds again", mem[sym["wCurNote"]] == 60, mem[sym["wCurNote"]])
+    # song mode: the playing step is shown as [n]
+    mem[CHAIN:CHAIN + 3] = bytes([0, 1, 0xFF])
+    combo(pb, "select", "up")          # song mode (restarts the song, silences)
+    check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0 and v("wPlayBase") == HI, (v("wChainPos"), v("wPlayBase")))
+    pb.tick(10)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
+    pb.tick(10)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
+    check("step 1 shows the cursor and the end mark of the playing step: '>1]'", row[:3] == tiles(">1]"), row)
+    pb.tick(80)                        # the second pattern now (a bar is 120 frames at 120 BPM: wait for it)
+    for _ in range(60):
+        pb.tick(4)
+        if v("wChainPos") == 1:
+            break
+    pb.tick(15)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
+    check("step 2 is marked '[2]' and step 1 lost its marks", row[:6] == tiles(">1 ") + tiles("[2]"), row)
+    combo(pb, "select", "start")
+    pb.tick(15)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
+    check("stopped: the marks are gone", row[3:6] == tiles(" 2 "), row)
     pb.stop(save=False)
 
 # --- saving and loading a whole song

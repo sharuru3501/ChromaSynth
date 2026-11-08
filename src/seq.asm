@@ -54,6 +54,7 @@ SeqToggle:
     jp MarkSeqStatus
 .stop:
     call SeqSilence
+    call SongMarkPos        ; the song screen drops its [ ] marks
     ld a, $FC               ; MIDI stop
     call MidiOutSync
     jp MarkSeqStatus

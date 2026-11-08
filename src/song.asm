@@ -80,10 +80,16 @@ SongRestart:
     call PatBase
 .set:
     ld [wPlayBase], a
-    ret
+    jr SongMarkPos
+
+; Redraw the chain row of the step that is playing (its [ ] marks).
+SongMarkPos:
+    ld a, [wChainPos]
+    jp MarkChainRow
 
 ; The pattern ended in song mode: the next chain step (back to the first after the last).
 SongNext:
+    call SongMarkPos        ; the old step loses its marks
     ld a, [wChainPos]
     inc a
     ld c, a                 ; c = the next step
@@ -112,7 +118,7 @@ SongNext:
 .play:
     call PatBase
     ld [wPlayBase], a
-    ret
+    jr SongMarkPos          ; the new step gets them
 
 ; a = pattern number (0..NUM_PATS-1): edit it. In loop mode it is played from now on too.
 SongSetEdit:
@@ -124,6 +130,9 @@ SongSetEdit:
     jr nz, .mark
     ld a, [wEditBase]
     ld [wPlayBase], a
+    ld a, [wSeqPlay]        ; another pattern plays from now on: a note of the old one would
+    and a                   ; never get its note-off
+    call nz, SeqSilence
 .mark:
     ld a, [wDirtySong]
     or 1
@@ -141,6 +150,9 @@ BuildSong:
     call DrawString
     ld hl, ROW_SONG_INFO + 32
     ld de, sSongEdit
+    call DrawString
+    ld hl, ROW_SONG_INFO + 32 + 9
+    ld de, sSongEditNote
     call DrawString
     ld hl, _SCRN0 + 5 * 32
     ld de, sSongChain
@@ -204,13 +216,18 @@ UpdateSong:
 .cell:
     ld a, c
     cp CHAIN_LEN
-    jr nc, .blank
+    jp nc, .blank
     ld a, [wSongCur]
     cp c
     ld a, 0
     jr nz, .noCur
     ld a, '>' - 32
+    jr .left
 .noCur:
+    call StepPlaying
+    jr nc, .left
+    ld a, '[' - 32
+.left:
     ld [hl+], a
     push hl
     ld hl, wChain
@@ -231,7 +248,11 @@ UpdateSong:
     ld [hl+], a
 .digit:
     ld [hl+], a
-    xor a
+    call StepPlaying
+    ld a, 0
+    jr nc, .right
+    ld a, ']' - 32
+.right:
     ld [hl+], a
     inc c
     dec b
@@ -252,6 +273,23 @@ UpdateSong:
     ld a, [wEditPat]
     add '1' - 32
     ld [hl], a
+    ret
+
+; c = chain step -> carry set if the sequencer is playing the chain and this is the step. Keeps all but a.
+StepPlaying:
+    ld a, [wSongMode]
+    and a
+    ret z                   ; (carry is clear)
+    ld a, [wSeqPlay]
+    and a
+    ret z
+    ld a, [wChainPos]
+    cp c
+    jr nz, .no
+    scf
+    ret
+.no:
+    and a
     ret
 
 ; d = buttons newly pressed.
@@ -288,7 +326,9 @@ SongInput:
     ld a, [wSeqPlay]
     and a
     jp z, MarkSeqStatus
-    jp SongRestart          ; (a running sequencer restarts the song from the top)
+    call SeqSilence         ; (a running sequencer: the pattern that plays changes)
+    call SongMarkPos
+    jp SongRestart          ; and the song starts from the top
 .plain:
     bit PADB_A, d
     jr z, .notA
@@ -406,7 +446,8 @@ StepValue:
 sSongTitle:  db "SONG CHAIN", 0
 sSongMode:   db "MODE", 0
 sSongEdit:   db "EDIT", 0
-sSongChain:  db "CHAIN", 0
+sSongChain:  db "ORDER STEP:PATTERN", 0
+sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0
 sSong:       db "SONG", 0
 sSongHelp1:  db "PAD:MOVE  A/B:STEP", 0
