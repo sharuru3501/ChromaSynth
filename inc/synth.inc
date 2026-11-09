@@ -68,7 +68,8 @@ DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothin
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
 
-; Save slots (src/sram.asm): the last four 8 KB banks of the 128 KB SRAM, 4 slots of 8 KB.
+; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM
+; is enough); the maintainer's shared EMS card keeps LSDj in banks 0-11, so `make card` builds with SLOT_BANK0 = 12.
 DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x up to 8 bars); pattern p lives in WRAM bank p + 1
 DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
 DEF CHAIN_END  EQU $FF
@@ -76,7 +77,9 @@ DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksu
 DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
 DEF NUM_SLOTS  EQU 4
 DEF SLOT_SIZE  EQU 8192    ; one 8 KB SRAM bank per slot
-DEF SLOT_BANK0 EQU 12      ; slot n in bank 12 + n (banks 12-15)
+IF !DEF(SLOT_BANK0)
+DEF SLOT_BANK0 EQU 0       ; slot n in bank SLOT_BANK0 + n (override: rgbasm -D SLOT_BANK0=12)
+ENDC
 
 ; D-pad auto-repeat (frames)
 DEF REPEAT_DELAY EQU 16

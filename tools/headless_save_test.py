@@ -6,6 +6,7 @@ Covers: save, reboot restore, SELECT+A load, no-save case, corrupted checksum,
 the 8 slots (SELECT+LEFT/RIGHT on the play screen), overwrite confirmation, foreign data in a slot.
 Slots live in the last 8 KB bank of the 128 KB SRAM (bank 15, 1 KB each); nothing else may be written.
 """
+import os
 import pathlib
 import re
 import shutil
@@ -15,7 +16,7 @@ import tempfile
 from pyboy import PyBoy
 
 root = pathlib.Path(__file__).resolve().parent.parent
-rom_src = root / "build/chromasynth.gb"
+rom_src = pathlib.Path(os.environ.get("ROM", root / "build/chromasynth.gb"))   # ROM=build-card/chromasynth.gb tests the EMS-card build
 
 sym = {}
 for line in (root / "build/chromasynth.sym").read_text().splitlines():
@@ -53,7 +54,9 @@ def combo(pb, held, btn):
     pb.tick(20)       # a save or load of a 4 KB slot takes several frames
 
 
-BANK12 = 12 * 8192
+# the first slot: bank 0 in the public build (32 KB SRAM), bank 12 in the EMS-card build (128 KB SRAM; header RAM code 4)
+BANK0 = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192
+BANK12 = BANK0
 SLOT = 8192
 PAT0 = 5 + 160 + 16 + 2          # the first pattern inside a slot (v9)
 NAMEOFF = 5 + 6322 + 1             # the name inside a slot
@@ -93,7 +96,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
     check("slot 1 has magic CSYN v9", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x09", raw[slot_off(0):slot_off(0) + 5])
-    check("nothing outside banks 12-15 was written", set(raw[:BANK12]) <= {0, 0xFF} and len(set(raw[:BANK12])) == 1, set(raw[:BANK12]))
+    check("nothing outside the four slots was written", BANK12 == 0 or (set(raw[:BANK12]) <= {0, 0xFF} and len(set(raw[:BANK12])) == 1), set(raw[:BANK12]))
     check("slots 2-4 are untouched", len(set(raw[slot_off(1):])) == 1, set(raw[slot_off(1):]))
 
     # --- reboot: restored automatically

@@ -5,6 +5,7 @@ ModRetro **Chromatic**(ゲームボーイ / GBC 互換機)のカートリッジ�
 
 > 状態: 個人の開発中のプロジェクトです。実機(Chromatic + EMS 64M スマートカード)で動作確認した範囲は、`docs/ROADMAP.md` の状態欄に書いています。
 > 確認していないことを「確認済み」とは書かない方針です(`AGENTS.md` のルール 7)。
+> **対応カートリッジ**: 普通の **MBC5 + 32 KB 電池 SRAM** の GB / GBC カートリッジ向けです([docs/CARTRIDGES.md](docs/CARTRIDGES.md))。作者は EMS スマートカードで使っていますが、ROM は特定のカードに依存しません。
 > **ライセンスは、まだ決めていません**(`chromatic-mcu/` のパッチは、ModRetro の MCU ファームウェア(GPL-3.0)の派生物です)。
 
 ## できること(実機で確認したもの)
@@ -19,7 +20,8 @@ ModRetro **Chromatic**(ゲームボーイ / GBC 互換機)のカートリッジ�
 必要なもの: RGBDS v1.0.x(ROM)、Python 3(`tools/`)、PyBoy(ヘッドレス試験)、ESP-IDF v5.3(MCU ファームウェア)、`swiftc`(Mac の中継)。
 
 ```bash
-make                       # ROM: build/chromasynth.gb(警告ゼロ、ヘッダ検査つき)
+make                       # ROM: build/chromasynth.gb(警告ゼロ、ヘッダ検査つき。32 KB ROM、SRAM 32 KB)
+make card                  # 作者の EMS スマートカード用(SRAM 128 KB、保存はバンク 12〜15): build-card/chromasynth.gb
 make gen                   # 生成ファイル(音階表、フォント、波形、テンポ表など)を作り直す
 python3 tools/headless_test.py            # PyBoy で ROM の自動試験(要 pip install pyboy pillow)
 python3 tools/headless_clink_test.py      # ケーブルなしリンクの試験

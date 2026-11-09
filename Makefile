@@ -2,24 +2,37 @@ RGBASM  ?= rgbasm
 RGBLINK ?= rgblink
 RGBFIX  ?= rgbfix
 
-TARGET  := build/chromasynth.gb
+# Public build (default): 32 KB ROM, 32 KB battery SRAM, save slots in SRAM banks 0-3.
+# `make card`: the maintainer's EMS 64M Smart Card, where LSDj owns SRAM banks 0-11: slots in banks 12-15, 128 KB SRAM.
+BUILD     ?= build
+SLOT_BANK0 ?= 0
+SRAM_CODE ?= 3
+ifeq ($(SLOT_BANK0),0)
+EXTRA_AS  :=
+else
+EXTRA_AS  := -D SLOT_BANK0=$(SLOT_BANK0)
+endif
+TARGET  := $(BUILD)/chromasynth.gb
 SRCS    := $(wildcard src/*.asm)
-OBJS    := $(patsubst src/%.asm,build/%.o,$(SRCS))
+OBJS    := $(patsubst src/%.asm,$(BUILD)/%.o,$(SRCS))
 INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 
-.PHONY: all clean run notetable gen check-bridge check-mcu check-usb-bridge firmware
+.PHONY: all card clean run notetable gen check-bridge check-mcu check-usb-bridge firmware
 
 all: $(TARGET)
 
-build/%.o: src/%.asm $(INCS) | build
-	$(RGBASM) -Weverything -E -I inc/ -I src/ -o $@ $<
+card:
+	$(MAKE) BUILD=build-card SLOT_BANK0=12 SRAM_CODE=4
+
+$(BUILD)/%.o: src/%.asm $(INCS) | $(BUILD)
+	$(RGBASM) -Weverything -E $(EXTRA_AS) -I inc/ -I src/ -o $@ $<
 
 $(TARGET): $(OBJS)
 	$(RGBLINK) -p 0xFF -m $(TARGET:.gb=.map) -n $(TARGET:.gb=.sym) -o $@ $(OBJS)
-	$(RGBFIX) -v -p 0xFF -c -t CHROMASYNTH -m MBC5+RAM+BATTERY -r 4 -l 0x33 -n 0 $@
+	$(RGBFIX) -v -p 0xFF -c -t CHROMASYNTH -m MBC5+RAM+BATTERY -r $(SRAM_CODE) -l 0x33 -n 0 $@
 
-build:
-	mkdir -p build
+$(BUILD):
+	mkdir -p $(BUILD)
 
 # Regenerate src/notetable.inc (committed; only needed when changing the range)
 notetable:
@@ -58,4 +71,4 @@ run: $(TARGET)
 	open -a SameBoy $(TARGET)
 
 clean:
-	rm -rf build
+	rm -rf build build-card
