@@ -14,16 +14,25 @@
 ;   2. UpdateSeq (right after VBlank starts) only COPIES: up to 2 grid rows
 ;      (1 when the playhead moved), or the ruler, or the status line, and moves
 ;      the playhead sprite (OAM is only writable in VBlank too).
+; Ring: the BG map has 32 rows and SCY picks which 18 are visible. Pitch p always lives in map
+; row (1 - p) mod 32 (the "ring row"); the visible window shows ring rows k .. k+17 with
+; k = (-top) mod 32 (SCY = 8 * k): the ruler on row k, the 16 pitch rows, the status on row
+; k + 17. The shadow rows, the render flags and the copy masks are all indexed by ring row, so
+; they stay valid when the window moves. Everything is drawn in the hidden map and swapped in
+; (below); moving the window by one pitch rewrites only 3 rows (the new pitch row, the ruler and
+; the status line at their new places) and then changes SCY.
 ; Anything that changes what is shown just flags rows (MarkRowRender /
 ; MarkAllRender); the screen catches up over the next few frames.
 ; tools/headless_test.py measures that UpdateUI really finishes inside VBlank.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF COPY_BUDGET   EQU 2     ; rows copied to VRAM per frame (VBlank is only ~1140 cycles)
-DEF RENDER_BUDGET EQU 8     ; rows rendered per frame (outside VBlank, ~750 cycles each)
+DEF COPY_BUDGET   EQU 2     ; (rows: the hidden-map copies; the shown map uses the unit budget below)
+DEF V_UNITS       EQU 11    ; copy budget of a frame in units (about 0.7 DIV ticks each): the ruler / status line = 4, a row = 3 + changed tiles / 5
+DEF RENDER_BUDGET EQU 16    ; rows rendered per frame (outside VBlank, ~750 cycles each)
+DEF BUILD_BUDGET  EQU 2     ; rows copied per frame while a full redraw is built in the hidden map
 
-SECTION "Roll", ROM0
+SECTION "Roll", ROMX, BANK[1]
 
 ; ---------------------------------------------------------------- state changes
 ; The pattern changed under the cursor (place / delete / length / transpose):
@@ -91,11 +100,48 @@ MarkPitchRow:
     ret nc
     jp MarkRowRender
 
-; Everything may have changed (new page, new pitch window, other channel, other
-; division, loop length, load): rebuild the column summary and ruler, redraw all
-; rows and the status line.
+; A new page (same pitch window): rebuild the column summary and the ruler and re-render every
+; row, but write straight into the shown map and copy only the rows (and ruler) that really
+; changed (CommitRow compares): the page turns in a few frames instead of a whole hidden-map
+; build. Falls back to RollRefreshAll when a build is running or the window is moving.
+RollRefreshSoft:
+    ld a, [wBuild]
+    and a
+    jp nz, RollRefreshAll
+    ld a, [wRollTop]
+    ld hl, wShownTop
+    cp [hl]
+    jp nz, RollRefreshAll
+    call BuildCols
+    call ShowPageNow        ; the playhead is placed on the new page from now on
+    call MarkAllRender
+    ld hl, wDirty
+    ld a, [hl]
+    or DIRTY_HEADER         ; copy the ruler to VRAM
+    ld [hl], a
+    jp MarkSeqStatus
+
+; Everything may have changed (other channel, other division, loop length, load, a big move of
+; the pitch window): rebuild the column summary and ruler, redraw all rows and the status line
+; in the hidden map and swap it in.
 RollRefreshAll:
     call BuildCols
+    xor a                   ; the shown map keeps what it has; the new picture is built in the other
+    ld hl, wMaskV
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl], a
+    ld hl, wMaskH
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl], a
+    inc a
+    ld [wBuild], a
+    xor a
+    ld [wBuildReady], a
+    ld [wVPre], a           ; (a pending scroll step is over: the build shows the new window)
     call MarkAllRender
     ld hl, wDirty
     ld a, [hl]
@@ -107,11 +153,17 @@ RollRefreshAll:
 ; one) and centre the pitch window on it, so the channel is visible at once.
 RollChannelChanged:
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add a
+    add HIGH(wPatterns)     ; the channel's first page (segment 0)
     ld b, a
+    xor a
+    ld [wRCSeg], a
+.seg:
     ld c, 0                 ; c = tick
 .scan:
-    ld h, b
+    ld a, [wRCSeg]
+    add b
+    ld h, a
     ld l, c
     ld a, [hl]
     and a
@@ -123,9 +175,18 @@ RollChannelChanged:
     ld a, c
     cp SEQ_TICKS
     jr c, .scan
+    ld a, [wRCSeg]          ; the next segment
+    inc a
+    ld [wRCSeg], a
+    cp NUM_SEGS
+    jr c, .seg
     jp RollRefreshAll       ; empty channel: leave the cursor where it is
 .found:
     ld [wRollNote], a
+    ld d, a
+    ld a, [wRCSeg]
+    ld [wRollSeg], a
+    ld a, d
     ld d, a                 ; d = pitch
     ld a, [wDivTicks]
     ld e, a
@@ -160,8 +221,30 @@ RollChannelChanged:
 
 ; The cursor moved (wOldNote = pitch before the move).
 RollCursorMoved:
+    xor a
+    ld [wPageChanged], a
     call RollScrollFix
-    jp c, RollRefreshAll    ; new page and/or new pitch window
+    jr nc, .sameWindow
+    ld a, [wPageChanged]
+    and a
+    jp nz, RollRefreshSoft  ; a new page: the page turns in a few frames
+    ld a, [wBuild]
+    and a
+    jp nz, RollRefreshAll   ; (a redraw is being built: it starts over for the new window)
+    ld a, [wRollTop]        ; only the pitch window moved: by one pitch it is a 3-row scroll
+    ld hl, wShownTop
+    sub [hl]
+    ld b, 0                 ; b = the grid row that enters: 0 = the top one, 15 = the bottom one
+    cp 1
+    jr z, .oneStep
+    ld b, ROLL_ROWS - 1
+    cp $FF
+    jp nz, RollRefreshAll   ; more than one pitch at once: redraw everything
+.oneStep:
+    ld a, b
+    call MarkRowRender      ; the entering pitch row is rendered; UpdateSeq scrolls when it is ready
+    call MarkSeqStatus      ; (the status line moves with the window)
+.sameWindow:
     ld a, [wRollTop]        ; redraw the row the cursor left and the row it entered
     ld c, a
     ld a, [wOldNote]
@@ -189,6 +272,10 @@ RollCursorMoved:
 ; -> carry set if the page or the pitch window changed.
 RollScrollFix:
     ld d, 0
+    ld a, [wRollSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .newPage         ; another segment
     ld a, [wRollCell]
     ld b, a
     ld a, [wPageCell]
@@ -203,6 +290,8 @@ RollScrollFix:
     cp c
     jr c, .samePage         ; inside the page
 .newPage:
+    ld a, 1
+    ld [wPageChanged], a
     call RollPageFromCell
     ld d, 1
 .samePage:
@@ -263,6 +352,8 @@ RollSetPage:
 ; Show the page that contains the cursor cell: page = wRollCell / wPageCols.
 ; Clobbers a, b, c.
 RollPageFromCell:
+    ld a, [wRollSeg]
+    ld [wPageSeg], a
     ld a, [wPageCols]
     ld c, a
     ld a, [wRollCell]
@@ -281,6 +372,10 @@ RollPageFromCell:
 RollFollow:
     ld a, [wSeqCur]
     ld b, a
+    ld a, [wSeqCurSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .move            ; the playhead is in another segment
     ld a, [wPageTick]
     ld c, a
     ld a, b
@@ -303,25 +398,40 @@ RollFollow:
     inc d
     jr .l
 .done:
+    ld a, [wSeqCurSeg]
+    ld [wPageSeg], a
     ld a, d
     call RollSetPage
-    jp RollRefreshAll
+    jp RollRefreshSoft
 
-; a = row -> flag it for rendering. Clobbers a, hl.
+; a = grid row 0..15 of the window (top = row 0) -> a = its ring row. Clobbers hl.
+RingOfRow:
+    inc a
+    ld l, a
+    ld a, [wRollTop]
+    ld h, a
+    ld a, l
+    sub h
+    and RING_ROWS - 1
+    ret
+
+; a = grid row 0..15 -> flag its ring row for rendering. Clobbers a, hl.
 MarkRowRender:
-    add LOW(wRowRender)
+    call RingOfRow
+    add LOW(wRowRender)     ; wRowRender is 32-byte aligned: no carry
     ld l, a
     ld h, HIGH(wRowRender)
     ld [hl], 1
     ret
 
 MarkAllRender:
-    ld hl, wRowRender
-    ld b, ROLL_ROWS
-    ld a, 1
-.l: ld [hl+], a
-    dec b
-    jr nz, .l
+    ld c, 0
+.l: ld a, c
+    call MarkRowRender
+    inc c
+    ld a, c
+    cp ROLL_ROWS
+    jr c, .l
     ret
 
 ; ---------------------------------------------------------------- column summary
@@ -339,18 +449,30 @@ MarkAllRender:
 ; Runs outside VBlank: at most about 400 ticks scanned.
 BuildCols:
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add a
+    add HIGH(wPatterns)
     ld b, a                 ; b = high byte of this channel's pattern
     ld a, [wPageTick]
     ld c, a                 ; c = tick where the current column starts
     ld d, 0                 ; d = pitch sounding at c
     ld e, c
-.back:                      ; look backwards for the last event before the page
+    ld a, [wPageSeg]
+    ld [wBCSeg], a
+.back:                      ; look backwards for the last event before the page (across segments)
     ld a, e
     and a
-    jr z, .init
+    jr nz, .step
+    ld a, [wBCSeg]
+    and a
+    jr z, .init             ; the very start of the pattern
+    dec a
+    ld [wBCSeg], a
+    ld e, SEQ_TICKS         ; the end of the previous segment
+.step:
     dec e
-    ld h, b
+    ld a, [wBCSeg]
+    add b
+    ld h, a
     ld l, e
     ld a, [hl]
     and a
@@ -358,8 +480,11 @@ BuildCols:
     cp CELL_OFF
     jr z, .init
     ld d, a
-.init:                      ; beat phase of the first column: tick mod 12, tick / 12
-    ld a, c
+.init:                      ; b = the channel's page in the page's segment from here on
+    ld a, [wPageSeg]
+    add b
+    ld b, a
+    ld a, c                 ; beat phase of the first column: tick mod 12, tick / 12
     ld e, 0
 .mod:
     cp TICKS_PER_BEAT
@@ -369,7 +494,9 @@ BuildCols:
     jr .mod
 .modDone:
     ld [wBCPhase], a
-    ld a, e
+    ld a, [wPageSeg]
+    swap a                  ; a segment is 16 beats
+    add e
     ld [wBCBeat], a         ; absolute beat number (bar = beat / 4)
     xor a
     ld [wBCCol], a
@@ -394,18 +521,18 @@ BuildCols:
     xor a
 .flagSet:
     ld [wBCFlag], a
-    and a                   ; ruler tile: only beat columns inside the loop get a mark
-    ld a, 0
+    and a                   ; ruler tile: bar numbers over the bar lines (all MAX_BARS bars, also after the
+    ld a, 0                 ; loop end), a tick over the other beat lines inside the loop
     jr z, .rulerSet
-    ld a, c
-    ld hl, wSeqLen
-    cp [hl]
-    ld a, 0
-    jr nc, .rulerSet        ; after the loop end: blank
     ld a, [wBCFlag]
     bit 3, a
+    jr nz, .barNumber
+    call InLoop
+    ld a, 0
+    jr nc, .rulerSet        ; after the loop end: no tick on an ordinary beat
     ld a, T_TICK
-    jr z, .rulerSet         ; ordinary beat: a tick on the beat line
+    jr .rulerSet
+.barNumber:
     ld a, [wBCBeat]
     srl a
     srl a
@@ -478,7 +605,7 @@ BuildCols:
     call BCStoreCol
     jr .padFill
 .finish:
-    ; ---- ruler ends: inverted channel label on the left, page number on the right
+    ; ---- ruler ends: inverted channel label on the left, the edited pattern (P1-P4) on the right
     ld de, ChanLabels
     ld a, [wSelCh]
     add a
@@ -498,11 +625,40 @@ BuildCols:
     ld hl, wRulerBuf + 18
     ld a, 'P' - 32 + TILE_INV   ; inverted tab, like the channel label
     ld [hl+], a
-    ld a, [wRollPage]
+    ld a, [wEditPat]        ; the edited pattern, like the P1-P4 of the song screen
     inc a
     call NibbleTile
     add TILE_INV
     ld [hl], a
+    ret
+
+; c = tick inside the page's segment -> carry set if that position is before the loop end.
+; Keeps bc, de.
+InLoop:
+    push de
+    ld a, [wSeqBars]
+    dec a
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, LoopEndTab
+    add hl, de
+    ld a, [wPageSeg]
+    cp [hl]
+    jr c, .inside           ; an earlier segment than the loop's last one
+    jr nz, .outside         ; a later one
+    inc hl
+    ld a, c
+    cp [hl]                 ; the last segment: tick < ticks played in it
+    pop de
+    ret
+.inside:
+    scf
+    pop de
+    ret
+.outside:
+    and a
+    pop de
     ret
 
 ; Store the current column (wBCPitch, wBCHead | wBCFlag) and move to the next one.
@@ -581,29 +737,66 @@ RenderPending:
     ld a, [hl]
     and a
     jr z, .next
+    ldh a, [rLY]            ; the frame is nearly over (LY 138-143): the rest waits for the next pass,
+    sub 138                 ; or the main loop would miss the VBlank and the sequencer a frame
+    cp 6
+    ret c
     xor a
     ld [hl], a
-    ld a, l
-    add ROLL_ROWS
-    ld l, a
-    ld [hl], 1              ; wRowDirty[row] = 1
     push bc
-    call RenderRow
+    call RenderRow          ; carry set: this ring row is not in the window (nothing drawn)
     pop bc
+    jr c, .next
+    ld a, [wBuild]
+    and a
+    jr nz, .hiddenOnly      ; a full redraw: the shown map is not touched until it is complete
+    ld a, [wRRChanged]
+    and a
+    jr z, .budget           ; the row came out exactly as it already is: nothing to copy
+    ld a, [wShownTop]       ; the shown picture: only rows of ITS window are copied (the others
+    add c                   ; belong to a scroll that has not happened yet)
+    dec a
+    and RING_ROWS - 1
+    cp ROLL_ROWS
+    jr nc, .budget
+    call AddSpan            ; (the changed tiles only)
+    jr .budget
+.hiddenOnly:
+    ld hl, wMaskH
+    ld a, c
+    call SetRowBit
+.budget:
     dec b
     ret z
 .next:
     inc c
     ld a, c
-    cp ROLL_ROWS
+    cp RING_ROWS
     jr c, .scan
+    ld a, [wBuild]          ; every flagged row has been rendered: the redraw may be shown
+    and a
+    ret z
+    ld a, 1
+    ld [wBuildReady], a
     ret
 
-; c = row. Renders the key label and the 16 cells of that row into wGrid.
+; c = ring row. Renders the key label and the 16 cells of that row into its wGrid slot.
+; -> carry set (and nothing drawn) when that ring row is not in the current window.
 RenderRow:
     push bc
     ld a, [wRollTop]
-    sub c
+    add c
+    dec a
+    and RING_ROWS - 1       ; grid row of the window = (top + r - 1) mod 32
+    cp ROLL_ROWS
+    jr c, .inWindow
+    pop bc
+    scf
+    ret
+.inWindow:
+    ld e, a
+    ld a, [wRollTop]
+    sub e
     ld b, a                 ; b = pitch of this row
     ld a, b
     ld [wRRPitch], a
@@ -611,6 +804,10 @@ RenderRow:
     ld a, [wRollNote]
     cp b
     jr nz, .noCursor
+    ld a, [wRollSeg]
+    ld hl, wPageSeg
+    cp [hl]
+    jr nz, .noCursor        ; the cursor is in another segment
     ld a, [wPageCell]
     ld d, a
     ld a, [wRollCell]
@@ -642,9 +839,9 @@ RenderRow:
     ld [wRRBlack], a
     ; --- key label: letter + ('#' | octave digit for C | blank)
     pop bc                  ; c = row again
-    push de                 ; keep pitch class / octave
-    call GridPtr            ; hl = dest (clobbers de)
-    pop de
+    ld a, c
+    ld [wRRRow], a
+    ld hl, wRRBuf           ; the row is built here and compared with its shadow slot at the end
     push hl
     ld a, e
     add a
@@ -737,6 +934,49 @@ RenderRow:
     xor a
     ld [hl+], a             ; cols 18-19: blank
     ld [hl], a
+    jp CommitRow
+
+; The row built in wRRBuf goes into its shadow slot; wRRChanged says whether it differs. -> carry clear.
+CommitRow:
+    ld a, [wRRRow]
+    ld c, a
+    call GridPtr            ; hl = the shadow slot
+    ld de, wRRBuf
+    ld a, $FF
+    ld [wRRLo], a
+    xor a
+    ld [wRRHi], a
+    ld b, 20
+.cmp:
+    ld a, [de]
+    inc de
+    cp [hl]
+    jr z, .same
+    ld [hl], a
+    ld a, 20
+    sub b                   ; the tile's index
+    ld c, a
+    ld a, [wRRLo]
+    cp c
+    jr c, .loKept           ; (the first difference stays the start)
+    ld a, c
+    ld [wRRLo], a
+.loKept:
+    ld a, c
+    inc a
+    ld [wRRHi], a           ; the last difference + 1 so far
+.same:
+    inc hl
+    dec b
+    jr nz, .cmp
+    ld a, [wRRHi]
+    and a
+    ld a, 0
+    jr z, .store
+    ld a, 1
+.store:
+    ld [wRRChanged], a
+    and a                   ; carry clear: drawn
     ret
 
 ; Letter tile and sharp tile for each pitch class (tile = ASCII - 32).
@@ -748,7 +988,7 @@ BlackKeys:
     db 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0
 ChanLabels: db "1P", "2P", "3W", "4N"
 
-; Status line into wStatusBuf: PLAY/STOP  bpm  grid division  cursor pitch
+; Status line into wStatusBuf: PLAY/STOP  bpm  grid division  cursor pitch  loop length (bars)
 BuildStatus:
     ld hl, wStatusBuf
     ld b, 20
@@ -765,7 +1005,7 @@ BuildStatus:
     ld de, sPlay
 .state:
     call DrawString
-    ld hl, wStatusBuf + 5
+    ld hl, wStatusBuf + 4
     ld a, [wBpm]
     call DrawDec3
     ld a, [wDiv]            ; label = DivLabels + 6 * index
@@ -779,53 +1019,206 @@ BuildStatus:
     add hl, de
     ld d, h
     ld e, l
-    ld hl, wStatusBuf + 9
+    ld hl, wStatusBuf + 8
     call DrawString
-    ld hl, wStatusBuf + 15
+    ld hl, wStatusBuf + 18  ; the loop length in bars: L1-L8
+    ld a, 'L' - 32
+    ld [hl+], a
+    ld a, [wSeqBars]
+    add '0' - 32
+    ld [hl], a
+    ld hl, wStatusBuf + 14
     ld a, [wRollNote]
     jp DrawNoteName
 
 ; ---------------------------------------------------------------- copy to VRAM
-; c = row -> copy that row of wGrid to the screen. Clobbers a, b, hl, de.
+; a = ring row -> de = wCopyMap:00 + row * 32. Clobbers a, hl.
+RowAddr:
+    ld l, a
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    ld a, [wCopyMap]
+    add h
+    ld d, a
+    ld e, l
+    ret
+
+; c = ring row -> copy that row of wGrid to the same ring row of the map. Clobbers a, b, hl, de.
 RollCopyRow:
     call GridPtr            ; hl = source
     push hl
-    ld h, 0
-    ld l, c
-    add hl, hl
-    add hl, hl
-    add hl, hl
-    add hl, hl
-    add hl, hl              ; row * 32
-    ld de, _SCRN0 + ROLL_ROW0 * 32
-    add hl, de
-    ld d, h
-    ld e, l                 ; de = destination
+    ld a, c
+    call RowAddr
     pop hl
-    REPT 20                 ; unrolled: this runs inside VBlank
+    REPT 20                 ; unrolled: this runs inside VBlank (a row never crosses a page: inc e)
         ld a, [hl+]
         ld [de], a
-        inc de
+        inc e
     ENDR
     ret
 
+; c = ring row -> copy only the tiles of it that changed (wSpanLo .. wSpanHi - 1) from its shadow
+; slot to the same row of the map. -> a = what it cost in units (3 + tiles / 5). Keeps c.
+; Clobbers b, d, e, hl. (The slot and row addresses come from tables: this is the hot path.)
+RollCopySpan:
+    ld a, c
+    add LOW(wSpanLo)        ; the span arrays are 64-byte aligned: no carry
+    ld l, a
+    ld h, HIGH(wSpanLo)
+    ld a, [hl]
+    ld d, a                 ; d = first tile
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [hl]              ; end (exclusive)
+    sub d
+    ld b, a                 ; b = tiles to copy (>= 1)
+    push bc
+    ld a, c
+    add a
+    ld e, a                 ; table offset = row * 2
+    push de
+    ld hl, SlotTab          ; source: the slot address + first tile
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    pop de                  ; d = first tile, e = offset
+    ld a, l
+    add d
+    ld l, a
+    jr nc, .src
+    inc h
+.src:
+    push hl
+    push de
+    ld hl, MapTab           ; destination: row * 32 + the map + first tile
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a                 ; hl = row * 32
+    ld a, [wCopyMap]
+    add h
+    ld h, a
+    pop de
+    ld a, l
+    add d                   ; (a row never crosses a page)
+    ld e, a
+    ld d, h
+    pop hl                  ; hl = source
+    pop bc                  ; b = tiles
+    push bc
+.copy:
+    ld a, [hl+]
+    ld [de], a
+    inc e
+    dec b
+    jr nz, .copy
+    pop bc
+    ld a, b                 ; the cost: 3 + tiles / 5 (the call itself is most of it)
+    ld b, 3
+.cost:
+    sub 5
+    jr c, .done
+    inc b
+    jr .cost
+.done:
+    ld a, b
+    ret
+
+; hl = a row mask, a = ring row: Z if its bit is clear. Clobbers a, d, e, hl.
+TestRowBit:
+.byte:
+    cp 8
+    jr c, .lo
+    sub 8
+    inc hl
+    jr .byte
+.lo:
+    ld d, a
+    ld e, 1
+    inc d
+.shift:
+    dec d
+    jr z, .test
+    sla e
+    jr .shift
+.test:
+    ld a, [hl]
+    and e
+    ret
+
+; c = ring row: flag it for copying (V) and merge the changed tiles of the row just rendered
+; (wRRLo .. wRRHi) into its pending span. Clobbers a, d, e, hl.
+AddSpan:
+    ld hl, wMaskV
+    ld a, c
+    call TestRowBit         ; Z = nothing pending for this row yet
+    push af
+    ld hl, wMaskV
+    ld a, c
+    call SetRowBit
+    ld a, c
+    add LOW(wSpanLo)
+    ld l, a
+    ld h, HIGH(wSpanLo)
+    pop af
+    jr z, .fresh
+    ld a, [wRRLo]           ; union with the pending span
+    cp [hl]
+    jr nc, .loKept
+    ld [hl], a
+.loKept:
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [wRRHi]
+    cp [hl]
+    ret c
+    ld [hl], a
+    ret
+.fresh:
+    ld a, [wRRLo]
+    ld [hl], a
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [wRRHi]
+    ld [hl], a
+    ret
+
 CopyRuler:
+    ld a, [wCopyTop]
+    cpl
+    inc a
+    and RING_ROWS - 1       ; the ruler's ring row: (-top) mod 32
+    call RowAddr
     ld hl, wRulerBuf
-    ld de, _SCRN0
     REPT 20
         ld a, [hl+]
         ld [de], a
-        inc de
+        inc e
     ENDR
     ret
 
 CopyStatus:
+    ld a, [wCopyTop]
+    ld l, a
+    ld a, 17
+    sub l
+    and RING_ROWS - 1       ; the status line's ring row: (17 - top) mod 32
+    call RowAddr
     ld hl, wStatusBuf
-    ld de, _SCRN0 + 17 * 32
     REPT 20
         ld a, [hl+]
         ld [de], a
-        inc de
+        inc e
     ENDR
     ret
 
@@ -835,26 +1228,49 @@ BuildSeq:
     ld a, $FF
     ld [wPlayShown], a
     ld [wPlayX], a
+    xor a
+    ld [wShown], a          ; $9800 is shown (LCDC bit 3 = 0 when the screen is switched on)
+    ld [wBuild], a
+    ld [wBuildReady], a
+    ld a, [wRollTop]
+    ld [wShownTop], a
+    call SetCopyVisible
+    call ApplyScy           ; SCY for this window (the LCD is off: no tearing to worry about)
     call BuildCols
-    ld c, 0
+    call ShowPageNow
+    ld b, 0                 ; b = grid row of the window
 .render:
+    ld a, b
+    call RingOfRow
+    ld c, a                 ; c = its ring row
     push bc
     call RenderRow
     pop bc
     push bc
     call RollCopyRow
     pop bc
-    inc c
-    ld a, c
+    inc b
+    ld a, b
     cp ROLL_ROWS
     jr c, .render
-    ld hl, wRowRender       ; nothing left to do for the flag arrays
-    ld b, ROLL_ROWS * 2
+    ld hl, wRowRender       ; nothing left to do for the flag arrays and masks
+    ld b, RING_ROWS
     xor a
 .clr:
     ld [hl+], a
     dec b
     jr nz, .clr
+    ld hl, wMaskV
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl], a
+    ld hl, wMaskH
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl+], a
+    ld [hl], a
+    ld [wDirtyH], a
     call BuildStatus
     call CopyStatus
     call CopyRuler
@@ -877,50 +1293,446 @@ BuildSeq:
     ret
 
 ; Right after VBlank starts: copy jobs only (see the header comment).
+; The shown map is updated row by row; a full redraw (RollRefreshAll) is built in the hidden
+; map only and shown by swapping the maps; a one-pitch scroll is the 3-row step below.
 UpdateSeq:
     call UpdatePlayhead     ; carry set if it touched OAM
     ld a, 0
     rla
     ld e, a                 ; e = 1 if the playhead moved this frame
+    ld a, [wBuild]
     and a
-    jr nz, .rows            ; it did: leave the ruler/status copy for the next frame
+    jp nz, .build
+    call SetCopyVisible
+    ld a, e
+    and a
+    jr nz, .noScroll        ; the playhead moved: no scroll step, no ruler/status copy this frame
+    call VScrollStep        ; a pending one-pitch scroll (needs its row rendered): 2 + 1 rows, SCY
+    ret c                   ; it took this frame
+.noScroll:
+    ld a, V_UNITS           ; the ruler / status line (4 each) and the rows (3 + span / 5 each) share it
+    ld b, a
+    ld a, e
+    and a
+    jr z, .u
+    ld a, b                 ; the playhead moved this frame and took some of the time
+    sub 5
+    ld b, a
+.u:
+    ld a, b
+    call LimitUnits
+    ld b, a
+    ld a, e
+    and a
+    jr nz, .rows            ; the playhead moved: only rows this frame
     ld a, [wDirty]
     bit 5, a
     jr z, .noRuler
     res 5, a
     ld [wDirty], a
-    jp CopyRuler
+    push bc
+    call CopyRuler
+    pop bc
+    ld a, b
+    sub 4
+    ret z
+    ret c
+    ld b, a
 .noRuler:
+    ld a, [wDirty]
     bit 4, a
     jr z, .rows
     res 4, a
     ld [wDirty], a
+    push bc
+    call CopyStatus
+    pop bc
+    ld a, b
+    sub 4
+    ret z
+    ret c
+    ld b, a
+.rows:
+.vLoop:
+    ld a, b
+    cp 3
+    ret c                   ; not enough left for another row
+    ld hl, wMaskV
+    call TakeRow            ; c = a ring row that waits (and its flag is cleared)
+    ret c                   ; none
+    push bc
+    call RollCopySpan       ; -> a = what it cost
+    pop bc
+    ld d, a
+    ld a, b
+    sub d
+    ret z
+    ret c
+    ld b, a
+    jr .vLoop
+
+; A full redraw is being built: everything goes to the hidden map; when it is complete the maps
+; are swapped (LCDC bit 3, and SCY for the new window).
+.build:
+    ld a, [wDirty]          ; the ruler / status line of the new picture belong to the hidden map
+    bit 5, a
+    jr z, .bNoRuler
+    res 5, a
+    ld [wDirty], a
+    ld hl, wDirtyH
+    set 0, [hl]
+.bNoRuler:
+    ld a, [wDirty]
+    bit 4, a
+    jr z, .bNoStatus
+    res 4, a
+    ld [wDirty], a
+    ld hl, wDirtyH
+    set 1, [hl]
+.bNoStatus:
+    call SetCopyHidden
+    ld a, BUILD_BUDGET
+    sub e
+    call LimitBudget
+    call CopyHidden
+    call HiddenPending
+    ret nz                  ; rows are still waiting
+    ld a, [wBuildReady]
+    and a
+    ret z                   ; (more rows still have to be rendered)
+    ld a, [wShown]          ; swap the maps
+    xor 1
+    ld [wShown], a
+    ldh a, [rLCDC]
+    xor %00001000           ; LCDC bit 3: BG tile map select
+    ldh [rLCDC], a
+    ld a, [wRollTop]
+    ld [wShownTop], a
+    call ApplyScy
+    xor a
+    ld [wBuild], a
+    ld [wBuildReady], a
+    call ShowPageNow
+    ld a, [wMsg]            ; a message on the status row must be drawn again (the status line
+    and a                   ; copy overwrote it in the hidden map)
+    ret z
+    ld hl, wDirty
+    set 6, [hl]
+    ret
+
+; SCY for the window of wShownTop: 8 * ((-top) mod 32).
+ApplyScy:
+    ld a, [wShownTop]
+    cpl
+    inc a
+    and RING_ROWS - 1
+    add a
+    add a
+    add a
+    ldh [rSCY], a
+    ret
+
+; a = row budget. Copies the ruler, the status line or flagged rows to the hidden map.
+; (a = row budget -> a = 1 when VBlank is already 2 lines old: see LimitBudget)
+LimitBudget:
+    ld c, a
+    ldh a, [rLY]
+    cp 146
+    ld a, c
+    ret c
+    cp 2
+    ret c
+    ld a, 1
+    ret
+
+; a = copy budget in units -> a = the units left for a frame that starts late: LY 146: 8, LY >= 147: 5.
+LimitUnits:
+    ld c, a
+    ldh a, [rLY]
+    cp 147
+    jr nc, .late
+    cp 146
+    ld a, c
+    ret c
+    cp 9
+    ret c
+    ld a, 8
+    ret
+.late:
+    ld a, c
+    cp 6
+    ret c
+    ld a, 5
+    ret
+
+CopyHidden:
+    ld b, a
+    ld a, [wDirtyH]
+    bit 0, a
+    jr z, .noRuler
+    res 0, a
+    ld [wDirtyH], a
+    jp CopyRuler
+.noRuler:
+    bit 1, a
+    jr z, .rows
+    res 1, a
+    ld [wDirtyH], a
     jp CopyStatus
 .rows:
-    ld a, COPY_BUDGET       ; one row less when the playhead used up some of VBlank
-    sub e
-    ld b, a
-    ld c, 0
-.scan:
-    ld a, c
-    add LOW(wRowDirty)
-    ld l, a
-    ld h, HIGH(wRowDirty)
-    ld a, [hl]
+    ld a, b
     and a
-    jr z, .next
-    xor a
-    ld [hl], a
+    ret z
+.hLoop:
+    ld hl, wMaskH
+    call TakeRow
+    ret c                   ; nothing waits
     push bc
     call RollCopyRow
     pop bc
     dec b
-    ret z
-.next:
-    inc c
-    ld a, c
-    cp ROLL_ROWS
-    jr c, .scan
+    jr nz, .hLoop
+    ret
+
+; -> Z if nothing waits to be copied to the hidden map. Clobbers a, hl.
+HiddenPending:
+    ld a, [wDirtyH]
+    and 3
+    ret nz
+    ld hl, wMaskH
+    ld a, [hl+]
+    or [hl]
+    inc hl
+    or [hl]
+    inc hl
+    or [hl]
+    ret
+
+; hl = a row mask (4 bytes), a = ring row 0..31: set its bit. Clobbers a, d, e, hl.
+SetRowBit:
+.byte:
+    cp 8
+    jr c, .lo
+    sub 8
+    inc hl
+    jr .byte
+.lo:
+    ld d, a                 ; bit number
+    ld e, 1
+    inc d
+.shift:
+    dec d
+    jr z, .set
+    sla e
+    jr .shift
+.set:
+    ld a, [hl]
+    or e
+    ld [hl], a
+    ret
+
+; hl = a row mask (4 bytes) -> c = the lowest ring row that is set (its bit is cleared) and
+; carry clear, or carry set when the mask is empty. Keeps b. Clobbers a, d, e, hl.
+TakeRow:
+    ld c, 0
+    ld a, [hl]
+    and a
+    jr nz, .go
+    inc hl
+    ld c, 8
+    ld a, [hl]
+    and a
+    jr nz, .go
+    inc hl
+    ld c, 16
+    ld a, [hl]
+    and a
+    jr nz, .go
+    inc hl
+    ld c, 24
+    ld a, [hl]
+    and a
+    jr nz, .go
+    scf
+    ret
+.go:
+    ld d, a                 ; the byte
+    push hl
+    ld h, HIGH(LowBitTab)   ; the index of its lowest set bit (a 256-byte table, page aligned)
+    ld l, a
+    ld a, [hl]
+    pop hl
+    add c
+    ld c, a
+    ld a, d
+    ld e, a
+    dec a
+    and e                   ; clear the lowest set bit
+    ld [hl], a
+    and a                   ; carry clear
+    ret
+
+; The page that is on screen = the live page (called when a picture is shown). Clobbers a.
+ShowPageNow:
+    ld a, [wPageSeg]
+    ld [wShSeg], a
+    ld a, [wPageTick]
+    ld [wShTick], a
+    ld a, [wPageSpan]
+    ld [wShSpan], a
+    ld a, [wDiv]
+    ld [wShDiv], a
+    ret
+
+; wCopyMap / wCopyTop = the map the copy routines write to and the window it holds.
+SetCopyVisible:
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0)
+    jr z, .set
+    ld a, HIGH(_SCRN0) + 4  ; $9C00
+.set:
+    ld [wCopyMap], a
+    ld a, [wShownTop]
+    ld [wCopyTop], a
+    ret
+
+SetCopyHidden:
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0) + 4
+    jr z, .set
+    ld a, HIGH(_SCRN0)
+.set:
+    ld [wCopyMap], a
+    ld a, [wRollTop]
+    ld [wCopyTop], a
+    ret
+
+; A one-pitch scroll is pending (the window moved by one pitch, wRollTop != wShownTop). Three
+; rows change: the entering pitch row, the ruler and the status line at their new ring rows. One
+; of the two (the ruler when scrolling up, the status line when scrolling down) lands on a row
+; nobody sees, so it is written one frame early (wVPre); the next frame writes the other two rows
+; and moves SCY. -> carry set if it used this frame, carry clear if there is nothing (yet) to do.
+; Needs the shown map (wCopyMap) to be set. Keeps de.
+VScrollStep:
+    push de
+    ld a, [wRollTop]
+    ld hl, wShownTop
+    sub [hl]
+    jp z, .none             ; no scroll pending
+    ld b, 0                 ; b = entering grid row: 0 = top (scrolling up), 15 = bottom (down)
+    cp 1
+    jr z, .step
+    ld b, ROLL_ROWS - 1
+    cp $FF
+    jp nz, .none            ; (the main loop never leaves more than one pitch: it redraws instead)
+.step:
+    ld a, [wStatusRender]
+    and a
+    jp nz, .none            ; the status line is being rebuilt: wait
+    ldh a, [rLY]
+    cp 148
+    jp nc, .none            ; too late in VBlank: next frame
+    ld a, b
+    call RingOfRow
+    ld c, a                 ; c = ring row of the entering pitch
+    add LOW(wRowRender)
+    ld l, a
+    ld h, HIGH(wRowRender)
+    ld a, [hl]
+    and a
+    jp nz, .none            ; not rendered yet
+    ld a, [wVPre]
+    and a
+    jr nz, .second
+    ; ---- first frame: the row that is free (it is not in the shown window) gets its content
+    ld a, [wRollTop]
+    ld [wCopyTop], a        ; (the copy routines place the ruler / status line for the NEW window)
+    push bc
+    ld a, b
+    and a
+    jr nz, .preStatus
+    ld hl, wDirty
+    res 5, [hl]             ; (the ruler is copied now; a later change sets the bit again)
+    call CopyRuler
+    jr .preDone
+.preStatus:
+    ld hl, wDirty
+    res 4, [hl]
+    call CopyStatus
+.preDone:
+    pop bc
+    ld a, 1
+    ld [wVPre], a
+    pop de
+    scf
+    ret
+.second:
+    ; ---- second frame: the entering pitch row and the other of the ruler / status line, then SCY
+    ld a, b
+    and a
+    ld a, [wShownTop]       ; (old window) scrolling up: the old bottom pitch leaves; down: the old top
+    jr nz, .down
+    sub ROLL_ROWS - 1       ; a = old bottom pitch
+.down:
+    ld e, a
+    ld a, 1
+    sub e
+    and RING_ROWS - 1       ; the leaving pitch's ring row (1 - p)
+    ld hl, wMaskV
+    call ClearRowBit        ; no copy may land on it any more (it becomes the ruler / status line)
+    ld a, [wRollTop]
+    ld [wShownTop], a
+    ld [wCopyTop], a
+    push bc
+    ld a, b
+    and a
+    jr nz, .postRuler
+    ld hl, wDirty
+    res 4, [hl]
+    call CopyStatus         ; scrolling up: the status line takes the leaving bottom row
+    jr .postDone
+.postRuler:
+    ld hl, wDirty
+    res 5, [hl]
+    call CopyRuler          ; scrolling down: the ruler takes the leaving top row
+.postDone:
+    pop bc
+    call RollCopyRow        ; c = the entering pitch row
+    call ApplyScy
+    xor a
+    ld [wVPre], a
+    pop de
+    scf
+    ret
+.none:
+    pop de
+    and a
+    ret
+
+; hl = a row mask (4 bytes), a = ring row 0..31: clear its bit. Clobbers a, d, e, hl.
+ClearRowBit:
+.byte:
+    cp 8
+    jr c, .lo
+    sub 8
+    inc hl
+    jr .byte
+.lo:
+    ld d, a
+    ld e, 1
+    inc d
+.shift:
+    dec d
+    jr z, .clear
+    sla e
+    jr .shift
+.clear:
+    ld a, e
+    cpl
+    and [hl]
+    ld [hl], a
     ret
 
 ; Decide where the playhead line should be (OAM X) for the tick that was played
@@ -930,17 +1742,21 @@ RollPlayheadCalc:
     ld a, [wSeqPlay]
     and a
     jr z, .hide
-    ld a, [wPageTick]
+    ld a, [wSeqCurSeg]      ; (relative to the page that is on screen: a rebuilt one is not shown yet)
+    ld hl, wShSeg
+    cp [hl]
+    jr nz, .hide            ; the playhead is in another segment
+    ld a, [wShTick]
     ld c, a
     ld a, [wSeqCur]
     sub c
     jr c, .hide             ; before the page
     ld b, a                 ; b = ticks since the page start
-    ld a, [wPageSpan]       ; ticks in a page
+    ld a, [wShSpan]         ; ticks in a page
     cp b
     jr z, .hide
     jr c, .hide             ; after the page
-    ld a, [wDiv]
+    ld a, [wShDiv]
     add a
     ld e, a
     ld d, 0
@@ -1026,3 +1842,19 @@ UpdatePlayhead:
     jr nz, .hideLoop
     scf
     ret
+
+; ---------------------------------------------------------------- tables
+SECTION "Roll tables", ROMX, BANK[1], ALIGN[8]
+; the lowest set bit of every byte value (0 for 0): GENERATED by tools/gen_lowbit.py
+LowBitTab:
+INCLUDE "lowbit.inc"
+
+; the wGrid slot address of every ring row, and row * 32
+SlotTab:
+FOR I, RING_ROWS
+    dw wGrid + 20 * I
+ENDR
+MapTab:
+FOR I, RING_ROWS
+    dw 32 * I
+ENDR

@@ -1,25 +1,25 @@
-; Save/load patches, pattern and BPM to cartridge SRAM (MBC5, 128 KB on the Smart Card).
+; Save/load a song (patches, chain, patterns, BPM) to cartridge SRAM (MBC5, 128 KB on the Smart Card).
 ;
 ; The SRAM is shared with every ROM on the card (LSDj uses it from the bottom), so ChromaSynth
-; only touches the LAST 8 KB bank (SLOT_BANK) as NUM_SLOTS slots of SLOT_SIZE bytes:
-;   slot n at $A000 + n * SLOT_SIZE in bank SLOT_BANK
+; only touches the LAST FOUR 8 KB banks as NUM_SLOTS slots of one bank each:
+;   slot n: bank SLOT_BANK0 + n, address $A000
 ;   +0    "CSYN"   magic
 ;   +4    version  (SAVE_VERSION)
 ;   +5    wPatch   (NUM_PATCHES * PATCH_SIZE = 160 bytes: 4 channels + the MIDI settings block)
-;   +165  wPattern (NUM_CH x SEQ_TICKS bytes: only the 192 used ticks of each channel)
-;   +933  wBpm
-;   +934  wSeqLen  (ticks)
-;   +935  checksum = (sum of the data bytes) xor $A5
-;   +936  name     (NAME_LEN bytes, indices into NameChars; not in the checksum. Slots saved before
-;                   names existed hold $00 there = a blank name, so SAVE_VERSION stays 7)
+;   +165  wChain   (CHAIN_LEN bytes)
+;   +181  wBpm
+;   +182  wSeqBars  (loop length)
+;   +183  the patterns, one after the other: NUM_PATS x NUM_CH x NUM_SEGS x SEQ_TICKS bytes
+;   +6327 checksum = (sum of the data bytes) xor $A5
+;   +6328 name     (NAME_LEN bytes, indices into NameChars; not in the checksum)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
-; anything else (LSDj data that grew into this bank) is never overwritten (MSG_INUSE).
+; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 7
-DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + NUM_CH * SEQ_TICKS + 2
+DEF SAVE_VERSION  EQU 9
+DEF SAVE_DATA_LEN EQU NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + NUM_PATS * NUM_CH * NUM_SEGS * SEQ_TICKS
 
 SECTION "SRAM", ROM0
 
@@ -28,8 +28,6 @@ SaveMagic:  db "CSYN", SAVE_VERSION
 SramOpen:
     ld a, CART_SRAM_ENABLE
     ld [rRAMG], a
-    ld a, SLOT_BANK
-    ld [rRAMB], a
     ret
 
 SramClose:
@@ -38,14 +36,12 @@ SramClose:
     ld [rRAMG], a           ; disabling protects the save from stray writes
     ret
 
-; -> hl = start of the selected slot (SRAM must be open). Clobbers a.
+; Selects the selected slot's bank. -> hl = start of the slot (SRAM must be open). Clobbers a.
 SlotBase:
     ld a, [wSlot]
-    add a
-    add a                   ; * SLOT_SIZE / 256
-    add HIGH(_SRAM)
-    ld h, a
-    ld l, 0
+    add SLOT_BANK0
+    ld [rRAMB], a           ; the slot's bank (SRAM must be open)
+    ld hl, _SRAM
     ret
 
 ; -> a = 1 << wSlot. Clobbers b.
@@ -288,7 +284,7 @@ SaveAll:
     call SramOpen
     call SlotBase
     call SlotWritable       ; (clobbers de)
-    jr c, .inUse
+    jp c, .inUse
     call SlotBase
     ld d, h
     ld e, l                 ; de = destination
@@ -300,8 +296,21 @@ SaveAll:
     ld hl, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call CopySum
-    ld a, HIGH(wPattern)
-.pat:
+    ld hl, wChain
+    ld bc, CHAIN_LEN
+    call CopySum
+    ld hl, wBpm
+    ld bc, 1
+    call CopySum
+    ld hl, wSeqBars
+    ld bc, 1
+    call CopySum
+    ld a, 1                 ; pattern bank 1..NUM_PATS
+.bank:
+    push af
+    ld [$FF70], a           ; SVBK
+    ld a, HIGH(wPatterns)
+.pat:                       ; the pages of the bank: channel c, segment g = page c * 2 + g
     push af
     ld h, a
     ld l, 0
@@ -309,14 +318,14 @@ SaveAll:
     call CopySum
     pop af
     inc a
-    cp HIGH(wPattern) + NUM_CH
+    cp HIGH(wPatterns) + NUM_CH * NUM_SEGS
     jr nz, .pat
-    ld hl, wBpm
-    ld bc, 1
-    call CopySum
-    ld hl, wSeqLen
-    ld bc, 1
-    call CopySum
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .bank
+    ld a, [wEditBank]       ; the piano roll reads the edited pattern's bank
+    ld [$FF70], a
     ld a, [wSaveSum]
     xor $A5
     ld [de], a
@@ -354,7 +363,20 @@ LoadAll:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call CopyBytes
-    ld a, HIGH(wPattern)
+    ld de, wChain
+    ld bc, CHAIN_LEN
+    call CopyBytes
+    ld de, wBpm
+    ld bc, 1
+    call CopyBytes
+    ld de, wSeqBars
+    ld bc, 1
+    call CopyBytes
+    ld a, 1
+.bank:
+    push af
+    ld [$FF70], a           ; SVBK
+    ld a, HIGH(wPatterns)
 .pat:
     push af
     ld d, a
@@ -363,20 +385,21 @@ LoadAll:
     call CopyBytes
     pop af
     inc a
-    cp HIGH(wPattern) + NUM_CH
+    cp HIGH(wPatterns) + NUM_CH * NUM_SEGS
     jr nz, .pat
-    ld de, wBpm
-    ld bc, 1
-    call CopyBytes
-    ld de, wSeqLen
-    ld bc, 1
-    call CopyBytes
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .bank
+    ld a, [wEditBank]
+    ld [$FF70], a
     inc hl                  ; the checksum, then the name
     ld de, wName
     ld bc, NAME_LEN
     call CopyBytes
     call SanitizeName
     call SramClose
+    call SongLoaded         ; (clamps the chain, edits pattern 1 in loop mode)
     and a                   ; clear carry
     ret
 .bad:

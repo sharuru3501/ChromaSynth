@@ -21,7 +21,7 @@
 ;   A + LEFT/RIGHT   shorten / lengthen the note under the cursor by one cell
 ;   A + UP/DOWN      transpose the note under the cursor
 ;   B (tap)          delete the note under the cursor
-;   SELECT + UP/DOWN BPM +-1      SELECT + LEFT/RIGHT  loop length -+1 bar
+;   SELECT + UP/DOWN BPM +-1      SELECT + LEFT/RIGHT  loop length -+1 bar (1..8)
 ;   SELECT tap       next channel (handled in joy.asm)
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
@@ -40,7 +40,9 @@ SeqToggle:
     jr z, .stop
     xor a
     ld [wSeqTick], a
-    inc a
+    ld [wSeqSeg], a
+    call SongRestart        ; from the first chain step (or the edited pattern in loop mode)
+    ld a, 1
     ld [wFollow], a         ; the roll scrolls along with the playhead
     call GetTickLen
     dec d                   ; acc = len - 1 frame: the first tick fires next frame
@@ -53,6 +55,7 @@ SeqToggle:
     jp MarkSeqStatus
 .stop:
     call SeqSilence
+    call SongMarkPos        ; the song screen drops its [ ] marks
     ld a, $FC               ; MIDI stop
     call MidiOutSync
     jp MarkSeqStatus
@@ -90,8 +93,13 @@ SeqTick:
     call SeqStep
     jr .external
 .internal:
-    ld hl, wSeqAcc + 1
-    inc [hl]                ; acc += 256
+    ld a, [wFrames]         ; the clock counts FRAMES, not main-loop passes: a pass that took two frames
+    ld hl, wSeqAcc + 1      ; (heavy drawing) must not make the music slower
+    add [hl]
+    ld [hl], a              ; acc += 256 * frames
+    ld a, 3                 ; at most 3 ticks in one pass (a catch-up plays them back to back)
+    ld [wSeqCatch], a
+.tickLoop:
     call GetTickLen         ; de = tick length
     ld a, [wSeqAcc]
     ld l, a
@@ -108,21 +116,42 @@ SeqTick:
     ld [wSeqAcc], a
     ld a, h
     ld [wSeqAcc + 1], a
-    ; fall through
+    call SeqStep
+    ld a, [wSeqPlay]
+    and a
+    ret z
+    ld hl, wSeqCatch
+    dec [hl]
+    jr nz, .tickLoop
+    ret
 
 ; Play the current tick on all channels, then advance.
 SeqStep:
+    ld a, [wSongWrap]
+    and a
+    jr z, .noWrap
+    xor a
+    ld [wSongWrap], a
+    call SeqSilence         ; a note of the pattern that just ended must not carry into the next
+.noWrap:
     ld a, [wSeqTick]
     ld [wSeqCur], a
+    ld a, [wSeqSeg]
+    ld [wSeqCurSeg], a
     ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)
     call MidiOutSync
+    ld a, [wPlayBank]       ; read the played pattern (SVBK goes back to the edited one below)
+    ld [$FF70], a
     ld c, 0
 .ch:
+    ld a, c
+    add a
+    ld hl, wSeqCurSeg
+    add [hl]
+    add HIGH(wPatterns)     ; the page: channel * 2 + segment
+    ld h, a
     ld a, [wSeqCur]
     ld l, a
-    ld a, c
-    add HIGH(wPattern)
-    ld h, a
     ld a, [hl]
     and a
     jr z, .next
@@ -145,18 +174,58 @@ SeqStep:
     ld a, c
     cp NUM_CH
     jr c, .ch
+    ld a, [wEditBank]       ; the piano roll reads the edited pattern
+    ld [$FF70], a
+    ld a, [wSeqBars]        ; where the loop ends: (last segment, ticks in it)
+    dec a
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, LoopEndTab
+    add hl, de
     ld a, [wSeqTick]
     inc a
-    ld hl, wSeqLen
+    ld c, a                 ; c = the next tick
+    ld a, [wSeqSeg]
+    cp [hl]                 ; compared with the last segment
+    jr c, .midLoop          ; before it: only the segment end can come
+    jr nz, .wrap            ; (the loop was shortened under the playhead)
+    inc hl
+    ld a, c
     cp [hl]
-    jr c, .store
+    jr c, .store            ; before the loop end
+.wrap:
     xor a                   ; reached the loop end
+    ld [wSeqTick], a
+    ld [wSeqSeg], a
+    ld a, [wSongMode]
+    and a
+    call nz, SongNext       ; the chain goes on with its next pattern
+    ld a, [wSeqTick]
+    jr .stored
+.midLoop:
+    ld a, c
+    cp SEQ_TICKS
+    jr c, .store
+    xor a                   ; the end of a segment: the next one starts
+    ld [wSeqTick], a
+    ld a, [wSeqSeg]
+    inc a
+    ld [wSeqSeg], a
+    xor a
+    jr .stored
 .store:
+    ld a, c
+.stored:
     ld [wSeqTick], a
     ld a, [wFollow]         ; the view follows the playhead until the user moves the cursor
     and a
     ret z
     jp RollFollow
+
+; The loop end for 1..MAX_BARS bars: (index of the last segment, ticks played in it).
+LoopEndTab:
+    db 0, 48,  0, 96,  0, 144,  0, 192,  1, 48,  1, 96,  1, 144,  1, 192
 
 ; -> de = tick length (8.8 frames) for wBpm. Clobbers a, hl.
 GetTickLen:
@@ -179,10 +248,13 @@ MarkSeqStatus:
     ret
 
 ; ---------------------------------------------------------------- cell helpers
-; b = tick -> hl = address of that cell in the selected channel. Clobbers a.
+; b = tick (in the cursor's segment) -> hl = address of that cell in the selected channel. Clobbers a.
 CellHL:
     ld a, [wSelCh]
-    add HIGH(wPattern)
+    add a
+    ld hl, wRollSeg
+    add [hl]
+    add HIGH(wPatterns)     ; the page: channel * 2 + the cursor's segment
     ld h, a
     ld l, b
     ret
@@ -366,7 +438,7 @@ SeqCursor:
     ld [wRollNote], a
     jp RollCursorMoved
 
-; c = cells: move the cursor right, stopping at the last cell. Keeps b, c, d, e.
+; c = cells: move the cursor right (on into the next segment), stopping at the last cell. Keeps b, c, d, e.
 CellRight:
     push bc
     push de
@@ -380,7 +452,7 @@ CellRight:
     ld e, a                 ; e = last cell
 .l: ld a, [wRollCell]
     cp e
-    jr nc, .done
+    jr nc, .edge
     inc a
     ld [wRollCell], a
     ld a, [wDivTicks]
@@ -388,6 +460,17 @@ CellRight:
     ld a, [wRollTick]
     add b
     ld [wRollTick], a
+    jr .more
+.edge:                      ; the last cell of the segment: on into the next one
+    ld a, [wRollSeg]
+    cp NUM_SEGS - 1
+    jr nc, .done
+    inc a
+    ld [wRollSeg], a
+    xor a
+    ld [wRollCell], a
+    ld [wRollTick], a
+.more:
     dec c
     jr nz, .l
 .done:
@@ -395,12 +478,13 @@ CellRight:
     pop bc
     ret
 
-; c = cells: move the cursor left, stopping at cell 0. Keeps b, c, d, e.
+; c = cells: move the cursor left (back into the previous segment), stopping at cell 0. Keeps b, c, d, e.
 CellLeft:
     push bc
+    push de
 .l: ld a, [wRollCell]
     and a
-    jr z, .done
+    jr z, .edge
     dec a
     ld [wRollCell], a
     ld a, [wDivTicks]
@@ -408,9 +492,31 @@ CellLeft:
     ld a, [wRollTick]
     sub b
     ld [wRollTick], a
+    jr .more
+.edge:                      ; cell 0: back into the last cell of the previous segment
+    ld a, [wRollSeg]
+    and a
+    jr z, .done
+    dec a
+    ld [wRollSeg], a
+    ld a, [wDiv]
+    ld e, a
+    ld d, 0
+    ld hl, DivCells
+    add hl, de
+    ld a, [hl]
+    dec a
+    ld [wRollCell], a
+    ld a, [wDivTicks]
+    ld b, a
+    ld a, SEQ_TICKS
+    sub b
+    ld [wRollTick], a       ; the last cell starts one cell before the segment end
+.more:
     dec c
     jr nz, .l
 .done:
+    pop de
     pop bc
     ret
 
@@ -489,23 +595,23 @@ SeqSelectHeld:
     ld [wBpm], a
     call MarkSeqStatus
 .keepBpm:
-    ld a, [wSeqLen]
+    ld a, [wSeqBars]
     ld b, a
     bit PADB_RIGHT, d
     jr z, .noRight
-    add TICKS_PER_BAR
+    inc a
 .noRight:
     bit PADB_LEFT, d
     jr z, .noLeft
-    sub TICKS_PER_BAR
+    dec a
 .noLeft:
-    cp TICKS_PER_BAR
-    ret c                   ; below one bar (also catches underflow)
-    cp SEQ_TICKS + 1
+    cp 1
+    ret c                   ; below one bar
+    cp MAX_BARS + 1
     ret nc
     cp b
     ret z
-    ld [wSeqLen], a
+    ld [wSeqBars], a
     jp RollRefreshAll       ; the ruler shows where the loop ends
 
 ; A pressed: put a one-cell note at the cursor unless a note of that pitch is
@@ -519,6 +625,7 @@ SeqPlace:
     call CellHL
     ld a, [wRollNote]
     ld [hl], a              ; note-on
+    call LoopCoverNote      ; a note past the loop end makes the loop longer
     ld a, [wDivTicks]
     add b                   ; a = end of the cell
     cp SEQ_TICKS
@@ -537,6 +644,35 @@ SeqPlace:
     ld c, a
     ld a, [wRollNote]
     jp NoteOn
+
+; A note was placed at the cursor: if its bar is after the loop end, the loop grows to
+; include it (up to MAX_BARS), so what you enter is what plays. Keeps b. Clobbers a, c, hl.
+LoopCoverNote:
+    ld a, [wRollTick]
+; a = a tick of the cursor's segment: the loop grows to include its bar (see above).
+LoopCoverTick:
+    ld c, 0                 ; c = bar inside the segment (tick / TICKS_PER_BAR)
+.bar:
+    cp TICKS_PER_BAR
+    jr c, .have
+    sub TICKS_PER_BAR
+    inc c
+    jr .bar
+.have:
+    ld a, [wRollSeg]
+    add a
+    add a                   ; a segment is 4 bars
+    add c
+    inc a                   ; bar number, 1-based
+    ld hl, wSeqBars
+    cp [hl]
+    ret c                   ; inside the loop already
+    ret z
+    ld [hl], a
+    push bc
+    call RollRefreshAll     ; the ruler and the status line show the new length
+    pop bc
+    ret
 
 ; A held (not newly pressed): LEFT/RIGHT = length, UP/DOWN = transpose.
 SeqNoteEdit:
@@ -623,10 +759,18 @@ SeqLength:
     ld a, [wDivTicks]
     add e                   ; a = new end
     cp b
-    jp nc, RollRefresh      ; reaches the next event / the end: the note runs into it
+    jr nc, .runsOn          ; reaches the next event / the end: the note runs into it
     ld b, a
     call CellHL
     ld [hl], CELL_OFF
+    ld a, b
+    dec a                   ; the last tick of the note: its bar must be inside the loop
+    call LoopCoverTick
+    jp RollRefresh
+.runsOn:
+    ld a, b
+    dec a
+    call LoopCoverTick
     jp RollRefresh
 .shorten:
     ld a, [wDivTicks]

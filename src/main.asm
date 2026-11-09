@@ -34,14 +34,38 @@ EntryPoint:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call MemCopy
-    ld hl, DefaultPattern
-    ld de, wPattern
+    ld a, 1                 ; every pattern bank starts empty ...
+.clearBank:
+    push af
+    ld [$FF70], a           ; SVBK
+    ld hl, wPatterns
     ld bc, NUM_CH * SEQ_STRIDE
-    call MemCopy
+    call MemClear
+    pop af
+    inc a
+    cp NUM_PATS + 1
+    jr nz, .clearBank
+    ld a, 1                 ; ... except pattern 1: the demo
+    ld [$FF70], a
+    ld hl, DefaultPattern
+    ld de, wPatterns
+    ld b, NUM_CH
+.demoCh:
+    push bc
+    ld bc, 256
+    call MemCopy            ; (a channel's first 256 ticks; its second page stays empty)
+    inc d                   ; de -> the next channel's first page
+    pop bc
+    dec b
+    jr nz, .demoCh
+    ld a, 1
+    ld [wEditBank], a
+    ld [wPlayBank], a
+    call ChainReset
     ld a, 120
     ld [wBpm], a
-    ld a, 2 * TICKS_PER_BAR ; the demo is two bars long
-    ld [wSeqLen], a
+    ld a, 2                 ; the demo is two bars long
+    ld [wSeqBars], a
     ld a, DEFAULT_DIV       ; piano-roll grid: 1/16
     call SetDivision
     ld a, 127
@@ -105,15 +129,27 @@ EntryPoint:
 MainLoop:
     halt
     nop
-    call DrainMidi
+    di                      ; take the frame count atomically (the ISR counts VBlanks)
     ld a, [wVBlank]
-    and a
-    jr z, MainLoop
+    ld b, a
     xor a
     ld [wVBlank], a
+    ei
+    ld a, b
+    and a
+    jr nz, .frame
+    call DrainMidi          ; woken by something else (the link): just the MIDI bytes
+    jr MainLoop
+.frame:
+    cp 5
+    jr c, .framesOk
+    ld a, 4                 ; (a long stall: the sequencer catches up at most 4 frames at once)
+.framesOk:
+    ld [wFrames], a
     call CLinkUp            ; palette RAM is only writable now, so before anything else
     call UpdateUI           ; VRAM is only writable now, so do this first
     call VoiceTick
+    call DrainMidi
     call SeqTick
     call RollPlayheadCalc
     call MsgTick
@@ -134,7 +170,11 @@ MainLoop:
 ; ---------------------------------------------------------------- ISRs
 VBlankISR:
     push af
-    ld a, 1
+    ld a, [wVBlank]
+    inc a
+    jr nz, .count
+    dec a                   ; (cap at 255)
+.count:
     ld [wVBlank], a
     pop af
     reti

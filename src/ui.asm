@@ -13,6 +13,7 @@ INCLUDE "synth.inc"
 DEF ROW_CH0    EQU 3
 DEF ROW_STATUS EQU _SCRN0 + 9 * 32
 DEF ROW_SLOT   EQU _SCRN0 + 11 * 32
+DEF EDIT_ROWS_PER_FRAME EQU 3
 
 SECTION "UI", ROM0
 
@@ -42,6 +43,8 @@ BuildScreen:
     xor a
     ld [wSelCh], a
 .chOk:
+    xor a
+    ldh [rSCY], a           ; only the piano roll scrolls (BuildSeq sets its SCY)
     ld hl, _SCRN0
     ld bc, 32 * 32
     call MemClear           ; tile 0 = space
@@ -60,6 +63,8 @@ BuildScreen:
     jr z, .kbd
     cp SCREEN_SLOT
     jp z, .slot
+    cp SCREEN_SONG
+    jp z, BuildSong
     jp .edit
 .slot:
     ld hl, _SCRN0 + 4
@@ -206,6 +211,8 @@ UpdateUI:
     jr z, .play
     cp SCREEN_SLOT
     jp z, UpdateSlot
+    cp SCREEN_SONG
+    jp z, UpdateSong
     jp UpdateEdit
 .play:
     ld a, [wDirty]
@@ -333,6 +340,9 @@ UpdateSlot:
     ld hl, wDirtySlot
     and [hl]
     ld [hl], a
+    ld a, c
+    cp NUM_SLOTS
+    ret nc                  ; (the dirty byte starts with all bits set)
     ld b, c                 ; b = slot
     ld a, c
     swap a
@@ -448,9 +458,16 @@ UpdateEdit:
     ld [wDirty], a
     jr DrawEditHeader
 .rows:
+    ld a, EDIT_ROWS_PER_FRAME   ; several rows a frame (a page change redraws 8 of them), as long as
+    ld [wRowBudget], a          ; VBlank has time left
+.again:
     ld a, [wDirtyEdit]
     and a
     ret z
+    ldh a, [rLY]
+    cp 148
+    ret nc                  ; (the rest waits for the next frame)
+    ld a, [wDirtyEdit]
     ld c, 0
 .find:
     rra
@@ -466,7 +483,12 @@ UpdateEdit:
     and [hl]
     ld [hl], a
     ld b, c
-    jr DrawEditRow
+    call DrawEditRow
+    ld a, [wRowBudget]
+    dec a
+    ld [wRowBudget], a
+    jr nz, .again
+    ret
 
 DrawEditHeader:
     ld hl, _SCRN0 + 8
@@ -615,7 +637,65 @@ PatchRowHL:
 
 ; Row 17 message line: wMsg = 0 clears it (and restores the sequencer status).
 DrawMsg:
-    ld hl, _SCRN0 + 17 * 32
+    ld a, [wScreen]
+    cp SCREEN_SEQ
+    jr z, .roll
+    ld c, 17                ; the other screens use $9800 only (SCY = 0)
+    ld a, HIGH(_SCRN0)
+    call DrawMsgRow
+    ld c, 17
+    ld a, HIGH(_SCRN0) + 4
+    call DrawMsgRow
+    jr .done
+.roll:                      ; the piano roll: the status row of each map, wherever its window put it
+    ld a, [wShownTop]
+    ld l, a
+    ld a, 17
+    sub l
+    and RING_ROWS - 1
+    ld c, a
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0)
+    jr z, .shown
+    ld a, HIGH(_SCRN0) + 4
+.shown:
+    call DrawMsgRow
+    ld a, [wRollTop]
+    ld l, a
+    ld a, 17
+    sub l
+    and RING_ROWS - 1
+    ld c, a
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0) + 4
+    jr z, .hidden
+    ld a, HIGH(_SCRN0)
+.hidden:
+    call DrawMsgRow
+.done:
+    ld a, [wMsg]
+    and a
+    ret nz
+    ld a, [wScreen]         ; the message is gone: the sequencer's status line comes back
+    cp SCREEN_SEQ
+    ret nz
+    jp MarkSeqStatus
+
+; a = HIGH of a tile map, c = map row: clear that row and write the message (if any).
+DrawMsgRow:
+    ld l, c
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl              ; row * 32
+    add h
+    ld h, a
+    ld d, h
+    ld e, l                 ; de = the row
     ld b, 20
     xor a
 .clear:
@@ -624,28 +704,30 @@ DrawMsg:
     jr nz, .clear
     ld a, [wMsg]
     and a
-    jr z, .restore
+    ret z
     dec a
     add a
-    ld e, a
-    ld d, 0
-    ld hl, MsgTable
+    ld l, a
+    ld h, 0
+    push de
+    ld de, MsgTable
     add hl, de
+    pop de
     ld a, [hl+]
-    ld e, a
-    ld d, [hl]
-    ld hl, _SCRN0 + 17 * 32
+    ld c, a
+    ld a, [hl]
+    ld h, a
+    ld l, c                 ; hl = the message text
+    push de
+    ld d, h
+    ld e, l                 ; de = text
+    pop hl                  ; hl = the row
     call DrawString
     inc hl                  ; every message ends with the slot number
     ld a, [wSlot]
     add '1' - 32
     ld [hl], a
     ret
-.restore:
-    ld a, [wScreen]
-    cp SCREEN_SEQ
-    ret nz
-    jp MarkSeqStatus
 
 ; ---------------------------------------------------------------- shared
 ; a = MIDI note, hl = dest -> three tiles, e.g. "C-4". Clobbers a, b, de.

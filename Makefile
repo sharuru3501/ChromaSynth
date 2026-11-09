@@ -28,6 +28,7 @@ notetable:
 # Regenerate all committed data includes
 gen:
 	python3 tools/gen_notetable.py > src/notetable.inc
+	python3 tools/gen_lowbit.py > src/lowbit.inc
 	python3 tools/gen_font.py > src/font.inc
 	python3 tools/gen_waves.py > src/waves.inc
 	python3 tools/gen_tempo.py > src/tempo.inc

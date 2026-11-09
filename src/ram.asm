@@ -14,26 +14,59 @@ wTx:            ds 256
 SECTION "Patch", WRAM0, ALIGN[8]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
-; Pattern: wPattern[channel * 256 + tick]. 256-byte aligned: HIGH(wPattern)+channel
-; is the high byte and the tick is the low byte (no 16-bit arithmetic anywhere).
-SECTION "Pattern", WRAM0, ALIGN[8]
-wPattern:       ds NUM_CH * SEQ_STRIDE
+; Patterns: pattern p lives in its own WRAM bank (p + 1, selected with SVBK = $FF70) at $D000:
+; channel c, segment g (4 bars each), tick t at wPatterns + c * 512 + g * 256 + t. The page is
+; HIGH(wPatterns) + c * 2 + g and the tick is the low byte, so no 16-bit arithmetic is needed.
+; SVBK is always the edited pattern's bank (wEditBank) except inside SeqStep, which reads the
+; played pattern's bank and puts the edited one back. (Needs a CGB: a DMG has no banks.)
+SECTION "Patterns 1", WRAMX[$D000], BANK[1]
+wPattern:
+wPatterns:      ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 2", WRAMX[$D000], BANK[2]
+                ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 3", WRAMX[$D000], BANK[3]
+                ds NUM_CH * SEQ_STRIDE
+SECTION "Patterns 4", WRAMX[$D000], BANK[4]
+                ds NUM_CH * SEQ_STRIDE
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
 SECTION "Roll grid", WRAM0
-wGrid:          ds ROLL_ROWS * 20
+wGrid:          ds RING_ROWS * 20   ; one slot per ring row (see the piano-roll header in roll.asm)
 
 ; 16 render flags, 16 copy flags, 16 column pitches, 16 head flags: 64 bytes, 64-byte
 ; aligned so that base + index never carries into the high byte.
-SECTION "Roll flags", WRAM0, ALIGN[6]
-wRowRender:     ds ROLL_ROWS    ; row must be re-rendered into wGrid
-wRowDirty:      ds ROLL_ROWS    ; row must be copied to VRAM
+SECTION "Roll render flags", WRAM0, ALIGN[5]
+wRowRender:     ds RING_ROWS    ; ring row must be re-rendered into wGrid
+SECTION "Roll spans", WRAM0, ALIGN[6]
+wSpanLo:        ds RING_ROWS    ; per ring row waiting to be copied: its first changed tile
+wSpanHi:        ds RING_ROWS    ; and the end (exclusive); wSpanHi = wSpanLo + RING_ROWS
+SECTION "Roll flags", WRAM0, ALIGN[5]
 ; Per column of the visible page: sounding pitch (0 = silence), then 1 = note head.
 wColPitch:      ds SEQ_PAGE
 wColHead:       ds SEQ_PAGE
 
-; Previous column summary, kept so that an edit only redraws the rows that changed.
+; The roll is drawn into a map that is NOT shown and the two maps are swapped (LCDC bit 3) when
+; it is complete, so a scroll or a page change never shows half old / half new rows.
+SECTION "Roll flags H", WRAM0
+wMaskV:         ds 4            ; bit r = ring row r waits to be copied to the shown map
+wMaskH:         ds 4            ; the same for the hidden map (only while a full redraw is built)
+wShownTop:      db              ; the pitch window (top pitch) of the picture on screen
+wVPre:          db              ; 1 = the free row of a one-pitch scroll is already written (see VScrollStep)
+wPageChanged:   db              ; RollScrollFix: 1 = the page (not just the pitch window) changed
+wCopyTop:       db              ; ... of the map the copy routines write to
+wShown:         db              ; 0 = $9800 is shown, 1 = $9C00
+wBuild:         db              ; 1 = a full redraw is being built in the hidden map
+wBuildReady:    db              ; 1 = every row of that redraw has been rendered
+wDirtyH:        db              ; bit 0 = ruler, bit 1 = status line must be copied to the hidden map
+wCopyMap:       db              ; HIGH of the map the copy routines write to
+wRowBudget:     db              ; rows left to draw this frame (edit screen)
+wCopyInit:      db              ; the copy budget at the start of the frame
+wShSeg:         db              ; the page that is ON SCREEN (the live wPage* may already be the next one)
+wShTick:        db
+wShSpan:        db
+wShDiv:         db
+
 SECTION "Roll old cols", WRAM0, ALIGN[5]
 wColOld:        ds SEQ_PAGE * 2
 
@@ -47,7 +80,9 @@ wRingTail:      db          ; written by main loop
 wTxHead:        db          ; next free slot in wTx (written by the main loop)
 wTxTail:        db          ; next byte the ISR hands to the bridge
 wExtTicks:      db          ; clock ticks received from the DAW and not played yet (0..4)
-wVBlank:        db
+wVBlank:        db          ; frames (VBlank interrupts) since the main loop last looked (capped at 255)
+wFrames:        db          ; the same, taken by the main loop for this pass: 1..4 (more than 1 = frames were lost)
+wSeqCatch:      db          ; SeqTick: ticks it may still play this pass
 wMidiStatus:    db          ; running status (0 = none)
 wMidiCount:     db          ; data bytes received for current message
 wMidiData1:     db
@@ -86,11 +121,26 @@ wBendSign:      db
 wCurNote:       ds NUM_CH   ; sounding note per channel, 0 = silent
 wVibPh:         ds NUM_CH   ; vibrato phase per channel
 wSeqPlay:       db          ; 1 = sequencer running
-wSeqTick:       db          ; next tick to play (0..wSeqLen-1)
+wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS-1)
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
-wSeqLen:        db          ; loop length in ticks (48/96/144/192)
+wSeqBars:       db          ; loop length in bars (1..MAX_BARS)
+wSeqSeg:        db          ; segment (4 bars) of the next tick to play
+wSeqCurSeg:     db          ; segment of the tick that was played last (playhead)
+wRollSeg:       db          ; piano-roll cursor: segment (wRollTick / wRollCell count inside it)
+wPageSeg:       db          ; segment of the visible page
+wBCSeg:         db          ; BuildCols scratch
+wRCSeg:         db          ; RollChannelChanged scratch
+wEditBank:      db          ; WRAM bank of the pattern shown / edited on the piano roll (1..NUM_PATS)
+wPlayBank:      db          ; WRAM bank of the pattern the sequencer plays
+wEditPat:       db          ; the edited pattern's number
+wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
+wChainPos:      db          ; chain step being played
+wSongWrap:      db          ; 1 = the chain just moved on: release the notes before the next pattern's first tick
+wChain:         ds CHAIN_LEN ; pattern numbers, CHAIN_END after the last step
+wSongCur:       db          ; song screen: the cursor's chain step
+wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, bit n = chain row n-1)
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)
@@ -128,6 +178,12 @@ wBCPhase:       db
 wBCBeat:        db
 wBCCol:         db
 wRulerBuf:      ds 20       ; row 0 of the roll, built outside VBlank
+wRRBuf:         ds 20       ; RenderRow builds a row here, CommitRow compares it with the shadow slot
+wRRRow:         db          ; the ring row being rendered
+wRRLo:          db          ; the first changed tile of the row just rendered ($FF = none)
+wRRHi:          db          ; the end of the changed tiles
+wSpanTmp:       db
+wRRChanged:     db          ; 1 = the rendered row differs from its shadow slot (it must be copied)
 wStatusBuf:     ds 20       ; row 17 of the roll
 wMsg:           db          ; message code shown on row 17 (0 = none)
 wMsgTimer:      db
