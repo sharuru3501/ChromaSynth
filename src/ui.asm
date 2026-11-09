@@ -345,8 +345,9 @@ UpdateSlot:
     and [hl]
     ld [hl], a
     ld a, c
-    cp NUM_SLOTS
-    ret nc                  ; (the dirty byte starts with all bits set)
+    ld hl, wNumSlots
+    cp [hl]
+    ret nc                  ; (the dirty byte starts with all bits set; slots this cartridge has no room for stay blank)
     ld b, c                 ; b = slot
     ld a, c
     swap a

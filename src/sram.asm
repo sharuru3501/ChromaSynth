@@ -29,9 +29,34 @@ SECTION "SRAM", ROM0
 
 SaveMagic:  db "CSYN", SAVE_VERSION
 
+; Which mapper chips work: MBC5 (the target), MBC3 (the same RAM enable and bank registers) and MBC1 (needs RAM banking mode 1,
+; which is selected here: a write to $6000 does nothing on an MBC5 and only a lone "1" on an MBC3, which is not a clock latch).
 SramOpen:
+    ld a, 1
+    ld [$6000], a
     ld a, CART_SRAM_ENABLE
     ld [rRAMG], a
+    ret
+
+; The number of save slots from the cartridge header (RAM size code at $0149): 2 = 8 KB: one slot; 3, 4, 5 = 32 KB or more:
+; NUM_SLOTS (4); anything else (no SRAM, 2 KB): none. A ROM built for 32 KB on an 8 KB cartridge is not detected: the header
+; is what the ROM believes (docs/CARTRIDGES.md). Clobbers a.
+InitSlots:
+    ld a, [$0149]
+    cp 2
+    jr c, .none
+    jr z, .one
+    cp 6
+    jr nc, .none
+    ld a, NUM_SLOTS
+    jr .set
+.one:
+    ld a, 1
+    jr .set
+.none:
+    xor a
+.set:
+    ld [wNumSlots], a
     ret
 
 SramClose:
@@ -72,9 +97,10 @@ SlotStep:
     dec a
     jr .set
 .right:
-    cp NUM_SLOTS - 1
-    ret nc
     inc a
+    ld hl, wNumSlots
+    cp [hl]
+    ret nc                  ; no slot after this one
 .set:
     ld [wSlot], a
     xor a
@@ -201,9 +227,10 @@ SlotInput:
 .down:
     bit PADB_DOWN, d
     jr z, .lr
-    cp NUM_SLOTS - 1
-    ret nc
     inc a
+    ld hl, wNumSlots
+    cp [hl]
+    ret nc
     jr SlotGoto
 .lr:
     ld c, $FF               ; LEFT / RIGHT: the name cursor
@@ -367,6 +394,12 @@ SaveAll:
 
 ; Restore the state from the selected slot. -> carry set if it holds no valid save.
 LoadAll:
+    ld a, [wNumSlots]
+    and a
+    jr nz, .have
+    scf                     ; no SRAM: nothing to load
+    ret
+.have:
     call SramOpen
     call SlotBase
     call ValidateSave       ; -> hl = start of the data
@@ -429,12 +462,15 @@ LoadAll:
 
 ; Fill wSlotUsed: which slots hold a valid save. Keeps wSlot.
 ScanSlots:
-    call SramOpen
     xor a
     ld [wSlotUsed], a
     ld hl, wSlotNames
     ld bc, NUM_SLOTS * NAME_LEN
     call MemClear
+    ld a, [wNumSlots]
+    and a
+    ret z                   ; no SRAM to look at
+    call SramOpen
     ld a, [wSlot]
     push af
     xor a
@@ -453,7 +489,8 @@ ScanSlots:
 .empty:
     ld a, [wSlot]
     inc a
-    cp NUM_SLOTS
+    ld hl, wNumSlots
+    cp [hl]
     jr c, .next
     pop af
     ld [wSlot], a
@@ -497,6 +534,12 @@ ValidateSave:
 ; ---------------------------------------------------------------- UI glue
 ; SELECT+B. A used slot asks for a second SELECT+B before it is overwritten.
 DoSave:
+    ld a, [wNumSlots]
+    and a
+    jr nz, .some
+    ld a, MSG_FAIL          ; no SRAM in this cartridge
+    jp SetMsg
+.some:
     call SlotMask
     ld hl, wSlotUsed
     and [hl]
@@ -527,6 +570,12 @@ DoSave:
 
 ; SELECT+A
 DoLoad:
+    ld a, [wNumSlots]
+    and a
+    jr nz, .some
+    ld a, MSG_NODATA
+    jp SetMsg
+.some:
     call LoadAll
     ld a, MSG_NODATA
     jr c, SetMsg

@@ -18,12 +18,16 @@ SRCS    := $(wildcard src/*.asm)
 OBJS    := $(patsubst src/%.asm,$(BUILD)/%.o,$(SRCS))
 INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 
-.PHONY: all card clean run notetable gen check-bridge check-mcu check-usb-bridge firmware
+.PHONY: all card small clean run notetable gen check-bridge check-mcu check-usb-bridge firmware
 
 all: $(TARGET)
 
 card:
 	$(MAKE) BUILD=build-card SLOT_BANK0=12 SRAM_CODE=4 CGB_FLAG=-c
+
+# `make small`: the version for cartridges with 8 KB of SRAM (header RAM size 8 KB: one save slot)
+small:
+	$(MAKE) BUILD=build-8k SRAM_CODE=2
 
 $(BUILD)/%.o: src/%.asm $(INCS) | $(BUILD)
 	$(RGBASM) -Weverything -E $(EXTRA_AS) -I inc/ -I src/ -o $@ $<
@@ -72,4 +76,4 @@ run: $(TARGET)
 	open -a SameBoy $(TARGET)
 
 clean:
-	rm -rf build build-card
+	rm -rf build build-card build-8k

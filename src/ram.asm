@@ -198,6 +198,7 @@ wRRPitch:       db          ; RenderRow scratch
 wRRBlack:       db
 wRRCur:         db
 wSaveSum:       db          ; SaveAll running checksum
+wNumSlots:      db          ; save slots this cartridge has room for (InitSlots: from the header's RAM size)
 wSlot:          db          ; selected save slot 0..NUM_SLOTS-1
 wSlotUsed:      db          ; bit n = slot n holds a valid save (cached; scanned at boot, kept up to date)
 wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)

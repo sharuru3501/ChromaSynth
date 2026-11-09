@@ -3,7 +3,7 @@
 画面・ボタン操作・音色パラメータ(PATCH 画面の略称)の一覧です。設計の話は [ARCHITECTURE.md](ARCHITECTURE.md)、MIDI の仕様は [MIDI.md](MIDI.md)、状態は [ROADMAP.md](ROADMAP.md)。
 ボタン名: 十字キー(↑↓←→)、A、B、START、SELECT。
 
-> **注意**: 保存はカートリッジの SRAM に書く(4 スロット、1 曲 8 KB、既定のビルドは SRAM のバンク 0〜3。§1 の保存スロット)。ほかのソフトのデータがあるスロットには書かない(`SLOT IN USE`)。カートリッジの条件は [CARTRIDGES.md](CARTRIDGES.md)。
+> **注意**: 保存はカートリッジの SRAM に書く(通常版は 4 スロット、機能制限版(SRAM 8 KB)は 1 スロット。1 曲 8 KB、SRAM のバンク 0 から。§1 の保存スロット)。ほかのソフトのデータがあるスロットには書かない(`SLOT IN USE`)。カートリッジの条件は [CARTRIDGES.md](CARTRIDGES.md)。
 
 ## 1. 画面と移動
 画面は一直線に並んでいる: **プレイ ⇄ PATCH(音色編集) ⇄ シーケンサー(ピアノロール) ⇄ キーボード**。端で止まる。
