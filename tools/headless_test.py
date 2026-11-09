@@ -776,7 +776,7 @@ for _ in range(5):          # cursor to cell 20 = tick 60 (bar 2, beat 2) at 1/1
 check("cursor at tick 60 (bar 2, beat 2)", (v("wRollCell"), v("wRollTick"), v("wDiv")) == (20, 60, 4),
       (v("wRollCell"), v("wRollTick"), v("wDiv")))
 DIV_TICKS = [12, 8, 6, 4, 3, 2, 1]
-DIV_COLS = [16, 12, 16, 12, 16, 12, 12]
+DIV_COLS = [16] * 7
 bad = []
 for step in range(7):       # visit every division once, ending where we started
     d_ = v("wDiv")
@@ -784,7 +784,7 @@ for step in range(7):       # visit every division once, ending where we started
     span, ptick = v("wPageSpan"), v("wPageTick")
     if (v("wDivTicks"), v("wPageCols"), span) != (ticks, cols, ticks * cols):
         bad.append(("params", d_))
-    if ptick % 12 != 0 or not (ptick <= v("wRollTick") < ptick + span):
+    if not (ptick <= v("wRollTick") < ptick + span):
         bad.append(("page", d_, ptick))
     settle()
     for c in range(16):
@@ -825,8 +825,8 @@ check("status line shows the division label '1/8T'", status[:4] == [ord(c) - 32 
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
 check("ruler at 1/8T: bar 1 at column 0, beat dots every 3 columns (12 ticks / 4)",
       ruler[2] == 17 and ruler[5] == DOT and ruler[8] == DOT and ruler[11] == DOT and ruler[3] == 0 and ruler[4] == 0, ruler)
-check("1/8T page: 12 columns, one bar; the unused columns are blank",
-      (v("wPageCols"), v("wPageSpan")) == (12, 48) and all(grid(0, c) == 0 for c in range(12, 16)),
+check("1/8T page: 16 columns (64 ticks); no blank column",
+      (v("wPageCols"), v("wPageSpan")) == (16, 64) and all(grid(0, c) != 0 for c in range(12, 16)),
       (v("wPageCols"), v("wPageSpan"), [grid(0, c) for c in range(12, 16)]))
 check("grid: beat column tiles follow the new division",
       (grid(0, 3) - T_EMP_W) & 2 == 2 and (grid(0, 6) - T_EMP_W) & 2 == 2 and (grid(0, 1) - T_EMP_W) & 2 == 0 and (grid(0, 2) - T_EMP_W) & 2 == 0,

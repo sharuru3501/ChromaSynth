@@ -11,7 +11,7 @@
 ;
 ; The roll shows up to 16 columns per page; a "grid division" (DivTicks) says how
 ; many ticks one column covers (1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/48). A page
-; always covers whole beats (DivSpan) so the bars stay put when the division changes.
+; always has 16 columns (DivSpan ticks); bars are tracked by tick, so they stay put when the division changes.
 ; The cursor sits on a cell (wRollCell) = tick wRollTick = cell * wDivTicks.
 ;
 ; Piano-roll controls (see SeqInput):
@@ -497,64 +497,109 @@ CellHL:
     ld l, b
     ret
 
-; -> a = tick of the note-on under the cursor cell, or $FF if there is none.
-; Looks for a note-on of the cursor's pitch inside the cell, then for a note of
-; that pitch that is still sounding when the cell starts. Clobbers b, c, e, hl.
+; de = absolute tick (0 .. TOTAL_TICKS-1, counted from the start of the pattern) -> hl = its cell in the
+; selected channel's pattern. Keeps de. Clobbers a.
+AbsHL:
+    ld a, [wSelCh]
+    add a
+    add HIGH(wPatterns)     ; the page of segment 0
+    ld h, a
+    ld a, d
+    and a
+    jr nz, .second
+    ld a, e
+    cp SEQ_TICKS
+    jr c, .first
+    sub SEQ_TICKS           ; 192..255: segment 1, tick 0..63
+    inc h
+    ld l, a
+    ret
+.first:
+    ld l, e
+    ret
+.second:                    ; 256..383: segment 1, tick 64..191
+    ld a, e
+    add 256 - SEQ_TICKS
+    inc h
+    ld l, a
+    ret
+
+; The cursor cell's start as an absolute tick -> de. Clobbers a, hl.
+CursorAbs:
+    ld a, [wRollTick]
+    ld e, a
+    ld d, 0
+    ld a, [wRollSeg]
+    and a
+    ret z
+    ld hl, SEQ_TICKS
+    add hl, de
+    ld d, h
+    ld e, l
+    ret
+
+; The note under the cursor cell: a note-on of the cursor's pitch inside the cell, else a note of that
+; pitch that is still sounding when the cell starts (notes may run across the segment end).
+; -> carry clear: de = absolute tick of its note-on, hl = that cell. Carry set: no note.
+; Clobbers a, b, c, de, hl.
 FindNote:
     ld a, [wRollNote]
-    ld e, a                 ; e = cursor pitch
-    ld a, [wRollTick]
-    ld b, a
+    ld b, a                 ; b = cursor pitch
+    call CursorAbs
     ld a, [wDivTicks]
     ld c, a                 ; c = ticks left in the cell
+    push de                 ; the cell start
 .inside:
-    call CellHL
+    call AbsHL
     ld a, [hl]
-    cp e
-    jr z, .found
-    inc b
+    cp b
+    jr z, .foundIn
+    inc de
     dec c
     jr nz, .inside
-    ld a, [wRollTick]
-    ld b, a
+    pop de
 .back:                      ; the last event at or before the cell start
-    call CellHL
+    call AbsHL
     ld a, [hl]
     and a
     jr nz, .hit
-    ld a, b
-    and a
+    ld a, d
+    or e
     jr z, .none
-    dec b
+    dec de
     jr .back
 .hit:
     cp CELL_OFF
     jr z, .none
-    cp e
+    cp b
     jr nz, .none
-.found:
-    ld a, b
+    and a                   ; carry clear
+    ret
+.foundIn:
+    pop af                  ; (drop the saved cell start)
+    and a
     ret
 .none:
-    ld a, $FF
+    scf
     ret
 
-; b = start tick -> a = b = tick of the first non-empty cell after it
-; (SEQ_TICKS if there is none). Clobbers hl.
+; de = start tick -> de = absolute tick of the first non-empty cell after it (TOTAL_TICKS if there is
+; none), hl = that cell (only when it exists). Clobbers a.
 FindEnd:
-.l: inc b
-    ld a, b
-    cp SEQ_TICKS
+.l: inc de
+    ld a, d
+    cp 1
     jr c, .look
-    ld a, SEQ_TICKS
-    ld b, a
+    ld a, e
+    cp LOW(TOTAL_TICKS)
+    jr c, .look
+    ld de, TOTAL_TICKS
     ret
 .look:
-    call CellHL
+    call AbsHL
     ld a, [hl]
     and a
     jr z, .l
-    ld a, b
     ret
 
 ; ---------------------------------------------------------------- input
@@ -562,6 +607,29 @@ FindEnd:
 SeqInput:
     ld a, [wJoy]
     ld e, a                 ; e = held
+    bit PADB_START, e
+    jr z, .noStart
+    ld a, [wEditPat]        ; START+A / START+B: the next / previous pattern is edited (and played)
+    bit PADB_A, d
+    jr z, .startB
+    cp NUM_PATS - 1
+    ret nc
+    inc a
+    jr .pattern
+.startB:
+    bit PADB_B, d
+    ret z                   ; (nothing else works while START is held)
+    ld b, a
+    ld a, 1
+    ld [wBUsed], a          ; the B release must not delete a note
+    ld a, b
+    and a
+    ret z
+    dec a
+.pattern:
+    call SongSetEdit
+    jp RollRefreshAll       ; the roll shows the other pattern
+.noStart:
     bit PADB_SELECT, e
     jp nz, SeqSelectHeld
     bit PADB_B, d
@@ -859,20 +927,28 @@ SeqSelectHeld:
 ; already under it. The note is auditioned either way.
 SeqPlace:
     call FindNote
-    cp $FF
-    jr nz, .audition        ; already there: just audition it
-    ld a, [wRollTick]
-    ld b, a
-    call CellHL
+    jr nc, .audition        ; already there: just audition it
+    call CursorAbs
+    push de
+    call AbsHL
     ld a, [wRollNote]
     ld [hl], a              ; note-on
     call LoopCoverNote      ; a note past the loop end makes the loop longer
+    pop de
     ld a, [wDivTicks]
-    add b                   ; a = end of the cell
-    cp SEQ_TICKS
-    jr nc, .placed          ; last cell: no room for an OFF
-    ld b, a
-    call CellHL
+    add e
+    ld e, a
+    jr nc, .end
+    inc d                   ; de = end of the cell
+.end:
+    ld a, d
+    cp 1
+    jr c, .room
+    ld a, e
+    cp LOW(TOTAL_TICKS)
+    jr nc, .placed          ; last cell of the pattern: no room for an OFF
+.room:
+    call AbsHL
     ld a, [hl]
     and a
     jr nz, .placed          ; something already there: the note ends at it
@@ -900,6 +976,7 @@ LoopCoverTick:
     ld de, SEQ_TICKS
     add hl, de
 .first:
+LoopCoverHL:                ; hl = a tick counted from the start of the pattern
     ld a, [wBarTicks]
     ld e, a
     ld d, 0
@@ -966,10 +1043,7 @@ SeqTranspose:
     push bc
     call FindNote
     pop bc
-    cp $FF
-    ret z
-    ld b, a
-    call CellHL
+    ret c
     ld a, [hl]
     add c
     cp NOTE_MIN
@@ -997,89 +1071,164 @@ SeqTranspose:
     jp NoteOn
 
 ; c = +1 / -1: lengthen / shorten the note under the cursor by one cell.
-; The end of a note is the next non-empty cell: an OFF marker, or another note.
+; The end of a note is the next non-empty cell: an OFF marker, or another note. A note may run across
+; the segment end. The cursor goes to the last cell of the note, so the view follows the end.
 SeqLength:
     push bc
     call FindNote
     pop bc
-    cp $FF
-    ret z
-    ld d, a                 ; d = start tick
-    ld b, a
-    call FindEnd            ; b = end tick (first non-empty cell, or 192)
+    ret c
+    ld a, e
+    ld [wNtStart], a
+    ld a, d
+    ld [wNtStart + 1], a
+    call FindEnd            ; de = end tick, hl = the cell there (if it exists)
     bit 7, c
     jr nz, .shorten
     ; ---- lengthen: move the OFF one cell to the right
-    ld a, b
-    cp SEQ_TICKS
+    ld a, d
+    cp 1
+    jr c, .have
+    ld a, e
+    cp LOW(TOTAL_TICKS)
     ret nc                  ; runs to the end of the pattern already
-    call CellHL
+.have:
     ld a, [hl]
     cp CELL_OFF
     ret nz                  ; touches the next note: cannot grow
     xor a
     ld [hl], a              ; remove the old OFF
-    ld e, b                 ; e = old end
-    call FindEnd            ; b = next event after it (or 192)
+    push de                 ; old end
+    call FindEnd            ; de = next event after it (or the end)
+    ld b, d
+    ld c, e
+    pop de
     ld a, [wDivTicks]
-    add e                   ; a = new end
+    add e
+    ld e, a
+    jr nc, .cmp
+    inc d                   ; de = new end
+.cmp:
+    ld a, d
     cp b
-    jr nc, .runsOn          ; reaches the next event / the end: the note runs into it
-    ld b, a
-    call CellHL
-    ld [hl], CELL_OFF
-    ld a, b
-    dec a                   ; the last tick of the note: its bar must be inside the loop
-    call LoopCoverTick
-    jp RollRefresh
-.runsOn:
-    ld a, b
-    dec a
-    call LoopCoverTick
-    jp RollRefresh
-.shorten:
-    ld a, [wDivTicks]
-    ld c, a                 ; c = one cell
-    ld a, b
-    sub d                   ; a = current length
+    jr c, .place
+    jr nz, .runsOn
+    ld a, e
     cp c
-    ret c
-    ret z                   ; already one cell long
-    ld a, b
-    cp SEQ_TICKS
+    jr c, .place
+.runsOn:                    ; reaches the next event / the end: the note runs into it
+    ld d, b
+    ld e, c
+    jr NoteEnded
+.place:
+    call AbsHL
+    ld [hl], CELL_OFF
+    jr NoteEnded
+.shorten:
+    ld hl, wNtStart
+    ld a, e
+    sub [hl]
+    ld c, a
+    inc hl
+    ld a, d
+    sbc [hl]
+    jr nz, .cut             ; 256 ticks or more
+    ld a, [wDivTicks]
+    cp c
+    ret nc                  ; one cell long (or less) already
+.cut:
+    ld a, d
+    cp 1
+    jr c, .look
+    ld a, e
+    cp LOW(TOTAL_TICKS)
     jr nc, .noOff
-    call CellHL
+.look:
+    call AbsHL
     ld a, [hl]
     cp CELL_OFF
     jr nz, .noOff
     xor a
     ld [hl], a              ; the old OFF goes away...
 .noOff:
-    ld a, b
-    sub c                   ; ...and a new one a cell earlier
-    ld b, a
-    call CellHL
+    ld a, [wDivTicks]
+    ld c, a
+    ld a, e
+    sub c
+    ld e, a
+    jr nc, .newOff
+    dec d                   ; ...and a new one a cell earlier
+.newOff:
+    call AbsHL
     ld [hl], CELL_OFF
-    jp RollRefresh
+    ; fall through
+
+; de = the absolute tick where the edited note now ends: the loop covers it, the changed rows are
+; redrawn and the cursor goes to the note's last cell (the page turns when that is off the page).
+NoteEnded:
+    dec de                  ; the note's last tick
+    push de
+    ld h, d
+    ld l, e
+    call LoopCoverHL        ; the loop grows to include it (may redraw everything)
+    call RollRefresh
+    pop de
+    ld a, [wRollNote]
+    ld [wOldNote], a
+    xor a
+    ld [wFollow], a         ; the user took over the view
+    ld b, 0                 ; b = segment
+    ld a, d
+    and a
+    jr nz, .second
+    ld a, e
+    cp SEQ_TICKS
+    jr c, .segDone
+    sub SEQ_TICKS
+    ld e, a
+    inc b
+    jr .segDone
+.second:
+    ld a, e
+    add 256 - SEQ_TICKS
+    ld e, a
+    ld b, 1
+.segDone:
+    ld a, b
+    ld [wRollSeg], a
+    ld a, [wDivTicks]
+    ld c, a
+    ld a, e
+    ld b, 0                 ; b = cell = tick / div
+.div:
+    cp c
+    jr c, .divDone
+    sub c
+    inc b
+    jr .div
+.divDone:
+    ld d, a                 ; remainder
+    ld a, e
+    sub d
+    ld [wRollTick], a       ; snapped to the grid
+    ld a, b
+    ld [wRollCell], a
+    jp RollCursorMoved
 
 ; B tapped: delete the note under the cursor together with its OFF marker.
 SeqDelete:
     call FindNote
-    cp $FF
-    ret z
-    ld d, a
-    ld b, a
-    call FindEnd
-    ld e, a                 ; e = end tick
-    ld b, d
-    call CellHL
+    ret c
     xor a
     ld [hl], a              ; note-on gone
+    call FindEnd            ; de = end tick, hl = the cell there
+    ld a, d
+    cp 1
+    jr c, .look
     ld a, e
-    cp SEQ_TICKS
+    cp LOW(TOTAL_TICKS)
     jp nc, RollRefresh
-    ld b, e
-    call CellHL
+.look:
     ld a, [hl]
     cp CELL_OFF
     jp nz, RollRefresh

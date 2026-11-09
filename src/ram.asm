@@ -171,6 +171,7 @@ wRollTop:       db          ; pitch shown on the top grid row
 wRollPage:      db          ; visible page index
 wPageTick:      db          ; tick of the first visible column (= page * wPageSpan)
 wPageCell:      db          ; cell index of the first visible column (= page * wPageCols)
+wNtStart:       dw          ; SeqLength: the edited note's start (absolute tick)
 wFollow:        db          ; 1 = the view follows the playhead
 wPlayX:         db          ; wanted playhead X in OAM coordinates ($FF = hidden)
 wPlayShown:     db          ; playhead X currently in OAM ($FF = hidden)

@@ -318,23 +318,12 @@ RollScrollFix:
     rra                     ; carry = changed
     ret
 
-; a = page index -> wRollPage, wPageTick = page * span, wPageCell = page * cols.
-; Clobbers a, b, c.
+; a = page index -> wRollPage, wPageCell = page * cols, wPageTick = wPageCell * ticks per cell.
+; The last page of a segment that is not a whole number of pages is shifted back so that it ends
+; on the segment end (every page has 16 columns). Clobbers a, b, c, hl (keeps d, e).
 RollSetPage:
+    push de
     ld [wRollPage], a
-    ld b, a
-    ld a, [wPageSpan]
-    ld c, a
-    xor a
-    inc b
-.tick:
-    dec b
-    jr z, .tickDone
-    add c
-    jr .tick
-.tickDone:
-    ld [wPageTick], a
-    ld a, [wRollPage]
     ld b, a
     ld a, [wPageCols]
     ld c, a
@@ -346,7 +335,35 @@ RollSetPage:
     add c
     jr .cell
 .cellDone:
+    ld d, a                 ; d = page * cols
+    ld a, [wDiv]
+    ld e, a
+    ld a, 0
+    ld hl, DivCells
+    ld c, e
+    ld b, 0
+    add hl, bc
+    ld a, [hl]              ; cells in a segment
+    ld hl, wPageCols
+    sub [hl]                ; the last cell a page may start at
+    cp d
+    jr nc, .keep
+    ld d, a                 ; clamp
+.keep:
+    ld a, d
     ld [wPageCell], a
+    ld a, [wDivTicks]
+    ld c, a
+    xor a
+    inc d
+.tick:
+    dec d
+    jr z, .tickDone
+    add c
+    jr .tick
+.tickDone:
+    ld [wPageTick], a
+    pop de
     ret
 
 ; Show the page that contains the cursor cell: page = wRollCell / wPageCols.
