@@ -47,6 +47,11 @@ SongRestart:
     inc a                   ; pattern number -> its WRAM bank
 .set:
     ld [wPlayBank], a
+    xor a
+    ld [wQueuedBank], a     ; (a pattern that was waiting for a bar line is the played one now)
+    ld a, [wDirtySong]
+    or 1                    ; the PLAY row
+    ld [wDirtySong], a
     jr SongMarkPos
 
 ; Redraw the chain row of the step that is playing (its [ ] marks).
@@ -98,12 +103,46 @@ SongSetEdit:
     ld a, [wSongMode]
     and a
     jr nz, .mark
-    ld a, [wEditBank]
+    ld a, [wSeqPlay]
+    and a
+    jr nz, .queue
+    ld a, [wEditBank]       ; stopped: it is the played pattern at once
     ld [wPlayBank], a
-    ld a, [wSeqPlay]        ; another pattern plays from now on: a note of the old one would
-    and a                   ; never get its note-off
-    call nz, SeqSilence
+    xor a
+    ld [wQueuedBank], a
+    jr .mark
+.queue:
+    ld a, [wEditBank]       ; playing: it takes over at the next bar line (SongBarStart)
+    ld hl, wPlayBank
+    cp [hl]
+    jr nz, .set
+    xor a                   ; (back to the pattern that plays: nothing waits)
+.set:
+    ld [wQueuedBank], a
 .mark:
+    ld a, [wDirtySong]
+    or 1
+    ld [wDirtySong], a
+    jp MarkSeqStatus
+
+; A bar begins (SeqStep, before its first tick): a pattern that was chosen while playing takes
+; over now (loop mode). The notes of the old one stop. Clobbers a, b, c, hl.
+SongBarStart:
+    ld a, [wQueuedBank]
+    and a
+    ret z
+    ld b, a
+    xor a
+    ld [wQueuedBank], a
+    ld a, [wSongMode]
+    and a
+    ret nz                  ; (song mode: the chain decides)
+    ld a, [wPlayBank]
+    cp b
+    ret z
+    ld a, b
+    ld [wPlayBank], a
+    call SeqSilence
     ld a, [wDirtySong]
     or 1
     ld [wDirtySong], a
@@ -269,6 +308,34 @@ UpdateSong:
     ld [hl+], a
     ld a, [wEditPat]
     add '1' - 32
+    ld [hl], a
+    ld hl, ROW_SONG_INFO + 64       ; PLAY P1  [NEXT P2]
+    ld b, 20
+    xor a
+.infoBlank:
+    ld [hl+], a
+    dec b
+    jr nz, .infoBlank
+    ld hl, ROW_SONG_INFO + 64
+    ld de, sSongPlay
+    call DrawString
+    ld hl, ROW_SONG_INFO + 64 + 6
+    ld a, 'P' - 32
+    ld [hl+], a
+    ld a, [wPlayBank]
+    add '0' - 32            ; the bank is the pattern number + 1
+    ld [hl+], a
+    ld a, [wQueuedBank]
+    and a
+    ret z
+    inc hl
+    ld de, sSongNext
+    call DrawString
+    inc hl
+    ld a, 'P' - 32
+    ld [hl+], a
+    ld a, [wQueuedBank]
+    add '0' - 32
     ld [hl], a
     ret
 
@@ -443,6 +510,8 @@ StepValue:
 sSongTitle:  db "SONG CHAIN", 0
 sSongMode:   db "MODE", 0
 sSongEdit:   db "EDIT", 0
+sSongPlay:   db "PLAY", 0
+sSongNext:   db "NEXT", 0
 sSongChain:  db "ORDER STEP:PATTERN", 0
 sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0

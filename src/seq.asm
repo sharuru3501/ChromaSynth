@@ -41,6 +41,7 @@ SeqToggle:
     xor a
     ld [wSeqTick], a
     ld [wSeqSeg], a
+    ld [wBarPos], a
     call SongRestart        ; from the first chain step (or the edited pattern in loop mode)
     ld a, 1
     ld [wFollow], a         ; the roll scrolls along with the playhead
@@ -134,6 +135,19 @@ SeqStep:
     ld [wSongWrap], a
     call SeqSilence         ; a note of the pattern that just ended must not carry into the next
 .noWrap:
+    ld a, [wBarPos]         ; a bar begins when the ticks since the last one are 0
+    and a
+    jr nz, .inBar
+    call SongBarStart       ; a pattern chosen while playing takes over here
+.inBar:
+    ld a, [wBarPos]
+    inc a
+    ld hl, wBarTicks
+    cp [hl]
+    jr c, .barStore
+    xor a
+.barStore:
+    ld [wBarPos], a
     ld a, [wSeqTick]
     ld [wSeqCur], a
     ld a, [wSeqSeg]
@@ -193,6 +207,7 @@ SeqStep:
     xor a                   ; reached the loop end
     ld [wSeqTick], a
     ld [wSeqSeg], a
+    ld [wBarPos], a         ; (the first tick of the loop starts a bar)
     ld a, [wSongMode]
     and a
     call nz, SongNext       ; the chain goes on with its next pattern

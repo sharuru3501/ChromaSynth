@@ -82,3 +82,9 @@ D-pad/A/B/Start/Select のみ。Patch画面: 項目選択+値増減。Sequencer�
 - 小節の数(`wSeqBars`)から、ループの終わり(`wLoopSeg` / `wLoopTail`)を作るのは `ComputeLoopEnd`(以前の表 `LoopEndTab` は無くなった)。`SeqStep` は、ティックごとにこれを呼ぶ。
 - ルーラーは、ページの先頭の位置から、拍の位相、小節の中の位置、小節の番号を `BCInitPhases` で求め、1 列ごとに進める(`BuildCols`)。小節線は、小節の頭の列に、拍の目印は、拍の頭の列に出る(ループの外では小節番号だけ)。
 - 音符の位置(ティック)は拍子に依存しない。区切り(192 ティック)も同じ。
+
+## 再生中のパターンの切り替え(M14c)
+- LOOP モードで再生中に編集パターンを変えると、`SongSetEdit` は、再生するパターンのバンクを変えずに、`wQueuedBank` にだけ入れる(鳴っているパターンに戻したときは 0)。再生していないときは、すぐ `wPlayBank` になる。
+- `SeqStep` は、ティックを鳴らす前に、小節の中の位置 `wBarPos` を見る。0 なら、小節の頭で、`SongBarStart` が `wQueuedBank` を `wPlayBank` に移し、鳴っている音を止める。`wBarPos` は 1 ティックごとに 1 増え、`wBarTicks`(拍子の小節の長さ)で 0 に戻る。ループの折り返し、再生の開始、MIDI の開始で 0 にする。
+- SONG モードでは、切り替えはチェーンが決める(`wQueuedBank` は使わない)。
+- ソング画面の `PLAY` の行は、`wPlayBank`(鳴っているパターン)と、`wQueuedBank`(あれば `NEXT`)を出す。

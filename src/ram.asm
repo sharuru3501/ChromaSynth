@@ -125,6 +125,8 @@ wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
+wBarPos:        db          ; ticks since the bar began (0 = a bar begins with the next tick played)
+wQueuedBank:    db          ; WRAM bank of the pattern that takes over at the next bar line (0 = none)
 wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)
 wBeatTicks:     db          ; ticks in the beat unit: 12 (/4), 6 (/8), 3 (/16)
 wMaxBars:       db          ; the longest loop in bars: 384 ticks / wBarTicks, at most MAX_BARS

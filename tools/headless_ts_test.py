@@ -219,6 +219,42 @@ with tempfile.TemporaryDirectory() as tmp:
           (max(t for s, t in seen if s == 1), max(t for s, t in seen if s == 0)))
     pb.stop(save=False)
 
+# --- a pattern chosen while playing takes over at the next bar line of the time signature (3/4: every 36 ticks)
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    mem[TSN] = 3
+    mem[TSD] = 0
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+    mem[sym["wSeqBars"]] = 4             # 144 ticks
+    mem[sym["wBpm"]] = 100
+    combo(pb, "start", "left")
+    combo(pb, "start", "left")
+    combo(pb, "start", "up")             # the song screen
+    combo(pb, "select", "start")
+    pb.tick(20)
+    for want in (2, 3, 4, 2):
+        mem[sym["wRollTick"]] = 0
+        combo(pb, "select", "right" if want > v("wPlayBank") else "left")
+        queued = v("wQueuedBank")
+        at = None
+        for _ in range(400):
+            pb.tick(1)
+            if v("wPlayBank") != 0 and v("wPlayBank") == queued:
+                at = v("wSeqCur")
+                break
+        # wSeqCur is the tick played before the switch: the bar line is the next tick (a multiple of 36)
+        check(f"3/4: pattern {queued} takes over on a bar line", at is not None and (at + 1) % 36 == 0, at)
+        if want == 4:
+            combo(pb, "select", "right")
+    combo(pb, "select", "start")
+    pb.stop(save=False)
+
 # --- the edit page sets it (BEAT, UNIT on the MIDI page) and a save keeps it
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"

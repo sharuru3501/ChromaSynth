@@ -251,12 +251,49 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "start")
     pb.tick(60)
     check("pattern 1 plays and its note sounds", v("wSeqPlay") == 1 and mem[sym["wCurNote"]] == 60, (v("wSeqPlay"), mem[sym["wCurNote"]]))
+    mem[sym["wBpm"]] = 90              # a bar (48 ticks) = 2 s at 90 BPM, so a switch has time to wait
     combo(pb, "select", "right")       # edit pattern 2 while pattern 1 plays (loop mode)
-    check("the edited pattern plays now", v("wPlayBank") == 2, v("wPlayBank"))
-    check("the old pattern's note was released (no hanging note)", all(mem[sym["wCurNote"] + c] == 0 for c in range(4)), [mem[sym["wCurNote"] + c] for c in range(4)])
+    check("the edited pattern is queued: it takes over at the next bar line, not now", v("wPlayBank") == 1 and v("wQueuedBank") == 2,
+          (v("wPlayBank"), v("wQueuedBank")))
+    check("... the old note keeps sounding until then", mem[sym["wCurNote"]] == 60, mem[sym["wCurNote"]])
+    pb.tick(20)
+    row = bytes(mem[0x9800 + 4 * 32 + i] for i in range(20))
+    check("the song screen says PLAY P1 / NEXT P2", row[:4] == bytes(ord(c) - 32 for c in "PLAY") and row[6] == ord("P") - 32 and row[7] == ord("1") - 32
+          and row[9:13] == bytes(ord(c) - 32 for c in "NEXT") and row[14] == ord("P") - 32 and row[15] == ord("2") - 32, list(row))
+    at = None
+    for _ in range(200):
+        pb.tick(1)
+        if v("wPlayBank") == 2:
+            at = v("wSeqCur")
+            break
+    check("the switch happens on a bar line (tick 0 of the bar)", at is not None and at % 48 in (0, 1, 47), at)
+    pb.tick(4)
+    check("... the old pattern's note was released (no hanging note)", all(mem[sym["wCurNote"] + c] == 0 for c in range(4)),
+          [mem[sym["wCurNote"] + c] for c in range(4)])
+    check("... and nothing waits any more", v("wQueuedBank") == 0, v("wQueuedBank"))
+    # choosing a pattern and then going back to the playing one before the bar line cancels the switch
+    combo(pb, "select", "left")        # pattern 1 is queued (pattern 2 plays)
+    check("pattern 1 queued while 2 plays", v("wQueuedBank") == 1 and v("wPlayBank") == 2, (v("wQueuedBank"), v("wPlayBank")))
+    combo(pb, "select", "right")       # back to 2, the playing one: nothing waits
+    check("going back to the playing pattern cancels the queue", v("wQueuedBank") == 0 and v("wPlayBank") == 2, (v("wQueuedBank"), v("wPlayBank")))
     combo(pb, "select", "left")
+    combo(pb, "select", "right")
+    combo(pb, "select", "left")        # the last choice wins
+    for _ in range(200):
+        pb.tick(1)
+        if v("wPlayBank") == 1:
+            break
+    check("the last choice before the bar line wins (pattern 1 plays again)", v("wPlayBank") == 1, v("wPlayBank"))
     pb.tick(60)
     check("back on pattern 1 its note sounds again", mem[sym["wCurNote"]] == 60, mem[sym["wCurNote"]])
+    # stopped: the edited pattern is the played one at once
+    combo(pb, "select", "start")
+    check("stopped", v("wSeqPlay") == 0)
+    combo(pb, "select", "right")
+    check("stopped: the edited pattern plays at once, nothing is queued", v("wPlayBank") == 2 and v("wQueuedBank") == 0, (v("wPlayBank"), v("wQueuedBank")))
+    combo(pb, "select", "left")
+    combo(pb, "select", "start")       # play again from pattern 1
+    pb.tick(10)
     # song mode: the playing step is shown as [n]
     mem[CHAIN:CHAIN + 3] = bytes([0, 1, 0xFF])
     combo(pb, "select", "up")          # song mode (restarts the song, silences)
