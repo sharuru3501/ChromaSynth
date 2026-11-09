@@ -49,6 +49,8 @@ SECTION "Roll flags H", WRAM0
 wMaskV:         ds 4            ; bit r = ring row r waits to be copied to the shown map
 wMaskH:         ds 4            ; the same for the hidden map (only while a full redraw is built)
 wShownTop:      db              ; the pitch window (top pitch) of the picture on screen
+wVPre:          db              ; 1 = the free row of a one-pitch scroll is already written (see VScrollStep)
+wPageChanged:   db              ; RollScrollFix: 1 = the page (not just the pitch window) changed
 wCopyTop:       db              ; ... of the map the copy routines write to
 wShown:         db              ; 0 = $9800 is shown, 1 = $9C00
 wBuild:         db              ; 1 = a full redraw is being built in the hidden map

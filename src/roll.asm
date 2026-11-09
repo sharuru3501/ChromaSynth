@@ -119,6 +119,7 @@ RollRefreshAll:
     ld [wBuild], a
     xor a
     ld [wBuildReady], a
+    ld [wVPre], a           ; (a pending scroll step is over: the build shows the new window)
     call MarkAllRender
     ld hl, wDirty
     ld a, [hl]
@@ -198,8 +199,30 @@ RollChannelChanged:
 
 ; The cursor moved (wOldNote = pitch before the move).
 RollCursorMoved:
+    xor a
+    ld [wPageChanged], a
     call RollScrollFix
-    jp c, RollRefreshAll    ; new page and/or new pitch window
+    jr nc, .sameWindow
+    ld a, [wPageChanged]
+    and a
+    jp nz, RollRefreshAll   ; a new page: the whole picture is redrawn
+    ld a, [wBuild]
+    and a
+    jp nz, RollRefreshAll   ; (a redraw is being built: it starts over for the new window)
+    ld a, [wRollTop]        ; only the pitch window moved: by one pitch it is a 3-row scroll
+    ld hl, wShownTop
+    sub [hl]
+    ld b, 0                 ; b = the grid row that enters: 0 = the top one, 15 = the bottom one
+    cp 1
+    jr z, .oneStep
+    ld b, ROLL_ROWS - 1
+    cp $FF
+    jp nz, RollRefreshAll   ; more than one pitch at once: redraw everything
+.oneStep:
+    ld a, b
+    call MarkRowRender      ; the entering pitch row is rendered; UpdateSeq scrolls when it is ready
+    call MarkSeqStatus      ; (the status line moves with the window)
+.sameWindow:
     ld a, [wRollTop]        ; redraw the row the cursor left and the row it entered
     ld c, a
     ld a, [wOldNote]
@@ -245,6 +268,8 @@ RollScrollFix:
     cp c
     jr c, .samePage         ; inside the page
 .newPage:
+    ld a, 1
+    ld [wPageChanged], a
     call RollPageFromCell
     ld d, 1
 .samePage:
@@ -1075,11 +1100,11 @@ UpdateSeq:
     and a
     jp nz, .build
     call SetCopyVisible
-    call VScrollStep        ; a pending one-pitch scroll (needs its row rendered): 3 rows + SCY
-    ret c                   ; it took this frame
     ld a, e
     and a
-    jr nz, .rows            ; the playhead moved: leave the ruler/status copy for the next frame
+    jr nz, .rows            ; the playhead moved: no scroll step, no ruler/status copy this frame
+    call VScrollStep        ; a pending one-pitch scroll (needs its row rendered): 2 + 1 rows, SCY
+    ret c                   ; it took this frame
     ld a, [wDirty]
     bit 5, a
     jr z, .noRuler
@@ -1326,9 +1351,130 @@ SetCopyHidden:
     ld [wCopyTop], a
     ret
 
-; (the one-pitch scroll comes in the next step: nothing pending yet) -> carry clear
+; A one-pitch scroll is pending (the window moved by one pitch, wRollTop != wShownTop). Three
+; rows change: the entering pitch row, the ruler and the status line at their new ring rows. One
+; of the two (the ruler when scrolling up, the status line when scrolling down) lands on a row
+; nobody sees, so it is written one frame early (wVPre); the next frame writes the other two rows
+; and moves SCY. -> carry set if it used this frame, carry clear if there is nothing (yet) to do.
+; Needs the shown map (wCopyMap) to be set. Keeps de.
 VScrollStep:
+    push de
+    ld a, [wRollTop]
+    ld hl, wShownTop
+    sub [hl]
+    jp z, .none             ; no scroll pending
+    ld b, 0                 ; b = entering grid row: 0 = top (scrolling up), 15 = bottom (down)
+    cp 1
+    jr z, .step
+    ld b, ROLL_ROWS - 1
+    cp $FF
+    jp nz, .none            ; (the main loop never leaves more than one pitch: it redraws instead)
+.step:
+    ld a, [wStatusRender]
     and a
+    jp nz, .none            ; the status line is being rebuilt: wait
+    ldh a, [rLY]
+    cp 148
+    jp nc, .none            ; too late in VBlank: next frame
+    ld a, b
+    call RingOfRow
+    ld c, a                 ; c = ring row of the entering pitch
+    add LOW(wRowRender)
+    ld l, a
+    ld h, HIGH(wRowRender)
+    ld a, [hl]
+    and a
+    jp nz, .none            ; not rendered yet
+    ld a, [wVPre]
+    and a
+    jr nz, .second
+    ; ---- first frame: the row that is free (it is not in the shown window) gets its content
+    ld a, [wRollTop]
+    ld [wCopyTop], a        ; (the copy routines place the ruler / status line for the NEW window)
+    push bc
+    ld a, b
+    and a
+    jr nz, .preStatus
+    ld hl, wDirty
+    res 5, [hl]             ; (the ruler is copied now; a later change sets the bit again)
+    call CopyRuler
+    jr .preDone
+.preStatus:
+    ld hl, wDirty
+    res 4, [hl]
+    call CopyStatus
+.preDone:
+    pop bc
+    ld a, 1
+    ld [wVPre], a
+    pop de
+    scf
+    ret
+.second:
+    ; ---- second frame: the entering pitch row and the other of the ruler / status line, then SCY
+    ld a, b
+    and a
+    ld a, [wShownTop]       ; (old window) scrolling up: the old bottom pitch leaves; down: the old top
+    jr nz, .down
+    sub ROLL_ROWS - 1       ; a = old bottom pitch
+.down:
+    ld e, a
+    ld a, 1
+    sub e
+    and RING_ROWS - 1       ; the leaving pitch's ring row (1 - p)
+    ld hl, wMaskV
+    call ClearRowBit        ; no copy may land on it any more (it becomes the ruler / status line)
+    ld a, [wRollTop]
+    ld [wShownTop], a
+    ld [wCopyTop], a
+    push bc
+    ld a, b
+    and a
+    jr nz, .postRuler
+    ld hl, wDirty
+    res 4, [hl]
+    call CopyStatus         ; scrolling up: the status line takes the leaving bottom row
+    jr .postDone
+.postRuler:
+    ld hl, wDirty
+    res 5, [hl]
+    call CopyRuler          ; scrolling down: the ruler takes the leaving top row
+.postDone:
+    pop bc
+    call RollCopyRow        ; c = the entering pitch row
+    call ApplyScy
+    xor a
+    ld [wVPre], a
+    pop de
+    scf
+    ret
+.none:
+    pop de
+    and a
+    ret
+
+; hl = a row mask (4 bytes), a = ring row 0..31: clear its bit. Clobbers a, d, e, hl.
+ClearRowBit:
+.byte:
+    cp 8
+    jr c, .lo
+    sub 8
+    inc hl
+    jr .byte
+.lo:
+    ld d, a
+    ld e, 1
+    inc d
+.shift:
+    dec d
+    jr z, .clear
+    sla e
+    jr .shift
+.clear:
+    ld a, e
+    cpl
+    and [hl]
+    ld [hl], a
     ret
 
 ; Decide where the playhead line should be (OAM X) for the tick that was played

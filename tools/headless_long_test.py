@@ -201,6 +201,107 @@ with tempfile.TemporaryDirectory() as tmp:
           True)
     pb.stop(save=False)
 
+
+# --- one-pitch scroll: 3 rows and SCY (no redraw), smooth while a key is held
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+
+    def picture():
+        return b"".join(screen_row_of(mem, r) for r in range(18))
+
+    def full_redraw_picture():
+        """What a complete redraw shows for the current state (the loop-length round trip rebuilds everything)."""
+        combo(pb, "select", "right")
+        combo(pb, "select", "left")
+        pb.tick(40)
+        return picture()
+
+    vb_in, vb_out = [], []
+    pb.hook_register(0, sym["UpdateUI"], lambda ctx: vb_in.append(mem[0xFF44]), None)
+    pb.hook_register(0, sym["VoiceTick"], lambda ctx: vb_out.append(mem[0xFF44]), None)
+    mem[sym["wRollNote"]] = mem[sym["wRollTop"]]       # the cursor on the top row (poked: draw it there first)
+    full_redraw_picture()
+    top0 = v("wRollTop")
+    scy0 = mem[0xFF42]
+    tap(pb, "up")
+    changed_at = None
+    for i in range(1, 7):
+        pb.tick(1)
+        if v("wShownTop") == top0 + 1:
+            changed_at = i
+            break
+    check("one UP at the top edge: the window moves within a few frames (no 8-frame redraw)", changed_at is not None and changed_at <= 4, changed_at)
+    check("... the picture shows the window one pitch higher", v("wShownTop") == v("wRollTop") == top0 + 1, (v("wShownTop"), v("wRollTop")))
+    pb.tick(10)
+    check("... SCY moved by one row (8 pixels)", (mem[0xFF42] - scy0) & 0xFF == 0xF8, (scy0, mem[0xFF42]))
+    p_fast = picture()
+    p_full = full_redraw_picture()
+    check("the fast scroll leaves exactly the picture a full redraw would give", p_fast == p_full,
+          [r for r in range(18) if p_fast[r * 20:(r + 1) * 20] != p_full[r * 20:(r + 1) * 20]])
+
+    # hold UP: the window follows the cursor on every repeat, and ends consistent
+    pb.button_press("up")
+    tops = []
+    for _ in range(70):
+        pb.tick(1)
+        tops.append(v("wShownTop"))
+    pb.button_release("up")
+    pb.tick(20)
+    steps = len(set(tops))
+    check("holding UP scrolls step by step while it is held (not at the release)", steps >= 6 and tops[len(tops) // 2] > tops[0], (steps, tops[0], tops[len(tops) // 2]))
+    check("the window and the cursor agree afterwards", v("wShownTop") == v("wRollTop") and v("wRollNote") <= v("wRollTop"), (v("wShownTop"), v("wRollTop"), v("wRollNote")))
+    p_fast = picture()
+    p_full = full_redraw_picture()
+    check("after the held scroll the picture equals a full redraw", p_fast == p_full,
+          [r for r in range(18) if p_fast[r * 20:(r + 1) * 20] != p_full[r * 20:(r + 1) * 20]])
+
+    # and downwards
+    mem[sym["wRollNote"]] = mem[sym["wRollTop"]] - 15
+    full_redraw_picture()                              # (poked cursor: draw it first)
+    pb.button_press("down")
+    pb.tick(50)
+    pb.button_release("down")
+    pb.tick(20)
+    check("holding DOWN scrolls the window down", v("wShownTop") < tops[-1], (v("wShownTop"), tops[-1]))
+    worked = [o for i_, o in zip(vb_in, vb_out) if 144 <= i_ < 147]
+    check("the scrolls never run past the end of VBlank (UpdateUI exits by LY 151)", len(worked) > 100 and min(worked) >= 144 and max(worked) <= 151,
+          (len(worked), min(worked), max(worked)))
+    p_fast = picture()
+    p_full = full_redraw_picture()
+    check("... and the picture equals a full redraw", p_fast == p_full,
+          [r for r in range(18) if p_fast[r * 20:(r + 1) * 20] != p_full[r * 20:(r + 1) * 20]])
+    # ... while the sequencer plays (the playhead also uses the VBlank)
+    mem[sym["wBpm"]] = 240
+    vb_in.clear()
+    vb_out.clear()
+    combo(pb, "select", "start")
+    mem[sym["wRollNote"]] = mem[sym["wRollTop"]]
+    full_redraw_picture()
+    pb.button_press("up")
+    pb.tick(60)
+    pb.button_release("up")
+    pb.button_press("down")
+    pb.tick(40)
+    pb.button_release("down")
+    combo(pb, "select", "start")
+    pb.tick(30)
+    worked = [o for i_, o in zip(vb_in, vb_out) if 144 <= i_ < 147]
+    over = sum(1 for o in worked if o > 151)
+    check("scrolling while the sequencer plays: UpdateUI ends by LY 151 (a rare quiet frame may end on 152, none later)",
+          len(worked) > 100 and min(worked) >= 144 and max(worked) <= 152 and over <= 2, (len(worked), min(worked), max(worked), over))
+    p_fast = picture()
+    p_full = full_redraw_picture()
+    check("... and the picture still equals a full redraw", p_fast == p_full,
+          [r for r in range(18) if p_fast[r * 20:(r + 1) * 20] != p_full[r * 20:(r + 1) * 20]])
+    pb.stop(save=False)
+
 # --- the status line shows the loop length; a note placed after the loop end lengthens the loop
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
