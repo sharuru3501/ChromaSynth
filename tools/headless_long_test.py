@@ -236,6 +236,9 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(10)
     check("a note inside the loop leaves the length alone", v("wSeqBars") == 6, v("wSeqBars"))
     # lengthening a note (A held + RIGHT) over the loop end lengthens the loop too
+    for g in range(2):
+        for t in range(192):
+            setcell(mem, 0, g, t, 0)          # an empty channel: nothing touches the growing note
     mem[sym["wSeqBars"]] = 1
     mem[sym["wRollSeg"]] = 0
     mem[sym["wRollCell"]] = 15                # the last cell of bar 1 (tick 45)
