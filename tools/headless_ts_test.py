@@ -288,12 +288,12 @@ with tempfile.TemporaryDirectory() as tmp:
     unit_row = bytes(mem[0x9800 + (2 + 3) * 32 + c] for c in range(12))
     check("the UNIT row shows 8 (the denominator), not its index", unit_row[10] == digit(8), list(unit_row))
     # save, change, load
-    combo(pb, "select", "a", 40)
-    check("SELECT+A saves", v("wMsg") == 1, v("wMsg"))
+    combo(pb, "select", "b", 40)
+    check("SELECT+B saves", v("wMsg") == 1, v("wMsg"))
     mem[TSN] = 3
     mem[TSD] = 0
-    combo(pb, "select", "b", 40)
-    check("SELECT+B loads the song with its time signature", (mem[TSN], mem[TSD]) == (6, 1), (mem[TSN], mem[TSD]))
+    combo(pb, "select", "a", 40)
+    check("SELECT+A loads the song with its time signature", (mem[TSN], mem[TSD]) == (6, 1), (mem[TSN], mem[TSD]))
     check("... and the bar length follows (36 ticks, beat 6)", (v("wBarTicks"), v("wBeatTicks")) == (36, 6), (v("wBarTicks"), v("wBeatTicks")))
     pb.stop(save=True)
     ram = pathlib.Path(str(rom) + ".ram")
@@ -408,7 +408,7 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "left")          # pattern 1: 3/4, 2 bars
     mem[TSN] = 3
     mem[TSD] = 0
-    combo(pb, "select", "a", 60)
+    combo(pb, "select", "b", 60)
     check("saved", v("wMsg") == 1, v("wMsg"))
     pb.stop(save=True)
     pb = boot(rom)

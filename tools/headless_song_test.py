@@ -366,15 +366,15 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wBpm"]] = 141
     mem[sym["wSeqBars"]] = 6
     snapshot = {(p_, c, g): bytes(mem[p_ + 1, PAT + c * 512 + g * 256: PAT + c * 512 + g * 256 + 192]) for p_ in range(4) for c in range(4) for g in range(2)}
-    combo(pb, "select", "a", 30)
-    check("SELECT+A saves the song", v("wMsg") == 1, v("wMsg"))
+    combo(pb, "select", "b", 30)
+    check("SELECT+B saves the song", v("wMsg") == 1, v("wMsg"))
     for b in range(1, 5):
         for i in range(2048):
             mem[b, PAT + i] = 0
     mem[CHAIN:CHAIN + 16] = bytes([0] + [0xFF] * 15)
     mem[sym["wBpm"]] = 90
-    combo(pb, "select", "b", 30)
-    check("SELECT+B loads it", v("wMsg") == 2, v("wMsg"))
+    combo(pb, "select", "a", 30)
+    check("SELECT+A loads it", v("wMsg") == 2, v("wMsg"))
     check("all four patterns are restored exactly (both segments of every channel)",
           all(bytes(mem[p_ + 1, PAT + c * 512 + g * 256: PAT + c * 512 + g * 256 + 192]) == snapshot[(p_, c, g)]
               for p_ in range(4) for c in range(4) for g in range(2)))

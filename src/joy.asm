@@ -4,7 +4,7 @@
 ;               START alone does nothing (kept free on purpose).
 ;               SELECT+START = sequencer play/stop (also on the keyboard screen),
 ;               SELECT tap = next channel (all screens; the roll shows it),
-;               SELECT+A = save to SRAM, SELECT+B = load.
+;               SELECT+B = save to SRAM, SELECT+A = load (as on the slot list: B saves, A loads).
 ;  Play/edit:   A = gate on the selected channel.
 ; START+DOWN = slot list (UP/DOWN pick, A load, B save), START+UP = back.
 ;  Play screen : d-pad = note (+-1 / +-octave), SELECT+LEFT/RIGHT = save slot.
@@ -207,18 +207,18 @@ HandleJoy:
     ld a, [wJoy]
     bit PADB_SELECT, a
     jr z, .noCombo
-    bit PADB_A, d
+    bit PADB_B, d
     jr z, .noSave
     ld a, 1
     ld [wSelUsed], a
-    jp DoSave               ; SELECT+A: save
+    ld [wBUsed], a          ; the B release must not delete a note
+    jp DoSave               ; SELECT+B: save
 .noSave:
-    bit PADB_B, d
+    bit PADB_A, d
     jr z, .noCombo
     ld a, 1
     ld [wSelUsed], a
-    ld [wBUsed], a          ; the B release must not delete a note
-    jp DoLoad               ; SELECT+B: load
+    jp DoLoad               ; SELECT+A: load
 .noCombo:
     ld a, [wScreen]         ; play screen: SELECT+LEFT/RIGHT = save slot -/+
     and a

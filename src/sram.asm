@@ -484,7 +484,7 @@ ValidateSave:
     ret
 
 ; ---------------------------------------------------------------- UI glue
-; SELECT+A. A used slot asks for a second SELECT+A before it is overwritten.
+; SELECT+B. A used slot asks for a second SELECT+B before it is overwritten.
 DoSave:
     call SlotMask
     ld hl, wSlotUsed
@@ -514,7 +514,7 @@ DoSave:
     ld [hl], a
     ret
 
-; SELECT+B
+; SELECT+A
 DoLoad:
     call LoadAll
     ld a, MSG_NODATA
