@@ -155,6 +155,26 @@ int main(int argc, char **argv)
         const int got = chl_blemidi_parse(pkt, len, collect, &r);
         if (got < 0 || (unsigned)got > len) { bad++; printf("BAD fuzz count %d for %u bytes\n", got, len); break; }
     }
+    {   // uplink: new messages are detected by seq
+        chl_slot_t sl = {.len = 3, .seq = 2, .ack = 0, .nack = 0, .data = {0x90, 60, 100}};
+        uint8_t last = 0xFF, out[3] = {0};
+        if (chl_up_decode(&sl, &last, out) != 0 || last != 2) { bad++; printf("BAD up: the first slot must only be remembered\n"); }
+        if (chl_up_decode(&sl, &last, out) != 0) { bad++; printf("BAD up: the same seq twice\n"); }
+        sl.seq = 3;
+        if (chl_up_decode(&sl, &last, out) != 3 || out[0] != 0x90 || out[1] != 60 || out[2] != 100 || last != 3) { bad++; printf("BAD up: a new 3-byte message\n"); }
+        sl.seq = 4; sl.len = 1; sl.data[0] = 0xF8;
+        if (chl_up_decode(&sl, &last, out) != 1 || out[0] != 0xF8) { bad++; printf("BAD up: a 1-byte clock\n"); }
+        sl.seq = 7;
+        if (chl_up_decode(&sl, &last, out) != 1 || last != 7) { bad++; printf("BAD up: a seq jump returns the newest\n"); }
+        sl.seq = 0; sl.len = 3; sl.data[0] = 0xF4; sl.data[1] = 0; sl.data[2] = 0;   // the keyboard-screen beacon
+        if (chl_up_decode(&sl, &last, out) != 0 || last != 7) { bad++; printf("BAD up: a beacon is not a message\n"); }
+        sl.seq = 1; sl.len = 0;
+        if (chl_up_decode(&sl, &last, out) != 0) { bad++; printf("BAD up: an empty slot\n"); }
+        sl.seq = 7; sl.len = 3; sl.data[0] = 0x90;       // wraps: 7 -> 0 -> ...
+        last = 7;
+        sl.seq = 0;
+        if (chl_up_decode(&sl, &last, out) != 3 || last != 0) { bad++; printf("BAD up: seq wraps 7 -> 0\n"); }
+    }
     printf("%d vectors (play %d, gen %d, mask %d, slot %d, cls %d, ble %d, act %d, coal %d, rel %d, ack %d, alive %d), %d bad\n", n,
            kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6], kinds[7], kinds[8], kinds[9], kinds[10], bad);
     return bad ? 1 : 0;

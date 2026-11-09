@@ -78,6 +78,44 @@ static void delay_ms(uint32_t ms)
     vTaskDelay((pdMS_TO_TICKS(ms) > 0) ? pdMS_TO_TICKS(ms) : 1);
 }
 
+// ---- uplink: new messages in the slot (every gpd read is looked at, not only the polls)
+static volatile bool s_up_on = false;
+static uint8_t s_up_last = 0xFF;
+static ChLinkUpHandler s_up_cb = NULL;
+static volatile uint32_t s_up_msgs = 0;
+
+void ChLinkLink_SetUpHandler(ChLinkUpHandler handler)
+{
+    s_up_cb = handler;
+}
+
+void ChLinkLink_SetUp(bool on)
+{
+    if (on == s_up_on)
+    {
+        return;                             // (asking again must not make the next slot be remembered instead of played)
+    }
+    s_up_last = 0xFF;                       // (the first slot seen is only remembered)
+    s_up_on = on;
+}
+
+static void up_feed(const uint8_t g[8])
+{
+    if (!s_up_on || s_up_cb == NULL)
+    {
+        return;
+    }
+    chl_slot_t slot;
+    chl_slot_from_gpd(g, &slot);
+    uint8_t msg[3];
+    const int n = chl_up_decode(&slot, &s_up_last, msg);
+    if (n > 0)
+    {
+        s_up_msgs++;
+        s_up_cb(msg, n, esp_timer_get_time());
+    }
+}
+
 static RomState rom_state(void)
 {
     uint8_t g[8];
@@ -88,6 +126,7 @@ static RomState rom_state(void)
     {
         return s_last_state = RS_UNKNOWN;
     }
+    up_feed(g);
     chl_slot_t s;
     chl_slot_from_gpd(g, &s);
     switch (chl_classify(&s))
@@ -182,6 +221,7 @@ static Verdict verify_last(void)
     {
         return V_OK;               // unknown: do not retransmit on a hunch (a duplicate note-on is worse than a gap)
     }
+    up_feed(g);
     chl_slot_t slot;
     chl_slot_from_gpd(g, &slot);
     if (chl_classify(&slot) != CHL_ROM_OTHER)
@@ -249,6 +289,7 @@ static bool still_linked(void)
     {
         return true;
     }
+    up_feed(g);
     chl_slot_t slot;
     chl_slot_from_gpd(g, &slot);
     if (chl_link_alive(&slot, s_phase ^ 1))
@@ -344,6 +385,7 @@ static bool handshake(void)
         {
             s_armed = true;
             s_cur_note = 0xFF;
+            s_up_last = 0xFF;
             (void)do_release(false);   // a note left sounding by an earlier session (or before an MCU restart) must not hang
             return s_armed;
         }
@@ -359,7 +401,8 @@ static void link_task(void *arg)
     {
         chl_cmd_t cmds[32];
         int n = 0;
-        if (xQueueReceive(s_q, &cmds[0], pdMS_TO_TICKS(POLL_MS)) == pdTRUE)
+        // with the uplink on the slot is read back to back (each read takes about 7 ms): the ROM writes one message a frame
+        if (xQueueReceive(s_q, &cmds[0], (s_up_on && s_armed) ? 0 : pdMS_TO_TICKS(POLL_MS)) == pdTRUE)
         {
             n = 1;
             while (n < 32 && xQueueReceive(s_q, &cmds[n], 0) == pdTRUE) n++;
@@ -538,7 +581,8 @@ static int cmd_link(int argc, char **argv)
                s_armed ? "yes" : "no", (unsigned)s_hold_ms, s_phase ? 'B' : 'A');
         printf("packets sent %u, aborted %u, dropped %u, handshakes %u, queued %u\n", (unsigned)s_sent, (unsigned)s_aborted,
                (unsigned)s_dropped, (unsigned)s_handshakes, (unsigned)uxQueueMessagesWaiting(s_q));
-        printf("release packets sent %u (a mode switch, a lost connection, all-notes-off)\n", (unsigned)s_releases);
+        printf("release packets sent %u (a mode switch, a lost connection, all-notes-off); uplink %s, %u messages\n", (unsigned)s_releases,
+               s_up_on ? "on" : "off", (unsigned)s_up_msgs);
         printf("retransmitted %u (after a nack or a lost symbol), re-synced %u, stale note-offs not sent %u, sounding note %d\n",
                (unsigned)s_retries, (unsigned)s_resyncs, (unsigned)s_stale_off, s_cur_note == 0xFF ? -1 : (int)s_cur_note);
         printf("gave up the link %u times (a packet failed twice) + %u (the slot was not ours before a keep-alive)\n",

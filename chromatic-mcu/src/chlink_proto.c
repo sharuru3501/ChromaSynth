@@ -88,6 +88,29 @@ chl_rom_state_t chl_classify(const chl_slot_t *slot)
     return CHL_ROM_OTHER;
 }
 
+int chl_up_decode(const chl_slot_t *slot, uint8_t *last_seq, uint8_t out[3])
+{
+    if (chl_classify(slot) != CHL_ROM_OTHER)
+    {
+        return 0;                     // a beacon: not a message
+    }
+    if (*last_seq == 0xFF)
+    {
+        *last_seq = slot->seq;        // the first slot seen: remember it, do not play it
+        return 0;
+    }
+    if (slot->seq == *last_seq || slot->len == 0)
+    {
+        return 0;
+    }
+    *last_seq = slot->seq;
+    for (int i = 0; i < slot->len && i < 3; i++)
+    {
+        out[i] = slot->data[i];
+    }
+    return slot->len;
+}
+
 int chl_link_alive(const chl_slot_t *slot, int last_phase)
 {
     return chl_classify(slot) == CHL_ROM_OTHER && chl_verify_ack(slot, last_phase);

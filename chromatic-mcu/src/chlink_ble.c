@@ -110,6 +110,26 @@ static const struct ble_gatt_svc_def kSvcs[] = {
          {0}}},
     {0}};
 
+// The ROM's MIDI out (clock, start/stop, the sequencer's notes) to the Mac: one BLE MIDI notification per message, stamped with the
+// time the ESP32 read it (13 bits of milliseconds). Only while the Mac has subscribed.
+void ChLinkBle_UpHandler(const uint8_t *msg, int len, int64_t t_us)
+{
+    if (!s_connected || (s_notify_on & 1) == 0 || len < 1 || len > 3)
+    {
+        return;
+    }
+    uint8_t pkt[5];
+    const uint16_t ts = (uint16_t)((t_us / 1000) & 0x1FFF);
+    pkt[0] = 0x80 | ((ts >> 7) & 0x3F);
+    pkt[1] = 0x80 | (ts & 0x7F);
+    memcpy(pkt + 2, msg, (size_t)len);
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(pkt, (uint16_t)(2 + len));
+    if (om != NULL)
+    {
+        (void)ble_gatts_notify_custom(s_conn_handle, s_val_handle, om);
+    }
+}
+
 static int gap_event(struct ble_gap_event *ev, void *arg)
 {
     (void)arg;
@@ -139,6 +159,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         s_disc_reason = ev->disconnect.reason;   // 0x13 remote user terminated, 0x08 supervision timeout, ...
         s_connected = false;
         s_notify_on = 0;
+        ChLinkLink_SetUp(false);
         advertise();
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
@@ -148,6 +169,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         s_subscribes++;
         s_notify_on = ev->subscribe.cur_notify;
+        ChLinkLink_SetUp((ev->subscribe.cur_notify & 1) != 0);   // the Mac wants the ROM's MIDI out
         break;
     case BLE_GAP_EVENT_MTU:
         s_mtu = ev->mtu.value;

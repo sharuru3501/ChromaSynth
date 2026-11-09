@@ -12,4 +12,10 @@ bool ChLinkLink_Midi(uint8_t b0, uint8_t b1, uint8_t b2);
 // The MIDI mode turns the link on (auto: sends only while the ROM shows the keyboard screen) or off (nothing is
 // sent, nothing is polled, queued notes are dropped), so that the ESP32 can light-sleep again.
 void ChLinkLink_SetEnabled(bool on);
+// Uplink (docs/M15_DESIGN.md): the ROM's MIDI out (SYNC = OUT: clock, start/stop, the sequencer's notes) read from the slot.
+// The handler runs in the link task for every new message (1-3 bytes) with the time it was read. It is only called while the
+// link is armed and the uplink is on (SetUp): BLE turns it on when the Mac subscribes to the notifications, USB with `up on`.
+typedef void (*ChLinkUpHandler)(const uint8_t *msg, int len, int64_t t_us);
+void ChLinkLink_SetUpHandler(ChLinkUpHandler handler);
+void ChLinkLink_SetUp(bool on);
 uint32_t ChLinkLink_StackFree(void);   // the least free stack the link task has ever had, in bytes

@@ -130,3 +130,81 @@ func blePacketBytes(_ message: [UInt8], timestamp: UInt16) -> [UInt8] {
 func messageBytes(fromLine line: String) -> [UInt8] {
     line.split(separator: " ").dropFirst().compactMap { UInt8($0, radix: 16) }
 }
+
+// ---------------------------------------------------------------- the ROM's MIDI out (Chromatic -> DAW)
+/// BLE MIDI packet -> MIDI messages. Header (bit 7 + time high), then for each message a time-low byte (bit 7) and the message;
+/// a message without a status byte continues the running status; real-time messages ($F8-$FF) are one byte; SysEx is skipped.
+func parseBLEMIDI(_ d: [UInt8]) -> [[UInt8]] {
+    guard d.count >= 3, d[0] & 0x80 != 0 else { return [] }
+    var out: [[UInt8]] = []
+    var i = 1
+    var running: UInt8 = 0
+    while i < d.count {
+        if d[i] & 0x80 != 0, i + 1 < d.count, d[i + 1] & 0x80 != 0 || (d[i + 1] & 0x80 == 0 && running != 0) { i += 1 }   // the time-low byte
+        guard i < d.count else { break }
+        var status = d[i]
+        if status & 0x80 != 0 {
+            i += 1
+            if status >= 0xF8 { out.append([status]); continue }
+            if status >= 0xF0 { running = 0; while i < d.count, d[i] & 0x80 == 0 { i += 1 }; continue }   // sysex / system common: skipped
+            running = status
+        } else {
+            status = running
+            if status == 0 { i += 1; continue }
+        }
+        let need = (status & 0xF0 == 0xC0 || status & 0xF0 == 0xD0) ? 1 : 2
+        var msg = [status]
+        while msg.count < need + 1, i < d.count, d[i] & 0x80 == 0 { msg.append(d[i]); i += 1 }
+        if msg.count == need + 1 { out.append(msg) }
+    }
+    return out
+}
+
+/// "u 90 3c 64" (a console line of the USB mode) -> [0x90, 0x3c, 0x64]; anything else -> nil.
+func uplinkMessage(fromLine line: String) -> [UInt8]? {
+    let parts = line.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+    guard parts.count >= 2, parts.count <= 4, parts[0] == "u" else { return nil }
+    var out: [UInt8] = []
+    for p in parts.dropFirst() {
+        guard p.count == 2, let b = UInt8(p, radix: 16) else { return nil }
+        out.append(b)
+    }
+    return out
+}
+
+/// The ROM sends a clock every tick, 12 a beat; a DAW wants 24 a beat. Every clock is followed by a second one half an interval
+/// later (the interval being the one between the last two clocks). Start / stop / continue forget the interval. Pure: the time is
+/// passed in.
+struct ClockDoubler {
+    var last: Double? = nil
+    /// -> the delay after which a second clock is due, or nil (not for this message, or no interval known yet)
+    mutating func secondClock(after message: [UInt8], at now: Double) -> Double? {
+        guard let b = message.first, message.count == 1 else { return nil }
+        if b == 0xFA || b == 0xFB || b == 0xFC { last = nil; return nil }
+        guard b == 0xF8 else { return nil }
+        defer { last = now }
+        if let l = last, now - l > 0.002, now - l < 0.5 { return (now - l) / 2 }
+        return nil
+    }
+}
+
+func selftestUplink() -> Int {
+    var fails = 0
+    func check(_ name: String, _ ok: Bool) { if ok { print("PASS \(name)") } else { print("FAIL \(name)"); fails += 1 } }
+    check("BLE MIDI note-on", parseBLEMIDI([0x80, 0x80, 0x90, 60, 100]) == [[0x90, 60, 100]])
+    check("BLE MIDI clock (one byte)", parseBLEMIDI([0x81, 0x85, 0xF8]) == [[0xF8]])
+    check("BLE MIDI two messages, the second with a time byte and running status", parseBLEMIDI([0x80, 0x80, 0x90, 60, 100, 0x81, 60, 0]) == [[0x90, 60, 100], [0x90, 60, 0]])
+    check("BLE MIDI two messages, the second with its own status", parseBLEMIDI([0x80, 0x80, 0x90, 60, 100, 0x81, 0x80, 60, 0]) == [[0x90, 60, 100], [0x80, 60, 0]])
+    check("BLE MIDI start", parseBLEMIDI([0x80, 0x80, 0xFA]) == [[0xFA]])
+    check("BLE MIDI garbage", parseBLEMIDI([0x00, 0x01]) == [] && parseBLEMIDI([]) == [])
+    check("console line, 3 bytes", uplinkMessage(fromLine: "u 90 3c 64\r\n") == [0x90, 0x3c, 0x64])
+    check("console line, 1 byte", uplinkMessage(fromLine: "u f8") == [0xF8])
+    check("console line: an echoed command is not a message", uplinkMessage(fromLine: "up on") == nil && uplinkMessage(fromLine: "mcu> hb") == nil)
+    var c = ClockDoubler()
+    check("the first clock: no interval yet", c.secondClock(after: [0xF8], at: 1.000) == nil)
+    let d = c.secondClock(after: [0xF8], at: 1.040)
+    check("the next clock: a second one half an interval later", d != nil && abs(d! - 0.020) < 1e-9)
+    check("start forgets the interval", c.secondClock(after: [0xFA], at: 1.05) == nil && c.secondClock(after: [0xF8], at: 1.06) == nil)
+    check("a note is not doubled", c.secondClock(after: [0x90, 60, 100], at: 1.1) == nil)
+    return fails
+}

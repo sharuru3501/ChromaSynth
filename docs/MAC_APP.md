@@ -27,6 +27,10 @@ open build/ChromaSynthLink.app
 - コンソールの `mode usb` などは**一時的**(保存しない)。保存するのは `mode set ble` など。`mode saved` は保存してあるモードに戻す。
 - `hb` を一度でも受けた USB モードは、2 秒途切れると保存モードへ戻る。モードが変わるとき(と BLE が切れたとき)は、鳴っている音を止める。起動直後に helper がモードを頼んでいたら、保存モードは上書きしない。`hb` を送らない古い helper(`tools/chromasynth_usb_bridge.swift`)には影響しない。
 
+## Chromatic のシーケンサーを DAW に録音する(ROM → DAW、M15)
+- DAW の MIDI 入力に **`ChromaSynth`** が出る(出力と同じ名前)。ChromaSynth の MIDI ページで SYNC = OUT にして、ROM をキーボード画面にして、SELECT+START で再生すると、シーケンサーのノート・クロック・スタート/停止がここに流れる。
+- ROM のクロックは 1 拍 12 回なので、アプリが 1 つおきに足して 24 回にする。詳しくは [M15_DESIGN.md](M15_DESIGN.md)。
+
 ## Chromatic の側でモードを切り替えたとき
 - Chromatic のメニュー(System > MIDI MODE)で USB から BLE などへ切り替えると、アプリは 2 秒おきに `mode` で問い合わせて**切り替えを検知**し、USB のポートを手放して、BLE に切り替える(メニューの表示は `Chromatic MIDI mode: …`)。ケーブルを抜き差しするか、「Connect」を選ぶまで、USB を勝手に取り戻さない(メニューで選んだモードを尊重する)。
 - BLE で接続中にメニューで USB に切り替えると、BLE が切れたことを手がかりに、アプリが USB を取りにいく。
