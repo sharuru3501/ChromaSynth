@@ -32,23 +32,24 @@ SECTION "Patterns 4", WRAMX[$D000], BANK[4]
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
 SECTION "Roll grid", WRAM0
-wGrid:          ds ROLL_ROWS * 20
+wGrid:          ds RING_ROWS * 20   ; one slot per ring row (see the piano-roll header in roll.asm)
 
 ; 16 render flags, 16 copy flags, 16 column pitches, 16 head flags: 64 bytes, 64-byte
 ; aligned so that base + index never carries into the high byte.
-SECTION "Roll flags", WRAM0, ALIGN[6]
-wRowRender:     ds ROLL_ROWS    ; row must be re-rendered into wGrid
-wRowDirty:      ds ROLL_ROWS    ; row must be copied to VRAM
+SECTION "Roll render flags", WRAM0, ALIGN[5]
+wRowRender:     ds RING_ROWS    ; ring row must be re-rendered into wGrid
+SECTION "Roll flags", WRAM0, ALIGN[5]
 ; Per column of the visible page: sounding pitch (0 = silence), then 1 = note head.
 wColPitch:      ds SEQ_PAGE
 wColHead:       ds SEQ_PAGE
 
-; Previous column summary, kept so that an edit only redraws the rows that changed.
-; The roll is drawn into the map that is NOT shown and the two maps are swapped (LCDC bit 3) when
+; The roll is drawn into a map that is NOT shown and the two maps are swapped (LCDC bit 3) when
 ; it is complete, so a scroll or a page change never shows half old / half new rows.
 SECTION "Roll flags H", WRAM0
-wMaskV:         dw              ; bit r = row r waits to be copied to the shown map
-wMaskH:         dw              ; the same for the hidden map
+wMaskV:         ds 4            ; bit r = ring row r waits to be copied to the shown map
+wMaskH:         ds 4            ; the same for the hidden map (only while a full redraw is built)
+wShownTop:      db              ; the pitch window (top pitch) of the picture on screen
+wCopyTop:       db              ; ... of the map the copy routines write to
 wShown:         db              ; 0 = $9800 is shown, 1 = $9C00
 wBuild:         db              ; 1 = a full redraw is being built in the hidden map
 wBuildReady:    db              ; 1 = every row of that redraw has been rendered

@@ -96,6 +96,7 @@ DEF NUM_SEGS   EQU 2        ; segments per pattern: a pattern is up to 8 bars (2
 DEF MAX_BARS   EQU 8
 DEF SEQ_PAGE   EQU 16       ; grid columns per piano-roll page
 DEF ROLL_ROWS  EQU 16       ; pitch rows visible
+DEF RING_ROWS  EQU 32       ; rows of a BG map: pitch p always lives in map row (1 - p) mod 32; SCY picks the visible 18
 DEF ROLL_COL0  EQU 2        ; first grid column (cols 0-1 = key labels)
 DEF ROLL_ROW0  EQU 1        ; first grid row on screen
 DEF NUM_DIVS   EQU 7        ; grid divisions (src/divs.inc)

@@ -43,6 +43,8 @@ BuildScreen:
     xor a
     ld [wSelCh], a
 .chOk:
+    xor a
+    ldh [rSCY], a           ; only the piano roll scrolls (BuildSeq sets its SCY)
     ld hl, _SCRN0
     ld bc, 32 * 32
     call MemClear           ; tile 0 = space
@@ -635,10 +637,44 @@ PatchRowHL:
 
 ; Row 17 message line: wMsg = 0 clears it (and restores the sequencer status).
 DrawMsg:
+    ld a, [wScreen]
+    cp SCREEN_SEQ
+    jr z, .roll
+    ld c, 17                ; the other screens use $9800 only (SCY = 0)
     ld a, HIGH(_SCRN0)
     call DrawMsgRow
-    ld a, HIGH(_SCRN0) + 4  ; the piano roll swaps between two maps: the message goes into both
+    ld c, 17
+    ld a, HIGH(_SCRN0) + 4
     call DrawMsgRow
+    jr .done
+.roll:                      ; the piano roll: the status row of each map, wherever its window put it
+    ld a, [wShownTop]
+    ld l, a
+    ld a, 17
+    sub l
+    and RING_ROWS - 1
+    ld c, a
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0)
+    jr z, .shown
+    ld a, HIGH(_SCRN0) + 4
+.shown:
+    call DrawMsgRow
+    ld a, [wRollTop]
+    ld l, a
+    ld a, 17
+    sub l
+    and RING_ROWS - 1
+    ld c, a
+    ld a, [wShown]
+    and a
+    ld a, HIGH(_SCRN0) + 4
+    jr z, .hidden
+    ld a, HIGH(_SCRN0)
+.hidden:
+    call DrawMsgRow
+.done:
     ld a, [wMsg]
     and a
     ret nz
@@ -647,11 +683,17 @@ DrawMsg:
     ret nz
     jp MarkSeqStatus
 
-; a = HIGH of a tile map: clear row 17 there and write the message (if any).
+; a = HIGH of a tile map, c = map row: clear that row and write the message (if any).
 DrawMsgRow:
-    add HIGH(17 * 32)
+    ld l, c
+    ld h, 0
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl
+    add hl, hl              ; row * 32
+    add h
     ld h, a
-    ld l, LOW(17 * 32)
     ld d, h
     ld e, l                 ; de = the row
     ld b, 20

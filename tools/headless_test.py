@@ -495,7 +495,8 @@ def cell(ch, tick):
 
 def grid(row, col):
     """Tile in the shadow map: grid row 0..15, grid column 0..15."""
-    return mem[G + row * 20 + 2 + col]
+    ring = (row + 1 - mem[sym["wRollTop"]]) & 31          # shadow slots are indexed by ring row (pitch p: 1 - p mod 32)
+    return mem[G + ring * 20 + 2 + col]
 
 
 def shown_map():
@@ -505,7 +506,8 @@ def shown_map():
 
 def vram(row, col):
     """Tile actually in VRAM (BG map) at grid row 0..15 / column 0..15."""
-    return mem[shown_map() + (1 + row) * 32 + 2 + col]
+    k = mem[0xFF42] // 8                 # SCY: the window starts at map row k (ruler), the grid rows follow
+    return mem[shown_map() + ((k + 1 + row) & 31) * 32 + 2 + col]
 
 
 def v(name):

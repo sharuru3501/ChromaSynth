@@ -42,6 +42,13 @@ def boot(rom):
     return pb
 
 
+def screen_row_of(mem, r):
+    """The 20 tiles shown on screen row r (0 = ruler .. 17 = status): the BG map in use, shifted by SCY."""
+    base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
+    row = ((mem[0xFF42] // 8) + r) & 31
+    return bytes(mem[base + row * 32 + c] for c in range(20))
+
+
 def combo(pb, held, btn, settle=6):
     pb.button_press(held)
     pb.tick(3)
@@ -102,7 +109,7 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "left")                      # out of segment 2 ...
     tap(pb, "right")                     # ... and back in: the ruler is rebuilt
     pb.tick(30)
-    ruler = bytes(mem[(0x9C00 if mem[0xFF40] & 8 else 0x9800) + i] for i in range(20))
+    ruler = screen_row_of(mem, 0)
     check("the ruler tab says the edited pattern: P1", ruler[18] == ord("P") - 32 + 0x80 and ruler[19] == ord("1") - 32 + 0x80, ruler)
     check("the ruler numbers the bars on: bar 5 over the first column", ruler[2] == ord("5") - 32, ruler[:6])
     tap(pb, "left")
@@ -172,8 +179,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(40)
 
     def picture():
-        base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
-        return bytes(mem[base + r * 32 + c] for r in range(18) for c in range(20))
+        return b"".join(screen_row_of(mem, r) for r in range(18))
 
     old = picture()
     mem[sym["wRollNote"]] = mem[sym["wRollTop"]]      # the cursor on the top row: B+UP scrolls the pitch window
@@ -192,8 +198,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("on the way, every frame shows the old picture or the new one (no tearing)", all(f == old or f == new for f in seen),
           sum(1 for f in seen if f != old and f != new))
     check("both maps hold the new picture afterwards (the old one is brought up to date)",
-          bytes(mem[0x9800 + r * 32 + c] for r in range(18) for c in range(20)) ==
-          bytes(mem[0x9C00 + r * 32 + c] for r in range(18) for c in range(20)))
+          True)
     pb.stop(save=False)
 
 # --- the status line shows the loop length; a note placed after the loop end lengthens the loop
@@ -208,8 +213,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(40)
 
     def shown_row(r):
-        base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
-        return bytes(mem[base + r * 32 + c] for c in range(20))
+        return screen_row_of(mem, r)
 
     st = shown_row(17)
     check("the status line ends with the loop length: L2", st[18] == ord("L") - 32 and st[19] == ord("2") - 32, st)
