@@ -38,6 +38,9 @@ wGrid:          ds RING_ROWS * 20   ; one slot per ring row (see the piano-roll 
 ; aligned so that base + index never carries into the high byte.
 SECTION "Roll render flags", WRAM0, ALIGN[5]
 wRowRender:     ds RING_ROWS    ; ring row must be re-rendered into wGrid
+SECTION "Roll spans", WRAM0, ALIGN[6]
+wSpanLo:        ds RING_ROWS    ; per ring row waiting to be copied: its first changed tile
+wSpanHi:        ds RING_ROWS    ; and the end (exclusive); wSpanHi = wSpanLo + RING_ROWS
 SECTION "Roll flags", WRAM0, ALIGN[5]
 ; Per column of the visible page: sounding pitch (0 = silence), then 1 = note head.
 wColPitch:      ds SEQ_PAGE
@@ -173,6 +176,12 @@ wBCPhase:       db
 wBCBeat:        db
 wBCCol:         db
 wRulerBuf:      ds 20       ; row 0 of the roll, built outside VBlank
+wRRBuf:         ds 20       ; RenderRow builds a row here, CommitRow compares it with the shadow slot
+wRRRow:         db          ; the ring row being rendered
+wRRLo:          db          ; the first changed tile of the row just rendered ($FF = none)
+wRRHi:          db          ; the end of the changed tiles
+wSpanTmp:       db
+wRRChanged:     db          ; 1 = the rendered row differs from its shadow slot (it must be copied)
 wStatusBuf:     ds 20       ; row 17 of the roll
 wMsg:           db          ; message code shown on row 17 (0 = none)
 wMsgTimer:      db

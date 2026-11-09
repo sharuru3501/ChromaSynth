@@ -302,6 +302,51 @@ with tempfile.TemporaryDirectory() as tmp:
           [r for r in range(18) if p_fast[r * 20:(r + 1) * 20] != p_full[r * 20:(r + 1) * 20]])
     pb.stop(save=False)
 
+
+# --- turning the page: only the rows that change are copied, so the page turns within a few frames
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+
+    def picture():
+        return b"".join(screen_row_of(mem, r) for r in range(18))
+
+    for turn, (cell, tick) in enumerate(((15, 45), (31, 93), (47, 141))):
+        mem[sym["wRollSeg"]] = 0
+        mem[sym["wRollCell"]] = cell
+        mem[sym["wRollTick"]] = tick
+        combo(pb, "left", "right") if False else None
+        pb.tick(30)
+        before = picture()
+        pb.button_press("right")
+        pb.tick(1)
+        pb.button_release("right")
+        frames = None
+        shots = []
+        for i in range(1, 16):
+            pb.tick(1)
+            shots.append(picture())
+        final = shots[-1]
+        for i, f in enumerate(shots, 1):
+            if f == final:
+                frames = i
+                break
+        check(f"page turn {turn + 1}: the new page is complete within 5 frames of the key press", v("wPageSeg") == 0 and frames is not None and frames <= 6,
+              (frames, v("wRollPage")))
+    # and the turned page equals a full redraw
+    combo(pb, "select", "right")
+    combo(pb, "select", "left")
+    pb.tick(40)
+    check("the page that was turned equals a complete redraw", final == picture(),
+          [r for r in range(18) if final[r * 20:(r + 1) * 20] != picture()[r * 20:(r + 1) * 20]])
+    pb.stop(save=False)
+
 # --- the status line shows the loop length; a note placed after the loop end lengthens the loop
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"

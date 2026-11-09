@@ -27,8 +27,9 @@
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF COPY_BUDGET   EQU 2     ; rows copied to VRAM per frame (VBlank is only ~1140 cycles)
-DEF RENDER_BUDGET EQU 8     ; rows rendered per frame (outside VBlank, ~750 cycles each)
+DEF COPY_BUDGET   EQU 2     ; (rows: the hidden-map copies; the shown map uses the unit budget below)
+DEF V_UNITS       EQU 11    ; copy budget of a frame in units (about 0.7 DIV ticks each): the ruler / status line = 4, a row = 3 + changed tiles / 5
+DEF RENDER_BUDGET EQU 16    ; rows rendered per frame (outside VBlank, ~750 cycles each)
 DEF BUILD_BUDGET  EQU 2     ; rows copied per frame while a full redraw is built in the hidden map
 
 SECTION "Roll", ROMX, BANK[1]
@@ -99,9 +100,30 @@ MarkPitchRow:
     ret nc
     jp MarkRowRender
 
-; Everything may have changed (new page, new pitch window, other channel, other
-; division, loop length, load): rebuild the column summary and ruler, redraw all
-; rows and the status line.
+; A new page (same pitch window): rebuild the column summary and the ruler and re-render every
+; row, but write straight into the shown map and copy only the rows (and ruler) that really
+; changed (CommitRow compares): the page turns in a few frames instead of a whole hidden-map
+; build. Falls back to RollRefreshAll when a build is running or the window is moving.
+RollRefreshSoft:
+    ld a, [wBuild]
+    and a
+    jp nz, RollRefreshAll
+    ld a, [wRollTop]
+    ld hl, wShownTop
+    cp [hl]
+    jp nz, RollRefreshAll
+    call BuildCols
+    call ShowPageNow        ; the playhead is placed on the new page from now on
+    call MarkAllRender
+    ld hl, wDirty
+    ld a, [hl]
+    or DIRTY_HEADER         ; copy the ruler to VRAM
+    ld [hl], a
+    jp MarkSeqStatus
+
+; Everything may have changed (other channel, other division, loop length, load, a big move of
+; the pitch window): rebuild the column summary and ruler, redraw all rows and the status line
+; in the hidden map and swap it in.
 RollRefreshAll:
     call BuildCols
     xor a                   ; the shown map keeps what it has; the new picture is built in the other
@@ -205,7 +227,7 @@ RollCursorMoved:
     jr nc, .sameWindow
     ld a, [wPageChanged]
     and a
-    jp nz, RollRefreshAll   ; a new page: the whole picture is redrawn
+    jp nz, RollRefreshSoft  ; a new page: the page turns in a few frames
     ld a, [wBuild]
     and a
     jp nz, RollRefreshAll   ; (a redraw is being built: it starts over for the new window)
@@ -380,7 +402,7 @@ RollFollow:
     ld [wPageSeg], a
     ld a, d
     call RollSetPage
-    jp RollRefreshAll
+    jp RollRefreshSoft
 
 ; a = grid row 0..15 of the window (top = row 0) -> a = its ring row. Clobbers hl.
 RingOfRow:
@@ -722,15 +744,16 @@ RenderPending:
     ld a, [wBuild]
     and a
     jr nz, .hiddenOnly      ; a full redraw: the shown map is not touched until it is complete
+    ld a, [wRRChanged]
+    and a
+    jr z, .budget           ; the row came out exactly as it already is: nothing to copy
     ld a, [wShownTop]       ; the shown picture: only rows of ITS window are copied (the others
     add c                   ; belong to a scroll that has not happened yet)
     dec a
     and RING_ROWS - 1
     cp ROLL_ROWS
     jr nc, .budget
-    ld hl, wMaskV
-    ld a, c
-    call SetRowBit
+    call AddSpan            ; (the changed tiles only)
     jr .budget
 .hiddenOnly:
     ld hl, wMaskH
@@ -810,9 +833,9 @@ RenderRow:
     ld [wRRBlack], a
     ; --- key label: letter + ('#' | octave digit for C | blank)
     pop bc                  ; c = row again
-    push de                 ; keep pitch class / octave
-    call GridPtr            ; hl = dest (clobbers de)
-    pop de
+    ld a, c
+    ld [wRRRow], a
+    ld hl, wRRBuf           ; the row is built here and compared with its shadow slot at the end
     push hl
     ld a, e
     add a
@@ -905,6 +928,49 @@ RenderRow:
     xor a
     ld [hl+], a             ; cols 18-19: blank
     ld [hl], a
+    jp CommitRow
+
+; The row built in wRRBuf goes into its shadow slot; wRRChanged says whether it differs. -> carry clear.
+CommitRow:
+    ld a, [wRRRow]
+    ld c, a
+    call GridPtr            ; hl = the shadow slot
+    ld de, wRRBuf
+    ld a, $FF
+    ld [wRRLo], a
+    xor a
+    ld [wRRHi], a
+    ld b, 20
+.cmp:
+    ld a, [de]
+    inc de
+    cp [hl]
+    jr z, .same
+    ld [hl], a
+    ld a, 20
+    sub b                   ; the tile's index
+    ld c, a
+    ld a, [wRRLo]
+    cp c
+    jr c, .loKept           ; (the first difference stays the start)
+    ld a, c
+    ld [wRRLo], a
+.loKept:
+    ld a, c
+    inc a
+    ld [wRRHi], a           ; the last difference + 1 so far
+.same:
+    inc hl
+    dec b
+    jr nz, .cmp
+    ld a, [wRRHi]
+    and a
+    ld a, 0
+    jr z, .store
+    ld a, 1
+.store:
+    ld [wRRChanged], a
+    and a                   ; carry clear: drawn
     ret
 
 ; Letter tile and sharp tile for each pitch class (tile = ASCII - 32).
@@ -987,6 +1053,138 @@ RollCopyRow:
         ld [de], a
         inc e
     ENDR
+    ret
+
+; c = ring row -> copy only the tiles of it that changed (wSpanLo .. wSpanHi - 1) from its shadow
+; slot to the same row of the map. -> a = what it cost in units (3 + tiles / 5). Keeps c.
+; Clobbers b, d, e, hl. (The slot and row addresses come from tables: this is the hot path.)
+RollCopySpan:
+    ld a, c
+    add LOW(wSpanLo)        ; the span arrays are 64-byte aligned: no carry
+    ld l, a
+    ld h, HIGH(wSpanLo)
+    ld a, [hl]
+    ld d, a                 ; d = first tile
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [hl]              ; end (exclusive)
+    sub d
+    ld b, a                 ; b = tiles to copy (>= 1)
+    push bc
+    ld a, c
+    add a
+    ld e, a                 ; table offset = row * 2
+    push de
+    ld hl, SlotTab          ; source: the slot address + first tile
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    pop de                  ; d = first tile, e = offset
+    ld a, l
+    add d
+    ld l, a
+    jr nc, .src
+    inc h
+.src:
+    push hl
+    push de
+    ld hl, MapTab           ; destination: row * 32 + the map + first tile
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a                 ; hl = row * 32
+    ld a, [wCopyMap]
+    add h
+    ld h, a
+    pop de
+    ld a, l
+    add d                   ; (a row never crosses a page)
+    ld e, a
+    ld d, h
+    pop hl                  ; hl = source
+    pop bc                  ; b = tiles
+    push bc
+.copy:
+    ld a, [hl+]
+    ld [de], a
+    inc e
+    dec b
+    jr nz, .copy
+    pop bc
+    ld a, b                 ; the cost: 3 + tiles / 5 (the call itself is most of it)
+    ld b, 3
+.cost:
+    sub 5
+    jr c, .done
+    inc b
+    jr .cost
+.done:
+    ld a, b
+    ret
+
+; hl = a row mask, a = ring row: Z if its bit is clear. Clobbers a, d, e, hl.
+TestRowBit:
+.byte:
+    cp 8
+    jr c, .lo
+    sub 8
+    inc hl
+    jr .byte
+.lo:
+    ld d, a
+    ld e, 1
+    inc d
+.shift:
+    dec d
+    jr z, .test
+    sla e
+    jr .shift
+.test:
+    ld a, [hl]
+    and e
+    ret
+
+; c = ring row: flag it for copying (V) and merge the changed tiles of the row just rendered
+; (wRRLo .. wRRHi) into its pending span. Clobbers a, d, e, hl.
+AddSpan:
+    ld hl, wMaskV
+    ld a, c
+    call TestRowBit         ; Z = nothing pending for this row yet
+    push af
+    ld hl, wMaskV
+    ld a, c
+    call SetRowBit
+    ld a, c
+    add LOW(wSpanLo)
+    ld l, a
+    ld h, HIGH(wSpanLo)
+    pop af
+    jr z, .fresh
+    ld a, [wRRLo]           ; union with the pending span
+    cp [hl]
+    jr nc, .loKept
+    ld [hl], a
+.loKept:
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [wRRHi]
+    cp [hl]
+    ret c
+    ld [hl], a
+    ret
+.fresh:
+    ld a, [wRRLo]
+    ld [hl], a
+    ld a, l
+    add RING_ROWS
+    ld l, a
+    ld a, [wRRHi]
+    ld [hl], a
     ret
 
 CopyRuler:
@@ -1102,36 +1300,70 @@ UpdateSeq:
     call SetCopyVisible
     ld a, e
     and a
-    jr nz, .rows            ; the playhead moved: no scroll step, no ruler/status copy this frame
+    jr nz, .noScroll        ; the playhead moved: no scroll step, no ruler/status copy this frame
     call VScrollStep        ; a pending one-pitch scroll (needs its row rendered): 2 + 1 rows, SCY
     ret c                   ; it took this frame
+.noScroll:
+    ld a, V_UNITS           ; the ruler / status line (4 each) and the rows (3 + span / 5 each) share it
+    ld b, a
+    ld a, e
+    and a
+    jr z, .u
+    ld a, b                 ; the playhead moved this frame and took some of the time
+    sub 5
+    ld b, a
+.u:
+    ld a, b
+    call LimitUnits
+    ld b, a
+    ld a, e
+    and a
+    jr nz, .rows            ; the playhead moved: only rows this frame
     ld a, [wDirty]
     bit 5, a
     jr z, .noRuler
     res 5, a
     ld [wDirty], a
-    jp CopyRuler
+    push bc
+    call CopyRuler
+    pop bc
+    ld a, b
+    sub 4
+    ret z
+    ret c
+    ld b, a
 .noRuler:
+    ld a, [wDirty]
     bit 4, a
     jr z, .rows
     res 4, a
     ld [wDirty], a
-    jp CopyStatus
-.rows:
-    ld a, COPY_BUDGET       ; one row less when the playhead used up some of VBlank
-    sub e
-    call LimitBudget
+    push bc
+    call CopyStatus
+    pop bc
+    ld a, b
+    sub 4
+    ret z
+    ret c
     ld b, a
+.rows:
 .vLoop:
+    ld a, b
+    cp 3
+    ret c                   ; not enough left for another row
     ld hl, wMaskV
     call TakeRow            ; c = a ring row that waits (and its flag is cleared)
     ret c                   ; none
     push bc
-    call RollCopyRow
+    call RollCopySpan       ; -> a = what it cost
     pop bc
-    dec b
-    jr nz, .vLoop
-    ret
+    ld d, a
+    ld a, b
+    sub d
+    ret z
+    ret c
+    ld b, a
+    jr .vLoop
 
 ; A full redraw is being built: everything goes to the hidden map; when it is complete the maps
 ; are swapped (LCDC bit 3, and SCY for the new window).
@@ -1205,6 +1437,26 @@ LimitBudget:
     cp 2
     ret c
     ld a, 1
+    ret
+
+; a = copy budget in units -> a = the units left for a frame that starts late: LY 146: 8, LY >= 147: 5.
+LimitUnits:
+    ld c, a
+    ldh a, [rLY]
+    cp 147
+    jr nc, .late
+    cp 146
+    ld a, c
+    ret c
+    cp 9
+    ret c
+    ld a, 8
+    ret
+.late:
+    ld a, c
+    cp 6
+    ret c
+    ld a, 5
     ret
 
 CopyHidden:
@@ -1299,18 +1551,18 @@ TakeRow:
     ret
 .go:
     ld d, a                 ; the byte
-    ld e, 1                 ; the bit being looked at
-.find:
-    rra
-    jr c, .found
-    inc c
-    sla e
-    jr .find
-.found:
-    ld a, e
-    cpl
-    and d
-    ld [hl], a              ; clear the bit
+    push hl
+    ld h, HIGH(LowBitTab)   ; the index of its lowest set bit (a 256-byte table, page aligned)
+    ld l, a
+    ld a, [hl]
+    pop hl
+    add c
+    ld c, a
+    ld a, d
+    ld e, a
+    dec a
+    and e                   ; clear the lowest set bit
+    ld [hl], a
     and a                   ; carry clear
     ret
 
@@ -1584,3 +1836,19 @@ UpdatePlayhead:
     jr nz, .hideLoop
     scf
     ret
+
+; ---------------------------------------------------------------- tables
+SECTION "Roll tables", ROMX, BANK[1], ALIGN[8]
+; the lowest set bit of every byte value (0 for 0): GENERATED by tools/gen_lowbit.py
+LowBitTab:
+INCLUDE "lowbit.inc"
+
+; the wGrid slot address of every ring row, and row * 32
+SlotTab:
+FOR I, RING_ROWS
+    dw wGrid + 20 * I
+ENDR
+MapTab:
+FOR I, RING_ROWS
+    dw 32 * I
+ENDR
