@@ -83,6 +83,9 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var consoleUp = false
     private let usbQueue = DispatchQueue(label: "chromasynth.usb")
     private var usbBusy = false
+    /// true while the USB takeover is under way: the notes that arrive meanwhile are dropped (they have no path), so that none can
+    /// start a note whose note-off would be lost.
+    private var switching = false
 
     func start() {
         MIDIClientCreate("ChromaSynth Link" as CFString, nil, nil, &client)
@@ -141,6 +144,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private func forward(_ line: String) {
         sendLock.lock()
         defer { sendLock.unlock() }
+        if switching { return }
         sent += 1
         if dry { print(line); return }
         switch transport {
@@ -209,14 +213,19 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             if !ports.contains(serialPath) { closeUSB() }
         } else if let p = ports.first, !usbBusy {
             usbBusy = true
+            switching = true
+            if transport == .ble, let per = peripheral, let c = characteristic {   // opening the port resets the ESP32: stop a held note first
+                per.writeValue(Data(blePacketBytes([0xB0, 123, 0], timestamp: 0)), for: c, type: .withoutResponse)
+            }
             usbQueue.async { [weak self] in self?.openUSB(p) }
         }
     }
 
     private func openUSB(_ path: String) {
         defer { usbBusy = false }
+        usleep(200_000)                           // (the all-notes-off above leaves first)
         let fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)
-        if fd < 0 { return }
+        if fd < 0 { DispatchQueue.main.async { [weak self] in self?.switching = false }; return }
         var t = termios()
         tcgetattr(fd, &t)
         cfmakeraw(&t)
@@ -253,6 +262,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         DispatchQueue.main.async { [weak self] in
             guard let me = self, me.serialFD == fd else { return }
+            me.switching = false
             if me.usbConfirmed {
                 if let p = me.peripheral, let c = me.characteristic {        // a note that is held over BLE must not hang
                     p.writeValue(Data(blePacketBytes([0xB0, 123, 0], timestamp: 0)), for: c, type: .withoutResponse)
@@ -269,6 +279,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     private func closeUSB() {
+        switching = false
         let fd = serialFD
         serialFD = -1
         if fd >= 0 { close(fd) }

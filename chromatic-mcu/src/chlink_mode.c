@@ -180,7 +180,10 @@ static int cmd_mode(int argc, char **argv)
             persist(m);
         }
         ChMode_Request(m);
-        vTaskDelay(pdMS_TO_TICKS(800));   // let the mode task finish (starting BLE takes a moment)
+        for (int i = 0; i < 80 && s_applied != m; i++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(10));   // let the mode task finish (starting BLE takes a moment): at most 0.8 s
+        }
     }
     printf("MIDI mode %s (applied %s), saved for boot: %s, %u switches, hb %s\n", ChMode_Name(s_mode), ChMode_Name(s_applied),
            ChMode_Name(load_saved()), (unsigned)s_switches, s_hb_seen ? "seen" : "not seen");
