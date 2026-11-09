@@ -125,17 +125,17 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "right")
     pb.tick(40)
     ruler = screen_row(mem, 0)
-    check("3/4, page 1: bar 1 at column 0, beat marks at ticks 12 and 24 (columns 4, 8), bar 2 at tick 36 (column 12)",
-          ruler[2] == digit(1) and ruler[2 + 4] == TICK and ruler[2 + 8] == TICK and ruler[2 + 12] == digit(2), list(ruler))
+    check("3/4, page 1 = bar 1: bar number at column 0, beat marks at ticks 12 and 24 (columns 4, 8), nothing after the bar",
+          ruler[2] == digit(1) and ruler[2 + 4] == TICK and ruler[2 + 8] == TICK and all(ruler[2 + c] == 0 for c in range(9, 16)), list(ruler))
     mem[sym["wRollSeg"]] = 0
     mem[sym["wRollCell"]] = 15
     mem[sym["wRollTick"]] = 45
-    tap(pb, "right")                     # the cursor crosses into page 2 (ticks 48..95)
+    tap(pb, "right")                     # the cursor crosses into bar 2 (ticks 36..71)
     pb.tick(20)
     ruler = screen_row(mem, 0)
     # page 2 starts at tick 48 = 12 ticks into bar 2: beat at 60 (column 4), bar 3 at tick 72 (column 8), beat at 84 (column 12)
-    check("3/4, page 2: beat mark at column 4, bar 3 over column 8, beat mark at column 12",
-          ruler[2 + 4] == TICK and ruler[2 + 8] == digit(3) and ruler[2 + 12] == TICK, list(ruler))
+    check("3/4, page 2 = bar 2: bar number 2 at column 0, beat marks at ticks 48 and 60 (columns 4, 8)",
+          ruler[2] == digit(2) and ruler[2 + 4] == TICK and ruler[2 + 8] == TICK and all(ruler[2 + c] == 0 for c in range(9, 16)), list(ruler))
     pb.stop(save=False)
 
 # --- 6/8: the beat unit is an eighth (6 ticks): beat marks every 2 columns at 1/16
@@ -150,8 +150,8 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "right")
     pb.tick(40)
     ruler = screen_row(mem, 0)
-    check("6/8: bar 1 at column 0, beat marks every 2 columns (6 ticks), bar 2 at column 12 (36 ticks)",
-          ruler[2] == digit(1) and ruler[2 + 2] == TICK and ruler[2 + 4] == TICK and ruler[2 + 10] == TICK and ruler[2 + 12] == digit(2),
+    check("6/8: bar 1 at column 0, beat marks every 2 columns (6 ticks); the page is the bar (12 columns)",
+          ruler[2] == digit(1) and ruler[2 + 2] == TICK and ruler[2 + 4] == TICK and ruler[2 + 10] == TICK and ruler[2 + 12] == 0,
           list(ruler))
     pb.stop(save=False)
 
@@ -342,7 +342,7 @@ with tempfile.TemporaryDirectory() as tmp:
         longest[key] = max(longest.get(key, 0), v("wSeqTick") + 0)
     combo(pb, "select", "start")
     check("song mode: pattern 1 loops 96 ticks, pattern 2 loops 108 ticks (its own time signature and length)",
-          longest.get(1) == 95 and longest.get(2) == 107, longest)
+          longest.get(1) in (94, 95) and longest.get(2) in (106, 107), longest)   # (sampled once a frame: the last tick can fall between samples)
     combo(pb, "select", "up")            # loop mode again
     pb.stop(save=False)
 

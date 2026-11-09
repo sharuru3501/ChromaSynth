@@ -115,22 +115,26 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "a", 4)
     check("a note of the same pitch can be placed right after another", cell(0, 0) == 60 and cell(0, 3) == 60 and cell(0, 6) == OFF,
           (cell(0, 0), cell(0, 3), cell(0, 6)))
-    # the playing page: every page has 16 columns; 1/4T has 24 cells in a segment: the 2nd page shows cells 8-23
+    # pages: a page is whole bars when the grid divides the bar; a bar of more than 16 cells is shown in
+    # pieces of 16 cells, the last piece shifted back to end on the bar's end
     for i in range(256):
         put(0, i, 0); put(1, i, 0)
     cursor(0, 0, 60)
     for _ in range(8):
-        if v("wDiv") == 1:
+        if v("wDiv") == 5:
             break
         combo(pb, "b", "a")
-    check("1/4T: 16 columns", (v("wDiv"), v("wPageCols"), v("wPageSpan")) == (1, 16, 128), (v("wDiv"), v("wPageCols"), v("wPageSpan")))
+    check("1/16T (24 cells in a 4/4 bar): pieces of 16 cells (32 ticks)", (v("wDiv"), v("wPageCols"), v("wPageSpan")) == (5, 16, 32), (v("wDiv"), v("wPageCols"), v("wPageSpan")))
     for _ in range(17):
         tap(pb, "right", 3)
-    check("1/4T: cell 17 shows the page that ends on the segment end (cells 8-23, tick 64)",
-          (v("wRollCell"), v("wPageCell"), v("wPageTick")) == (17, 8, 64), (v("wRollCell"), v("wPageCell"), v("wPageTick")))
+    check("1/16T: cell 17 shows the last piece of the bar (cells 8-23: tick 16)",
+          (v("wRollCell"), v("wPageAbs")) == (17, 16), (v("wRollCell"), v("wPageAbs")))
     pb.tick(20)
     blank = [mem[sym["wColHead"] + c] & 4 for c in range(16)]
     check("no blank column on the page", not any(blank), blank)
+    for _ in range(40):
+        tap(pb, "right", 3)
+    check("cell 57 (tick 114, bar 3) is on a page of bar 3 (96..143)", 96 <= v("wPageAbs") <= 114 and v("wPageAbs") + v("wPageSpan") <= 144, (v("wPageAbs"), v("wPageSpan")))
     # START+A / START+B: the next / previous pattern on the sequencer screen
     check("pattern 1 is edited", v("wEditPat") == 0)
     pb.button_press("start"); pb.tick(3); tap(pb, "a", 3); pb.button_release("start"); pb.tick(10)

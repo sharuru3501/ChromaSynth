@@ -162,8 +162,15 @@ wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)
 wDivTicks:      db          ; ticks per grid cell for that division
-wPageCols:      db          ; grid columns per page for that division (12 or 16)
-wPageSpan:      db          ; ticks per page (a whole number of beats: the bars never move)
+wPageCols:      db          ; grid columns the page uses (1..16; the rest are blank)
+wPageSpan:      db          ; ticks the page shows (wPageCols * wDivTicks)
+wPageAbs:       dw          ; the page's first tick, counted from the start of the pattern
+wShAbs:         dw          ; the same for the page that is on screen
+wColSeg:        db          ; BuildCols: the segment of the column being built
+wPfX:           dw          ; PageFor: the tick the page must show
+wPfStep:        dw          ; PageFor: ticks from one page start to the next
+wPfCols:        db          ; PageFor: columns of the page
+wPfN:           db          ; PageFor: cells in a bar
 wRollCell:      db          ; piano-roll cursor: grid cell index (tick / wDivTicks)
 wRollTick:      db          ; piano-roll cursor: tick (= cell * wDivTicks)
 wRollNote:      db          ; piano-roll cursor: MIDI note

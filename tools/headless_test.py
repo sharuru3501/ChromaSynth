@@ -599,7 +599,7 @@ press("right")
 press("right")
 release("b", frames=4)
 check("page scroll: cell 16 -> page 2 (starts at tick 48)",
-      (v("wRollCell"), v("wRollPage"), v("wPageTick")) == (16, 1, 48), (v("wRollCell"), v("wRollPage"), v("wPageTick")))
+      (v("wRollCell"), v("wPageAbs"), v("wPageTick")) == (16, 48, 48), (v("wRollCell"), v("wPageAbs"), v("wPageTick")))
 settle()
 check("page 2: A3 head at column 0 (row 15), cursor empty at C4",
       grid(15, 0) == T_NOTE_HEAD and grid(12, 0) == T_CUR_EMP, (grid(15, 0), grid(12, 0)))
@@ -607,7 +607,7 @@ hold("b")
 press("left")
 press("left")
 release("b", frames=4)
-check("page scroll back", (v("wRollCell"), v("wRollPage"), v("wPageTick")) == (8, 0, 0))
+check("page scroll back", (v("wRollCell"), v("wPageAbs"), v("wPageTick")) == (8, 0, 0))
 for _ in range(8):
     press("left")
 check("cursor at cell 0", v("wRollCell") == 0 and v("wRollTick") == 0)
@@ -722,7 +722,7 @@ for i in range(120):
         last = t_
     bass.add(cur(2))
     if v("wPlayX") != 0xFF:
-        samples.append((v("wSeqCur"), v("wShTick"), v("wPlayX"), v("wPlayShown")))
+        samples.append((v("wSeqCur"), v("wShAbs"), v("wPlayX"), v("wPlayShown")))
     if i == 30:
         shot("10_roll_playing")
 check("tempo: 48 ticks in 2 s at 120 BPM (12 ticks per beat)", 46 <= ticks <= 50, ticks)
@@ -762,7 +762,7 @@ for _ in range(240):
     pb.tick(1)
     seen.add(v("wSeqTick"))
     if v("wSeqCur") >= 48:
-        pages.add(v("wRollPage"))
+        pages.add(v("wPageAbs") // max(1, v("wPageSpan")))
 check("loop: ticks wrap inside 0..95", max(seen) == 95 and 0 in seen, (min(seen), max(seen)))
 check("view followed the playhead onto page 2", 1 in pages, pages)
 tap_while("select", "start")
@@ -776,7 +776,7 @@ for _ in range(5):          # cursor to cell 20 = tick 60 (bar 2, beat 2) at 1/1
 check("cursor at tick 60 (bar 2, beat 2)", (v("wRollCell"), v("wRollTick"), v("wDiv")) == (20, 60, 4),
       (v("wRollCell"), v("wRollTick"), v("wDiv")))
 DIV_TICKS = [12, 8, 6, 4, 3, 2, 1]
-DIV_COLS = [16] * 7
+DIV_COLS = [16, 12, 16, 12, 16, 16, 16]   # a page is whole 4/4 bars: 1/4T and 1/8T have 12 columns
 bad = []
 for step in range(7):       # visit every division once, ending where we started
     d_ = v("wDiv")
@@ -825,8 +825,8 @@ check("status line shows the division label '1/8T'", status[:4] == [ord(c) - 32 
 ruler = [mem[sym["wRulerBuf"] + i] for i in range(20)]
 check("ruler at 1/8T: bar 1 at column 0, beat dots every 3 columns (12 ticks / 4)",
       ruler[2] == 17 and ruler[5] == DOT and ruler[8] == DOT and ruler[11] == DOT and ruler[3] == 0 and ruler[4] == 0, ruler)
-check("1/8T page: 16 columns (64 ticks); no blank column",
-      (v("wPageCols"), v("wPageSpan")) == (16, 64) and all(grid(0, c) != 0 for c in range(12, 16)),
+check("1/8T page: one bar = 12 columns (48 ticks); the 4 columns after the bar are blank, not the next bar",
+      (v("wPageCols"), v("wPageSpan")) == (12, 48) and all(grid(0, c) == 0 for c in range(12, 16)),
       (v("wPageCols"), v("wPageSpan"), [grid(0, c) for c in range(12, 16)]))
 check("grid: beat column tiles follow the new division",
       (grid(0, 3) - T_EMP_W) & 2 == 2 and (grid(0, 6) - T_EMP_W) & 2 == 2 and (grid(0, 1) - T_EMP_W) & 2 == 0 and (grid(0, 2) - T_EMP_W) & 2 == 0,

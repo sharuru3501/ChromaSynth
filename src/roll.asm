@@ -125,6 +125,7 @@ RollRefreshSoft:
 ; the pitch window): rebuild the column summary and ruler, redraw all rows and the status line
 ; in the hidden map and swap it in.
 RollRefreshAll:
+    call RollPageFromCell   ; (the bar length or the grid may have changed)
     call BuildCols
     xor a                   ; the shown map keeps what it has; the new picture is built in the other
     ld hl, wMaskV
@@ -271,24 +272,10 @@ RollCursorMoved:
 ; Scroll the view so that the cursor is visible.
 ; -> carry set if the page or the pitch window changed.
 RollScrollFix:
+    call CursorAbs
+    call PageHas
     ld d, 0
-    ld a, [wRollSeg]
-    ld hl, wPageSeg
-    cp [hl]
-    jr nz, .newPage         ; another segment
-    ld a, [wRollCell]
-    ld b, a
-    ld a, [wPageCell]
-    ld c, a
-    ld a, b
-    cp c
-    jr c, .newPage          ; before the page
-    ld a, [wPageCols]
-    add c                   ; first cell after the page
-    ld c, a
-    ld a, b
-    cp c
-    jr c, .samePage         ; inside the page
+    jr c, .samePage         ; the cursor is on the page
 .newPage:
     ld a, 1
     ld [wPageChanged], a
@@ -318,108 +305,290 @@ RollScrollFix:
     rra                     ; carry = changed
     ret
 
-; a = page index -> wRollPage, wPageCell = page * cols, wPageTick = wPageCell * ticks per cell.
-; The last page of a segment that is not a whole number of pages is shifted back so that it ends
-; on the segment end (every page has 16 columns). Clobbers a, b, c, hl (keeps d, e).
-RollSetPage:
-    push de
-    ld [wRollPage], a
-    ld b, a
-    ld a, [wPageCols]
-    ld c, a
-    xor a
-    inc b
-.cell:
-    dec b
-    jr z, .cellDone
-    add c
-    jr .cell
-.cellDone:
-    ld d, a                 ; d = page * cols
-    ld a, [wDiv]
+; de = a tick (counted from the start of the pattern) -> carry set if the page shows it.
+; Clobbers a, de, hl.
+PageHas:
+    ld hl, wPageAbs
+    ld a, e
+    sub [hl]
     ld e, a
-    ld a, 0
-    ld hl, DivCells
-    ld c, e
-    ld b, 0
-    add hl, bc
-    ld a, [hl]              ; cells in a segment
-    ld hl, wPageCols
-    sub [hl]                ; the last cell a page may start at
-    cp d
-    jr nc, .keep
-    ld d, a                 ; clamp
-.keep:
+    inc hl
     ld a, d
-    ld [wPageCell], a
-    ld a, [wDivTicks]
-    ld c, a
-    xor a
-    inc d
-.tick:
-    dec d
-    jr z, .tickDone
-    add c
-    jr .tick
-.tickDone:
-    ld [wPageTick], a
-    pop de
+    sbc [hl]
+    jr c, .out              ; before the page
+    jr nz, .out             ; 256 ticks or more after its start
+    ld a, e
+    ld hl, wPageSpan
+    cp [hl]                 ; carry = inside
+    ret
+.out:
+    and a
     ret
 
-; Show the page that contains the cursor cell: page = wRollCell / wPageCols.
-; Clobbers a, b, c.
+; Show the page that has the cursor. Keeps de.
 RollPageFromCell:
-    ld a, [wRollSeg]
-    ld [wPageSeg], a
-    ld a, [wPageCols]
-    ld c, a
-    ld a, [wRollCell]
-    ld b, 0
-.l: cp c
-    jr c, .done
-    sub c
-    inc b
-    jr .l
-.done:
-    ld a, b
-    jp RollSetPage
+    push de
+    call CursorAbs
+    call PageFor
+    pop de
+    ret
 
 ; While playing with wFollow set: keep the playhead's tick inside the page.
 ; The user scrolling (moving the cursor) clears wFollow.
 RollFollow:
     ld a, [wSeqCur]
-    ld b, a
-    ld a, [wSeqCurSeg]
-    ld hl, wPageSeg
-    cp [hl]
-    jr nz, .move            ; the playhead is in another segment
-    ld a, [wPageTick]
-    ld c, a
-    ld a, b
-    sub c
-    jr c, .move             ; before the page
-    ld d, a
-    ld a, [wPageSpan]
     ld e, a
+    ld d, 0
+    ld a, [wSeqCurSeg]
+    and a
+    jr z, .have
+    ld hl, SEQ_TICKS
+    add hl, de
+    ld d, h
+    ld e, l
+.have:
+    push de
+    call PageHas
+    pop de
+    ret c                   ; still inside the page
+    call PageFor
+    jp RollRefreshSoft
+
+; The page that shows the tick de (the cursor or the playhead): wPageAbs / wPageSeg / wPageTick /
+; wPageCols / wPageSpan. A page is made of whole bars of the same number of grid cells when the
+; grid division divides the bar (at most 16 cells: as many whole bars as fit; more: pieces of 16
+; cells from the bar's start, the last one shifted back to end on the bar's end); otherwise it is a
+; piece of 16 cells that starts on a multiple of its span. Columns the page does not use are blank.
+PageFor:
+    push de
+    call TsUpdate
+    pop de
+    ld a, e
+    ld [wPfX], a
+    ld a, d
+    ld [wPfX + 1], a
+    ld a, [wBarTicks]
+    ld b, a                 ; b = ticks in a bar
+    ld a, [wDivTicks]
+    ld c, a                 ; c = ticks in a cell
+    ld a, b
+.mod:
+    cp c
+    jr c, .modDone
+    sub c
+    jr .mod
+.modDone:
+    and a
+    jp nz, .fixed           ; the division does not divide the bar
+    ld a, b
+    ld e, 0                 ; e = cells in a bar
+.cells:
+    and a
+    jr z, .cellsDone
+    sub c
+    inc e
+    jr .cells
+.cellsDone:
+    ld a, e
+    cp 17
+    jp nc, .long
+    ld a, 16
+    ld d, 0                 ; d = whole bars that fit in 16 cells
+.k:
+    sub e
+    jr c, .kDone
+    inc d
+    jr .k
+.kDone:
+    push de
+    ld c, d
+    ld d, 0
+    ld e, b                 ; de = ticks in a bar
+    ld hl, 0
+.step:
+    add hl, de
+    dec c
+    jr nz, .step            ; hl = bars * bar ticks
+    pop de
+    ld a, l
+    ld [wPfStep], a
+    ld a, h
+    ld [wPfStep + 1], a
+    xor a
+    ld c, d
+.cols:
+    add e
+    dec c
+    jr nz, .cols            ; a = bars * cells
+    ld [wPfCols], a
+    call PageStart
+    jp .finish
+.long:                      ; a bar of more than 16 cells
+    ld a, b
+    ld [wPfStep], a
+    xor a
+    ld [wPfStep + 1], a
+    ld a, e
+    ld [wPfN], a
+    call PageStart          ; hl = the start of the bar
+    ld a, [wPfX]
+    sub l
+    ld b, a                 ; b = ticks into the bar
+    ld a, [wDivTicks]
+    ld c, a
+    ld d, 0                 ; d = the cursor's cell in the bar
+.cell:
+    ld a, b
+    cp c
+    jr c, .cellDone
+    sub c
+    ld b, a
+    inc d
+    jr .cell
+.cellDone:
+    ld a, d
+    and $F0                 ; the piece starts at a multiple of 16 cells
+    ld d, a
+    ld a, [wPfN]
+    sub 16
+    ld e, a                 ; the last piece starts at cell n - 16
     ld a, d
     cp e
-    ret c                   ; still inside the page
-.move:
-    ld a, [wPageSpan]
+    jr c, .piece
+    ld d, e
+.piece:
+    ld a, d
+    and a
+    jr z, .pieceDone
+.add:
+    ld a, [wDivTicks]
+    add l
+    ld l, a
+    jr nc, .noCarry
+    inc h
+.noCarry:
+    dec d
+    jr nz, .add
+.pieceDone:
+    ld a, 16
+    ld [wPfCols], a
+    jr .finish
+.fixed:
+    ld a, c
+    add a
+    add a
+    add a
+    add a                   ; the span of 16 cells (at most 192)
+    ld [wPfStep], a
+    xor a
+    ld [wPfStep + 1], a
+    ld a, 16
+    ld [wPfCols], a
+    call PageStart
+    ld a, [wPfStep]
+    ld c, a
+    ld a, 128               ; de = 384 - span: the last page starts there
+    sub c
     ld e, a
-    ld a, b                 ; tick
-    ld d, 0                 ; d = page index
-.l: cp e
-    jr c, .done
+    ld a, 1
+    sbc 0
+    ld d, a
+    ld a, e
+    sub l
+    ld a, d
+    sbc h
+    jr nc, .finish          ; the page start is not after it
+    ld h, d
+    ld l, e
+.finish:                    ; hl = the start; wPfCols columns, fewer at the end of the pattern
+    ld a, l
+    ld [wPageAbs], a
+    ld a, h
+    ld [wPageAbs + 1], a
+    ld a, 128
+    sub l
+    ld c, a
+    ld a, 1
+    sbc h
+    ld b, a                 ; bc = ticks left in the pattern
+    ld a, [wPfCols]
+    ld d, a
+    ld a, [wDivTicks]
+    ld e, a
+    xor a
+.span:
+    add e
+    dec d
+    jr nz, .span            ; a = the span of the columns
+    ld d, a
+    ld a, b
+    and a
+    jr nz, .full            ; 256 or more ticks left
+    ld a, c
+    cp d
+    jr nc, .full
+    ld d, 0                 ; fewer left than the span: the columns that fit
+.fit:
+    cp e
+    jr c, .fitDone
     sub e
     inc d
-    jr .l
-.done:
-    ld a, [wSeqCurSeg]
-    ld [wPageSeg], a
+    jr .fit
+.fitDone:
     ld a, d
-    call RollSetPage
-    jp RollRefreshSoft
+    ld [wPfCols], a
+.full:
+    ld a, [wPfCols]
+    ld [wPageCols], a
+    ld d, a
+    xor a
+.span2:
+    add e
+    dec d
+    jr nz, .span2
+    ld [wPageSpan], a
+    ld a, [wPageAbs + 1]
+    and a
+    jr nz, .second
+    ld a, [wPageAbs]
+    cp SEQ_TICKS
+    jr c, .first
+    sub SEQ_TICKS
+    ld [wPageTick], a
+    ld a, 1
+    ld [wPageSeg], a
+    ret
+.first:
+    ld [wPageTick], a
+    xor a
+    ld [wPageSeg], a
+    ret
+.second:
+    ld a, [wPageAbs]
+    add 256 - SEQ_TICKS
+    ld [wPageTick], a
+    ld a, 1
+    ld [wPageSeg], a
+    ret
+
+; hl = the last multiple of wPfStep (from 0) that is not after wPfX. Clobbers a, de.
+PageStart:
+    ld hl, 0
+.next:
+    ld a, [wPfStep]
+    add l
+    ld e, a
+    ld a, [wPfStep + 1]
+    adc h
+    ld d, a                 ; de = the next start
+    ld a, [wPfX]
+    sub e
+    ld a, [wPfX + 1]
+    sbc d
+    ret c                   ; the tick is before it
+    ld h, d
+    ld l, e
+    jr .next
 
 ; a = grid row 0..15 of the window (top = row 0) -> a = its ring row. Clobbers hl.
 RingOfRow:
@@ -558,6 +727,8 @@ BuildCols:
     add b
     ld b, a
     call BCInitPhases       ; the beat phase, the tick in the bar and the bar of the first column
+    ld a, [wPageSeg]
+    ld [wColSeg], a
     xor a
     ld [wBCCol], a
 .col:
@@ -567,7 +738,15 @@ BuildCols:
     jp nc, .padFill
     ld a, c
     cp SEQ_TICKS
-    jp nc, .padFill         ; (never happens: pages tile the pattern exactly)
+    jr c, .inSeg
+    ld a, [wColSeg]         ; the page runs on into the next segment
+    cp NUM_SEGS - 1
+    jp nc, .padFill
+    inc a
+    ld [wColSeg], a
+    inc b
+    ld c, 0
+.inSeg:
     ld a, [wBCPhase]        ; beat / bar line column?
     and a
     jr nz, .noBeat
@@ -707,7 +886,7 @@ BuildCols:
 ; Keeps bc, de.
 InLoop:
     ld hl, wEdLoopSeg       ; (BuildCols computed it)
-    ld a, [wPageSeg]
+    ld a, [wColSeg]
     cp [hl]
     jr c, .inside           ; an earlier segment than the loop's last one
     jr nz, .outside         ; a later one
@@ -865,17 +1044,37 @@ RenderRow:
     ld a, [wRollNote]
     cp b
     jr nz, .noCursor
-    ld a, [wRollSeg]
-    ld hl, wPageSeg
+    push bc
+    call CursorAbs
+    ld hl, wPageAbs
+    ld a, e
+    sub [hl]
+    ld e, a
+    inc hl
+    ld a, d
+    sbc [hl]
+    pop bc
+    jr c, .noCursor         ; before the page
+    jr nz, .noCursor
+    ld a, e
+    ld hl, wPageSpan
     cp [hl]
-    jr nz, .noCursor        ; the cursor is in another segment
-    ld a, [wPageCell]
-    ld d, a
-    ld a, [wRollCell]
-    sub d                   ; column = cell - first cell of the page
-    ld hl, wPageCols
-    cp [hl]
-    jr c, .haveCur
+    jr nc, .noCursor        ; after it
+    push bc
+    ld b, 0                 ; column = ticks into the page / ticks per cell
+    ld a, [wDivTicks]
+    ld c, a
+    ld a, e
+.colDiv:
+    cp c
+    jr c, .colDone
+    sub c
+    inc b
+    jr .colDiv
+.colDone:
+    ld a, b
+    pop bc
+    jr .haveCur
 .noCursor:
     ld a, $FF
 .haveCur:
@@ -1297,6 +1496,7 @@ BuildSeq:
     ld [wShownTop], a
     call SetCopyVisible
     call ApplyScy           ; SCY for this window (the LCD is off: no tearing to worry about)
+    call RollPageFromCell   ; (the time signature may have changed since the screen was last shown)
     call BuildCols
     call ShowPageNow
     ld b, 0                 ; b = grid row of the window
@@ -1635,10 +1835,10 @@ TakeRow:
 
 ; The page that is on screen = the live page (called when a picture is shown). Clobbers a.
 ShowPageNow:
-    ld a, [wPageSeg]
-    ld [wShSeg], a
-    ld a, [wPageTick]
-    ld [wShTick], a
+    ld a, [wPageAbs]
+    ld [wShAbs], a
+    ld a, [wPageAbs + 1]
+    ld [wShAbs + 1], a
     ld a, [wPageSpan]
     ld [wShSpan], a
     ld a, [wDiv]
@@ -1803,16 +2003,27 @@ RollPlayheadCalc:
     ld a, [wSeqPlay]
     and a
     jr z, .hide
-    ld a, [wSeqCurSeg]      ; (relative to the page that is on screen: a rebuilt one is not shown yet)
-    ld hl, wShSeg
-    cp [hl]
-    jr nz, .hide            ; the playhead is in another segment
-    ld a, [wShTick]
-    ld c, a
-    ld a, [wSeqCur]
-    sub c
+    ld a, [wSeqCur]         ; (relative to the page that is on screen: a rebuilt one is not shown yet)
+    ld e, a
+    ld d, 0
+    ld a, [wSeqCurSeg]
+    and a
+    jr z, .abs
+    ld hl, SEQ_TICKS
+    add hl, de
+    ld d, h
+    ld e, l
+.abs:
+    ld hl, wShAbs
+    ld a, e
+    sub [hl]
+    ld e, a
+    inc hl
+    ld a, d
+    sbc [hl]
     jr c, .hide             ; before the page
-    ld b, a                 ; b = ticks since the page start
+    jr nz, .hide            ; far after it
+    ld b, e                 ; b = ticks since the page start
     ld a, [wShSpan]         ; ticks in a page
     cp b
     jr z, .hide
