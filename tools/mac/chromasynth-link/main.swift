@@ -53,7 +53,10 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         switch transport {
         case .usb: return "Connected: USB"
         case .ble: return "Connected: Bluetooth"
-        case .none: return !autoConnect ? "Disconnected" : bleReady ? "Looking for the Chromatic…" : "Bluetooth is off or not allowed"
+        case .none:
+            if !autoConnect { return "Disconnected" }
+            if usbSuppressed, !chromaticMode.isEmpty { return "Chromatic MIDI mode: \(chromaticMode)" }
+            return bleReady ? "Looking for the Chromatic…" : "Bluetooth is off or not allowed"
         }
     }
 
@@ -83,6 +86,12 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var consoleUp = false
     private let usbQueue = DispatchQueue(label: "chromasynth.usb")
     private var usbBusy = false
+    /// The Chromatic's MIDI mode was changed on the console itself (its menu): the USB link is not taken back until the cable is
+    /// pulled and plugged in again, or "Connect" is chosen.
+    private var usbSuppressed = false
+    private var chromaticMode = ""
+    private var lastModeReply = Date()
+    private let ioQueue = DispatchQueue(label: "chromasynth.io")     // every serial write: the main thread never waits for the port
     /// true while the USB takeover is under way: the notes that arrive meanwhile are dropped (they have no path), so that none can
     /// start a note whose note-off would be lost.
     private var switching = false
@@ -104,7 +113,15 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private func tick() {
         ticks += 1
         pollUSB()
-        if transport == .usb, ticks % 2 == 0 { send("hb") }   // the heartbeat, twice a second: without it the ESP32 leaves USB mode after 2 s
+        if transport == .usb {
+            if ticks % 2 == 0 { send("hb") }                  // the heartbeat, twice a second: without it the ESP32 leaves USB mode after 2 s
+            if ticks % 8 == 0 { send("mode") }                // every 2 s: which mode is the Chromatic in? (its menu may have changed it)
+            if Date().timeIntervalSince(lastModeReply) > 8 { // no answer for 8 s: the console is gone or stuck
+                print("USB: the ESP32 does not answer")
+                usbSuppressed = true
+                closeUSB()
+            }
+        }
         if ticks % 4 == 0 { connectKeyboards() }               // once a second
     }
 
@@ -203,6 +220,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         characteristic = nil
         if transport == .ble { transport = .none }
         print("Bluetooth: disconnected")
+        if usbSuppressed, !serialPorts().isEmpty { usbSuppressed = false }   // BLE stopped while the cable is in: the menu was used to pick USB (or OFF)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.scan() }
     }
 
@@ -210,6 +228,10 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private func pollUSB() {
         if dry || !autoConnect { return }
         let ports = serialPorts()
+        if usbSuppressed {
+            if ports.isEmpty { usbSuppressed = false; chromaticMode = "" }   // unplugged: the next plug-in is a new start
+            return
+        }
         if serialFD >= 0 {
             if !ports.contains(serialPath) { closeUSB() }
         } else if let p = ports.first, !usbBusy {
@@ -236,22 +258,31 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         tcsetattr(fd, TCSANOW, &t)
         var bits: Int32 = TIOCM_DTR | TIOCM_RTS
         _ = ioctl(fd, TIOCMBIC, &bits)            // DTR and RTS off: they hold the ESP32 in reset
-        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
-        serialFD = fd
+        serialFD = fd                              // (the port stays non-blocking: a write never hangs a thread)
         serialPath = path
         usbConfirmed = false
         consoleUp = false
         print("USB: opened \(path); the ESP32 resets once")
+        lastModeReply = Date()
         DispatchQueue.global().async { [weak self] in
             var buf = [UInt8](repeating: 0, count: 512)
-            var text = ""
+            var tail = ""
+            let re = try! NSRegularExpression(pattern: "applied (USB|BLE|OFF)")
             while let me = self, me.serialFD == fd {
                 let n = read(fd, &buf, buf.count)
                 if n > 0 {
-                    text += String(decoding: buf[0..<n], as: UTF8.self)
-                    if text.count > 4000 { text = String(text.suffix(2000)) }
-                    if text.contains("applied USB") { me.usbConfirmed = true }
-                    if text.contains("mcu>") { me.consoleUp = true }
+                    let window = tail + String(decoding: buf[0..<n], as: UTF8.self)
+                    if window.contains("mcu>") { me.consoleUp = true }
+                    for m in re.matches(in: window, range: NSRange(window.startIndex..., in: window)) {
+                        let mode = (window as NSString).substring(with: m.range(at: 1))
+                        DispatchQueue.main.async { me.lastModeReply = Date() }
+                        if mode == "USB" { me.usbConfirmed = true }
+                        else if me.usbConfirmed {
+                            me.usbConfirmed = false
+                            DispatchQueue.main.async { me.mcuLeftUSB(fd, mode: mode) }
+                        }
+                    }
+                    tail = String(window.suffix(10))     // (shorter than "applied USB": a match is never counted twice)
                 } else { usleep(20000) }
             }
         }
@@ -283,16 +314,40 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         switching = false
         let fd = serialFD
         serialFD = -1
-        if fd >= 0 { close(fd) }
-        print("USB: unplugged")
+        if fd >= 0 { DispatchQueue.global().async { close(fd) } }
+        print("USB: closed")
         if transport == .usb { transport = .none }
         scan()
     }
 
+    /// The console says that the Chromatic is no longer in USB mode (its menu was used): give the port back, look for it over BLE.
+    private func mcuLeftUSB(_ fd: Int32, mode: String) {
+        guard serialFD == fd else { return }
+        print("USB: the Chromatic is now in \(mode) mode")
+        usbSuppressed = true
+        chromaticMode = mode
+        closeUSB()
+    }
+
     private func send(_ line: String) {
-        guard serialFD >= 0 else { return }
+        let fd = serialFD
+        guard fd >= 0 else { return }
         let data = Array((line + "\r\n").utf8)
-        _ = data.withUnsafeBytes { write(serialFD, $0.baseAddress, data.count) }
+        ioQueue.async { Link.writeAll(fd, data) }
+    }
+
+    private static func writeAll(_ fd: Int32, _ data: [UInt8]) {
+        var off = 0
+        var waits = 0
+        while off < data.count, waits < 20 {
+            let n = data[off...].withUnsafeBytes { write(fd, $0.baseAddress, data.count - off) }
+            if n > 0 { off += n }
+            else if n < 0, errno == EAGAIN {
+                var p = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                _ = poll(&p, 1, 50)
+                waits += 1
+            } else { return }
+        }
     }
 
     func setListenKeyboards(_ on: Bool) {
@@ -310,7 +365,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         autoConnect = false
         central?.stopScan()
         if let p = peripheral { central.cancelPeripheralConnection(p) }
-        if serialFD >= 0 { send("mode saved"); usleep(200_000); closeUSB() }
+        if serialFD >= 0 { send("mode saved"); ioQueue.sync {}; usleep(200_000); closeUSB() }
         transport = .none
         onChange?()
     }
@@ -318,13 +373,14 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     /// Menu: connect again (and keep connecting by itself).
     func connect() {
         autoConnect = true
+        usbSuppressed = false
         scan()
         pollUSB()
         onChange?()
     }
 
     func shutdown() {
-        if serialFD >= 0 { send("mode saved"); usleep(300_000) }   // back to the mode that is saved on the Chromatic
+        if serialFD >= 0 { send("mode saved"); ioQueue.sync {}; usleep(300_000) }   // back to the mode that is saved on the Chromatic
     }
 }
 
