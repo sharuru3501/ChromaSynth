@@ -1,6 +1,6 @@
 ; CH3 wave editor. The patch's WAVE value 0-3 is a preset (src/waves.inc), 4-7 is one of the four custom
 ; waves W1-W4 (wWaves, 16 bytes each in wave RAM format: two 4-bit samples a byte, the high nibble first).
-; The custom waves are saved with the song (src/sram.asm).
+; The custom waves are saved with the song (src/sram.asm). The editor also shows the four presets (WAVE 0-3, read-only).
 ;
 ; Screen (START+A on the edit screen with CH3 selected and WAVE = 4-7 opens it, START+B goes back):
 ;   rows 3-4  the 16 samples of the page (the cursor's half of the 32) as bars, 1-16 pixels high
@@ -32,11 +32,11 @@ WaveDefaults:
 ; START+A on the edit screen (CH3): open the editor on the custom wave that the patch uses.
 WaveOpen:
     ld a, [wPatch + 2 * PATCH_SIZE + P_MAIN]
-    sub WAVE_CUSTOM
-    ret c                   ; a preset: nothing to edit
-    cp NUM_CUSTOM
-    ret nc
-    ld [wWaveSel], a
+    cp 8
+    jr c, .ok
+    ld a, 7
+.ok:
+    ld [wWaveSel], a        ; 0-3 a preset (shown only), 4-7 a custom wave
     ld a, SCREEN_WAVE + 1   ; (a request is the screen + 1)
     ld [wScreenReq], a
     ld a, 1
@@ -76,6 +76,9 @@ BuildWave:
     call DrawString
     ld hl, _SCRN0 + 15 * 32
     ld de, sWaveHelp6
+    call DrawString
+    ld hl, _SCRN0 + 16 * 32
+    ld de, sWaveHelp7
     call DrawString
     call WaveRender
     ld hl, wWaveBuf         ; the LCD is off: all the rows at once
@@ -153,18 +156,23 @@ UpdateWave:
 WaveRowAddr:
     dw ROW_WAVE_TOP, ROW_WAVE_BOT, ROW_WAVE_HEX, ROW_WAVE_INFO
 
-; a = sample index 0-31 -> hl = the byte of the selected custom wave that holds it, c = the index.
-; Clobbers a, b, de.
+; a = sample index 0-31 -> hl = the byte of the shown wave (a preset in ROM, or a custom wave) that holds it,
+; c = the index. Clobbers a, b, de.
 WaveSampleAddr:
     ld c, a
     srl a
     ld b, a
     ld a, [wWaveSel]
+    ld hl, Waves
+    cp WAVE_CUSTOM
+    jr c, .have
+    sub WAVE_CUSTOM
+    ld hl, wWaves
+.have:
     swap a
     add b
     ld e, a
     ld d, 0
-    ld hl, wWaves
     add hl, de
     ret
 
@@ -242,9 +250,15 @@ WaveRender:
     call WaveGet
     ld [wWaveIdx], a        ; (the level)
     ld hl, wWaveBuf + 60 + WAVE_COL0
+    ld a, [wWaveSel]
+    cp WAVE_CUSTOM
+    ld a, 'P' - 32          ; P1-P4 = the presets (WAVE 0-3), W1-W4 = the custom waves
+    jr c, .letter
     ld a, 'W' - 32
+.letter:
     ld [hl+], a
     ld a, [wWaveSel]
+    and 3
     add '1' - 32
     ld [hl+], a
     inc hl
@@ -264,6 +278,17 @@ WaveRender:
 
 ; A pad frame on the wave editor (d = newly pressed, wJoy = held).
 WaveInput:
+    ld a, [wJoyPrev]        ; A released (also while START is held): the note stops
+    bit PADB_A, a
+    jr z, .held
+    ld a, [wJoy]
+    bit PADB_A, a
+    jr nz, .held
+    push de
+    ld c, 2
+    call NoteOff
+    pop de
+.held:
     ld a, [wJoy]
     ld e, a
     bit PADB_START, e
@@ -272,6 +297,9 @@ WaveInput:
     jp nz, WaveClose
     bit PADB_A, d
     ret z                   ; START+A: the next preset goes into this wave
+    ld a, [wWaveSel]
+    cp WAVE_CUSTOM
+    ret c                   ; (a preset cannot be changed)
     ld a, [wWavePre]
     inc a
     and 3
@@ -283,6 +311,7 @@ WaveInput:
     add hl, de
     push hl
     ld a, [wWaveSel]
+    sub WAVE_CUSTOM
     swap a
     ld e, a
     ld d, 0
@@ -305,16 +334,6 @@ WaveInput:
     call NoteOn
     pop de
 .noPress:
-    ld a, [wJoyPrev]        ; A released: the note stops
-    bit PADB_A, a
-    jr z, .pad
-    ld a, [wJoy]
-    bit PADB_A, a
-    jr nz, .pad
-    push de
-    ld c, 2
-    call NoteOff
-    pop de
 .pad:
     ld a, [wWaveCur]
     ld b, a
@@ -346,6 +365,9 @@ WaveInput:
     jr z, .noDown
     ld c, $FF
 .noDown:
+    ld a, [wWaveSel]
+    cp WAVE_CUSTOM
+    jr c, .done             ; a preset is shown only
     ld a, c
     and a
     jr z, .done
@@ -412,5 +434,6 @@ sWaveHelp1: db "LEFT/RIGHT: SAMPLE", 0
 sWaveHelp2: db "UP/DOWN: LEVEL +-1", 0
 sWaveHelp3: db "B+UP/DOWN: +-4", 0
 sWaveHelp4: db "A: HEAR (HOLD)", 0
-sWaveHelp5: db "START+A: PRESET", 0
+sWaveHelp5: db "START+A: LOAD PRESET", 0
+sWaveHelp7: db "P1-4 = PRESETS (VIEW)", 0
 sWaveHelp6: db "START+B: BACK", 0

@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "select"); tap(pb, "select")       # CH3
     check("on the edit screen, CH3", v("wScreen") == 1 and v("wSelCh") == 2, (v("wScreen"), v("wSelCh")))
     combo(pb, "start", "a"); pb.tick(30)
-    check("START+A opens the wave editor on W3", v("wScreen") == 6 and v("wWaveSel") == 2, (v("wScreen"), v("wWaveSel")))
+    check("START+A opens the wave editor on W3", v("wScreen") == 6 and v("wWaveSel") == 6, (v("wScreen"), v("wWaveSel")))
     before = wv(2)
     tap(pb, "up")                              # level of sample 0 +1
     lvl0 = wv(2)[0] >> 4
@@ -100,11 +100,28 @@ with tempfile.TemporaryDirectory() as tmp:
     # back
     combo(pb, "start", "b"); pb.tick(30)
     check("START+B goes back to the edit screen on CH3", v("wScreen") == 1 and v("wSelCh") == 2, (v("wScreen"), v("wSelCh")))
-    # a preset WAVE does not open the editor
+    # a preset WAVE opens the editor read-only
     mem[PATCH_CH3] = 1
-    combo(pb, "start", "a"); pb.tick(20)
-    check("START+A with a preset wave does nothing", v("wScreen") == 1, v("wScreen"))
+    combo(pb, "start", "a"); pb.tick(30)
+    check("START+A with a preset wave opens the editor on the preset (view only)", v("wScreen") == 6 and v("wWaveSel") == 1, (v("wScreen"), v("wWaveSel")))
+    top = [pb.tilemap_background[2 + i, 3] for i in range(16)]
+    check("the preset SAW is drawn (bar tiles)", any(76 <= t <= 83 for t in top + [pb.tilemap_background[2 + i, 4] for i in range(16)]))
+    for _ in range(3):
+        tap(pb, "up", 2)
+    check("the preset is not changed by UP", all(mem[sym["Waves"] + 16 + i] == presets[1][i] for i in range(16)))
+    check("START+A does not load a preset over a preset", (combo(pb, "start", "a") or True) and mem[sym["Waves"] + 16] == presets[1][0] and wv(2) == presets[1])
+    combo(pb, "start", "b"); pb.tick(30)
+    # A held, START pressed, A released while START is held: the note must stop
+    mem[PATCH_CH3] = 5
+    combo(pb, "start", "a"); pb.tick(30)
+    pb.button_press("a"); pb.tick(10)
+    pb.button_press("start"); pb.tick(4)
+    pb.button_release("a"); pb.tick(10)
+    check("A released while START is held still stops the note", mem[sym["wCurNote"] + 2] == 0 and mem[0xFF1A] & 0x80 == 0, (mem[sym["wCurNote"] + 2], hex(mem[0xFF1A])))
+    pb.button_release("start"); pb.tick(10)
+    combo(pb, "start", "b"); pb.tick(30)
     # presets still play from the presets
+    mem[PATCH_CH3] = 1
     del srcs[:]
     pb.button_press("a"); pb.tick(20)
     pb.button_release("a"); pb.tick(10)
