@@ -93,8 +93,13 @@ SeqTick:
     call SeqStep
     jr .external
 .internal:
-    ld hl, wSeqAcc + 1
-    inc [hl]                ; acc += 256
+    ld a, [wFrames]         ; the clock counts FRAMES, not main-loop passes: a pass that took two frames
+    ld hl, wSeqAcc + 1      ; (heavy drawing) must not make the music slower
+    add [hl]
+    ld [hl], a              ; acc += 256 * frames
+    ld a, 3                 ; at most 3 ticks in one pass (a catch-up plays them back to back)
+    ld [wSeqCatch], a
+.tickLoop:
     call GetTickLen         ; de = tick length
     ld a, [wSeqAcc]
     ld l, a
@@ -111,7 +116,14 @@ SeqTick:
     ld [wSeqAcc], a
     ld a, h
     ld [wSeqAcc + 1], a
-    ; fall through
+    call SeqStep
+    ld a, [wSeqPlay]
+    and a
+    ret z
+    ld hl, wSeqCatch
+    dec [hl]
+    jr nz, .tickLoop
+    ret
 
 ; Play the current tick on all channels, then advance.
 SeqStep:

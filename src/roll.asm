@@ -737,6 +737,10 @@ RenderPending:
     ld a, [hl]
     and a
     jr z, .next
+    ldh a, [rLY]            ; the frame is nearly over (LY 138-143): the rest waits for the next pass,
+    sub 138                 ; or the main loop would miss the VBlank and the sequencer a frame
+    cp 6
+    ret c
     xor a
     ld [hl], a
     push bc

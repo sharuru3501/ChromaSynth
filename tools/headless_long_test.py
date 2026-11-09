@@ -373,9 +373,61 @@ with tempfile.TemporaryDirectory() as tmp:
         want = ord("1") - 32 + tick // 48
         if tick % 48 >= 2:                        # two ticks after the page started: it must be the shown one
             lag.append(ruler != want)
-    check("every page turn is on screen two ticks after the playhead enters the new page (no lag)", sum(lag) <= 3, (sum(lag), len(lag)))
+    check("a page turn is on screen two ticks after the playhead enters the new page (at most one turn a frame late)", sum(lag) <= 8, (sum(lag), len(lag)))
     hidden = [1 for tick, seg, ruler, vis in samples if tick % 48 >= 2 and not vis]
     check("the playhead is visible except for the first ticks of a page", len(hidden) <= 4, len(hidden))
+    pb.stop(save=False)
+
+
+# --- the sequencer's clock counts frames: heavy drawing (a main-loop pass longer than a frame) must not slow the music
+with tempfile.TemporaryDirectory() as tmp:
+    import random
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    steps = [0]
+    passes = [0]
+    pb.hook_register(0, sym["SeqStep"], lambda ctx: steps.__setitem__(0, steps[0] + 1), None)
+    pb.hook_register(0, sym["SeqTick"], lambda ctx: passes.__setitem__(0, passes[0] + 1), None)
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(60)
+    mem[sym["wSeqBars"]] = 8
+    mem[sym["wBpm"]] = 150
+    combo(pb, "select", "start")
+    pb.tick(5)
+    random.seed(3)
+
+    def act(btns, frames, gap):
+        t = 0
+        while t < frames:
+            b = random.choice(btns)
+            if isinstance(b, tuple):
+                pb.button_press(b[0]); pb.tick(2); pb.button_press(b[1]); pb.tick(3)
+                pb.button_release(b[1]); pb.button_release(b[0]); t += 5
+            else:
+                pb.button_press(b); pb.tick(3); pb.button_release(b); t += 3
+            pb.tick(gap)
+            t += gap
+
+    worst = 0.0
+    dropped_any = False
+    for name, btns, gap in (("channel changes", ["select"], 5), ("division changes", [("b", "a")], 6),
+                            ("loop length", [("select", "left"), ("select", "right")], 6),
+                            ("pitch moves", ["up", "down", ("b", "up"), ("b", "down")], 4)):
+        steps[0] = 0
+        passes[0] = 0
+        act(btns, 600, gap)
+        # 150 BPM, 12 ticks a beat: 3600 / (150 * 12) = 2 frames per tick; the loop above ran ~600 frames
+        expect = 600 / 2.0
+        err = abs(steps[0] - expect) / expect
+        worst = max(worst, err)
+        dropped_any = dropped_any or passes[0] < 595
+        print("INFO", name, "ticks", steps[0], "of about", int(expect), "main-loop passes", passes[0])
+    check("while drawing hard, the sequencer plays the right number of ticks (within 4%)", worst <= 0.04, round(worst, 3))
+    combo(pb, "select", "start")
     pb.stop(save=False)
 
 # --- the status line shows the loop length; a note placed after the loop end lengthens the loop

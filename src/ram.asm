@@ -80,7 +80,9 @@ wRingTail:      db          ; written by main loop
 wTxHead:        db          ; next free slot in wTx (written by the main loop)
 wTxTail:        db          ; next byte the ISR hands to the bridge
 wExtTicks:      db          ; clock ticks received from the DAW and not played yet (0..4)
-wVBlank:        db
+wVBlank:        db          ; frames (VBlank interrupts) since the main loop last looked (capped at 255)
+wFrames:        db          ; the same, taken by the main loop for this pass: 1..4 (more than 1 = frames were lost)
+wSeqCatch:      db          ; SeqTick: ticks it may still play this pass
 wMidiStatus:    db          ; running status (0 = none)
 wMidiCount:     db          ; data bytes received for current message
 wMidiData1:     db
