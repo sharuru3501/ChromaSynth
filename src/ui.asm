@@ -562,7 +562,30 @@ DrawEditRow:
     call PatchRowHL
     ld a, [hl]
     pop hl
+    ld c, a
+    ld a, [wSelCh]
+    cp NUM_CH
+    ld a, c
+    jp nz, DrawNum3
+    ld c, a                 ; the MIDI page:
+    ld a, b
+    cp PM_TSD
+    ld a, c
+    jp nz, DrawNum3
+    cp 3                    ; UNIT shows the denominator (4, 8, 16), not its index
+    jr c, .unit
+    xor a
+.unit:
+    push hl
+    ld e, a
+    ld d, 0
+    ld hl, TsDenShown
+    add hl, de
+    ld a, [hl]
+    pop hl
     jp DrawNum3
+
+TsDenShown: db 4, 8, 16
 
 ; a = 0..255, hl = dest -> three tiles, right-aligned, no leading zeros. Clobbers a, b, c.
 DrawNum3:
@@ -1024,8 +1047,8 @@ PT_Midi:
     PARAM 2, "SYNC"
     PARAM 7, "VOLL"
     PARAM 7, "VOLR"
-    PARAM 0, "    "
-    PARAM 0, "    "
+    PARAM 16, "BEAT"
+    PARAM 2, "UNIT"
     PARAM 0, "    "
     PARAM 0, "    "
     PARAM 0, "    "

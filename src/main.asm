@@ -34,6 +34,17 @@ EntryPoint:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call MemCopy
+    ld a, 4                 ; every pattern: 4/4, 2 bars
+    ld hl, wPatTsn
+    REPT NUM_PATS
+        ld [hl+], a
+    ENDR
+    ld a, 2
+    ld hl, wPatBars
+    REPT NUM_PATS
+        ld [hl+], a
+    ENDR
+    call TsUpdate           ; 4/4 until a song says otherwise
     ld a, 1                 ; every pattern bank starts empty ...
 .clearBank:
     push af

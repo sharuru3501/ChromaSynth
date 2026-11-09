@@ -125,6 +125,23 @@ wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
+wPatTsn:        ds NUM_PATS ; per pattern: the time signature's numerator ...
+wPatTsd:        ds NUM_PATS ; ... the denominator index ...
+wPatBars:       ds NUM_PATS ; ... and the loop length in bars (the edited pattern's values live in the
+                            ; MIDI block / wSeqBars until TsStore copies them here)
+wPBarTicks:     db          ; ticks in a bar of the PLAYED pattern
+wEdLoopSeg:     db          ; where the loop of the EDITED pattern ends (the ruler): segment ...
+wEdLoopTail:    db          ; ... and ticks in it
+wBarIdx:        db          ; index of the bar that is playing (0-based; $FF just before the first)
+wBarPos:        db          ; ticks since the bar began (0 = a bar begins with the next tick played)
+wQueuedBank:    db          ; WRAM bank of the pattern that takes over at the next bar line (0 = none)
+wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)
+wBeatTicks:     db          ; ticks in the beat unit: 12 (/4), 6 (/8), 3 (/16)
+wMaxBars:       db          ; the longest loop in bars: 384 ticks / wBarTicks, at most MAX_BARS
+wLoopSeg:       db          ; where the loop ends: the last segment ...
+wLoopTail:      db          ; ... and the ticks played in it (ComputeLoopEnd)
+wBCInBar:       db          ; BuildCols: ticks into the bar at the column that is being built
+wBCBar:         db          ; BuildCols: bar index (0-based) of that column
 wSeqBars:       db          ; loop length in bars (1..MAX_BARS)
 wSeqSeg:        db          ; segment (4 bars) of the next tick to play
 wSeqCurSeg:     db          ; segment of the tick that was played last (playhead)
@@ -145,8 +162,15 @@ wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)
 wDivTicks:      db          ; ticks per grid cell for that division
-wPageCols:      db          ; grid columns per page for that division (12 or 16)
-wPageSpan:      db          ; ticks per page (a whole number of beats: the bars never move)
+wPageCols:      db          ; grid columns the page uses (1..16; the rest are blank)
+wPageSpan:      db          ; ticks the page shows (wPageCols * wDivTicks)
+wPageAbs:       dw          ; the page's first tick, counted from the start of the pattern
+wShAbs:         dw          ; the same for the page that is on screen
+wColSeg:        db          ; BuildCols: the segment of the column being built
+wPfX:           dw          ; PageFor: the tick the page must show
+wPfStep:        dw          ; PageFor: ticks from one page start to the next
+wPfCols:        db          ; PageFor: columns of the page
+wPfN:           db          ; PageFor: cells in a bar
 wRollCell:      db          ; piano-roll cursor: grid cell index (tick / wDivTicks)
 wRollTick:      db          ; piano-roll cursor: tick (= cell * wDivTicks)
 wRollNote:      db          ; piano-roll cursor: MIDI note
@@ -154,6 +178,7 @@ wRollTop:       db          ; pitch shown on the top grid row
 wRollPage:      db          ; visible page index
 wPageTick:      db          ; tick of the first visible column (= page * wPageSpan)
 wPageCell:      db          ; cell index of the first visible column (= page * wPageCols)
+wNtStart:       dw          ; SeqLength: the edited note's start (absolute tick)
 wFollow:        db          ; 1 = the view follows the playhead
 wPlayX:         db          ; wanted playhead X in OAM coordinates ($FF = hidden)
 wPlayShown:     db          ; playhead X currently in OAM ($FF = hidden)

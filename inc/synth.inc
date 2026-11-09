@@ -42,6 +42,8 @@ DEF PM_MODW EQU 6           ; 1 = CC1 (mod wheel) raises the vibrato depth
 DEF PM_SYNC EQU 7           ; sync mode, see SYNC_*
 DEF PM_VOLL EQU 8           ; master volume left 0-7  -> NR50 bits 6-4
 DEF PM_VOLR EQU 9           ; master volume right 0-7 -> NR50 bits 2-0
+DEF PM_TSN  EQU 10          ; time signature: numerator 1-16 (0 = 4: songs saved before it existed)
+DEF PM_TSD  EQU 11          ; time signature: denominator index 0 = 4, 1 = 8, 2 = 16
 DEF SYNC_OFF EQU 0          ; no clock, nothing sent
 DEF SYNC_OUT EQU 1          ; this unit is the master: sends clock/start/stop and the sequencer's notes
 DEF SYNC_IN  EQU 2          ; this unit follows the DAW: clock/start/stop come from the link
@@ -92,8 +94,9 @@ DEF TICKS_PER_BEAT EQU 12
 DEF TICKS_PER_BAR  EQU 48
 DEF SEQ_TICKS  EQU 192      ; ticks per segment (4 bars of 4/4); a position is (segment, tick)
 DEF SEQ_STRIDE EQU 512      ; pattern bytes per channel: two 256-byte pages, one per segment of SEQ_TICKS ticks
+DEF TOTAL_TICKS EQU 384     ; ticks in a whole pattern (NUM_SEGS x SEQ_TICKS)
 DEF NUM_SEGS   EQU 2        ; segments per pattern: a pattern is up to 8 bars (2 x 4 bars)
-DEF MAX_BARS   EQU 8
+DEF MAX_BARS   EQU 8           ; loop length in bars is at most this (and at most 384 ticks: wMaxBars)
 DEF SEQ_PAGE   EQU 16       ; grid columns per piano-roll page
 DEF ROLL_ROWS  EQU 16       ; pitch rows visible
 DEF RING_ROWS  EQU 32       ; rows of a BG map: pitch p always lives in map row (1 - p) mod 32; SCY picks the visible 18

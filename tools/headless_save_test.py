@@ -2,7 +2,7 @@
 """SRAM save/load test using PyBoy (pip install pyboy pillow). Run `make` first.
 
 Uses a temp copy of the ROM so the emulator's .ram file never touches build/.
-Covers: save, reboot restore, SELECT+B load, no-save case, corrupted checksum,
+Covers: save, reboot restore, SELECT+A load, no-save case, corrupted checksum,
 the 8 slots (SELECT+LEFT/RIGHT on the play screen), overwrite confirmation, foreign data in a slot.
 Slots live in the last 8 KB bank of the 128 KB SRAM (bank 15, 1 KB each); nothing else may be written.
 """
@@ -75,17 +75,17 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     check("fresh: defaults loaded (pattern C4 / BPM 120)", mem[1, P] == 60 and mem[sym["wBpm"]] == 120)
-    combo(pb, "select", "b")
-    check("fresh: SELECT+B -> NO SAVE DATA", mem[sym["wMsg"]] == 3, mem[sym["wMsg"]])
+    combo(pb, "select", "a")
+    check("fresh: SELECT+A -> NO SAVE DATA", mem[sym["wMsg"]] == 3, mem[sym["wMsg"]])
     check("fresh: state untouched by failed load", mem[1, P] == 60)
 
     # --- edit and save
     mem[1, P + 513] = 77
     mem[patch + 1] = 9
     mem[sym["wBpm"]] = 133
-    mem[sym["wSeqBars"]] = 144
-    combo(pb, "select", "a")
-    check("SELECT+A -> SAVED", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    mem[sym["wSeqBars"]] = 6
+    combo(pb, "select", "b")
+    check("SELECT+B -> SAVED", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     pb.tick(100)
     check("message expires", mem[sym["wMsg"]] == 0 and mem[sym["wMsgTimer"]] == 0)
     check("SELECT combo did not change channel/screen", mem[sym["wSelCh"]] == 0 and mem[sym["wScreen"]] == 0)
@@ -102,15 +102,15 @@ with tempfile.TemporaryDirectory() as tmp:
     check("reboot: pattern restored", mem[1, P + 513] == 77, mem[1, P + 513])
     check("reboot: patch restored", mem[patch + 1] == 9, mem[patch + 1])
     check("reboot: BPM restored", mem[sym["wBpm"]] == 133, mem[sym["wBpm"]])
-    check("reboot: loop length restored", mem[sym["wSeqBars"]] == 144, mem[sym["wSeqBars"]])
+    check("reboot: loop length restored", mem[sym["wSeqBars"]] == 6, mem[sym["wSeqBars"]])
     check("reboot: untouched cells keep defaults", mem[1, P] == 60 and mem[1, P + 1024] == 48)
 
-    # --- SELECT+B reloads the saved copy over unsaved edits
+    # --- SELECT+A reloads the saved copy over unsaved edits
     mem[1, P + 513] = 5
     mem[sym["wBpm"]] = 90
-    combo(pb, "select", "b")
-    check("SELECT+B -> LOADED", mem[sym["wMsg"]] == 2, mem[sym["wMsg"]])
-    check("SELECT+B restored the saved state", mem[1, P + 513] == 77 and mem[sym["wBpm"]] == 133)
+    combo(pb, "select", "a")
+    check("SELECT+A -> LOADED", mem[sym["wMsg"]] == 2, mem[sym["wMsg"]])
+    check("SELECT+A restored the saved state", mem[1, P + 513] == 77 and mem[sym["wBpm"]] == 133)
     pb.stop(save=False)
 
     # --- corrupted data: checksum must reject it
@@ -121,8 +121,8 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     check("corrupt save ignored at boot (defaults kept)", mem[1, P + 513] == 0 and mem[sym["wBpm"]] == 120,
           (mem[1, P + 513], mem[sym["wBpm"]]))
-    combo(pb, "select", "b")
-    check("corrupt save: SELECT+B -> NO SAVE DATA", mem[sym["wMsg"]] == 3)
+    combo(pb, "select", "a")
+    check("corrupt save: SELECT+A -> NO SAVE DATA", mem[sym["wMsg"]] == 3)
     pb.stop(save=False)
 
     # --- wrong version must be ignored too
@@ -152,39 +152,39 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(7):
         combo(pb, "select", "left")
     combo(pb, "select", "right")             # slot 2 (empty)
-    combo(pb, "select", "b")
-    check("empty slot: SELECT+B -> NO SAVE DATA", mem[sym["wMsg"]] == 3 and mem[1, P + 513] == 77, mem[sym["wMsg"]])
+    combo(pb, "select", "a")
+    check("empty slot: SELECT+A -> NO SAVE DATA", mem[sym["wMsg"]] == 3 and mem[1, P + 513] == 77, mem[sym["wMsg"]])
     mem[1, P + 513] = 11
     mem[sym["wBpm"]] = 100
-    combo(pb, "select", "a")
-    check("empty slot: SELECT+A saves at once", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    combo(pb, "select", "b")
+    check("empty slot: SELECT+B saves at once", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     check("used bitmap = slots 1 and 2", mem[sym["wSlotUsed"]] == 3, mem[sym["wSlotUsed"]])
     pb.tick(100)
     # a used slot asks first
     mem[1, P + 513] = 12
-    combo(pb, "select", "a")
-    check("used slot: first SELECT+A only asks", mem[sym["wMsg"]] == 6 and mem[sym["wConfirm"]] == 2, (mem[sym["wMsg"]], mem[sym["wConfirm"]]))
+    combo(pb, "select", "b")
+    check("used slot: first SELECT+B only asks", mem[sym["wMsg"]] == 6 and mem[sym["wConfirm"]] == 2, (mem[sym["wMsg"]], mem[sym["wConfirm"]]))
     pb.stop(save=True)
     r2 = ram.read_bytes()
     check("... and nothing was overwritten yet", r2[slot_off(1) + PAT0 + 2 * 192 + 1] == 11, r2[slot_off(1) + PAT0 + 2 * 192 + 1])
     pb = boot(rom)
     mem = pb.memory
     combo(pb, "select", "right")
-    combo(pb, "select", "b")
+    combo(pb, "select", "a")
     check("slot 2 restored after reboot", mem[sym["wMsg"]] == 2 and mem[1, P + 513] == 11 and mem[sym["wBpm"]] == 100,
           (mem[sym["wMsg"]], mem[1, P + 513], mem[sym["wBpm"]]))
     mem[1, P + 513] = 12
-    combo(pb, "select", "a")
+    combo(pb, "select", "b")
     pb.tick(100)                              # the question expires
     check("the question expires", mem[sym["wConfirm"]] == 0)
-    combo(pb, "select", "a")
-    combo(pb, "select", "a")
-    check("used slot: second SELECT+A overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
-    mem[1, P + 513] = 0
     combo(pb, "select", "b")
+    combo(pb, "select", "b")
+    check("used slot: second SELECT+B overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    mem[1, P + 513] = 0
+    combo(pb, "select", "a")
     check("slot 2 holds the new data", mem[1, P + 513] == 12, mem[1, P + 513])
     combo(pb, "select", "left")
-    combo(pb, "select", "b")
+    combo(pb, "select", "a")
     check("slot 1 still holds the first save", mem[1, P + 513] == 77 and mem[sym["wBpm"]] == 133, (mem[1, P + 513], mem[sym["wBpm"]]))
     pb.stop(save=True)
 
@@ -198,8 +198,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("foreign slot is not counted as a save", mem[sym["wSlotUsed"]] == 3, mem[sym["wSlotUsed"]])
     combo(pb, "select", "right")
     combo(pb, "select", "right")
-    combo(pb, "select", "a")
-    check("foreign slot: SELECT+A -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
+    combo(pb, "select", "b")
+    check("foreign slot: SELECT+B -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
     pb.stop(save=True)
     check("foreign slot: the bytes are unchanged", ram.read_bytes()[slot_off(2):slot_off(2) + SLOT] == foreign)
     # one differing byte at the very end of an otherwise empty slot is foreign too
@@ -211,8 +211,8 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     for _ in range(3):
         combo(pb, "select", "right")
-    combo(pb, "select", "a")
-    check("almost-empty slot: SELECT+A -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
+    combo(pb, "select", "b")
+    check("almost-empty slot: SELECT+B -> SLOT IN USE", mem[sym["wMsg"]] == 5, mem[sym["wMsg"]])
     pb.stop(save=False)
 
 
@@ -327,8 +327,8 @@ with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "norams.gb"
     rom.write_bytes(bytes(data))
     pb = boot(rom)
-    combo(pb, "select", "a")
-    check("no-SRAM cart: SELECT+A -> SAVE FAILED", pb.memory[sym["wMsg"]] == 4, pb.memory[sym["wMsg"]])
+    combo(pb, "select", "b")
+    check("no-SRAM cart: SELECT+B -> SAVE FAILED", pb.memory[sym["wMsg"]] == 4, pb.memory[sym["wMsg"]])
     pb.tick(20)
     pb.stop(save=False)
 
