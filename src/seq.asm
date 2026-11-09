@@ -637,6 +637,8 @@ SeqPlace:
 ; include it (up to MAX_BARS), so what you enter is what plays. Keeps b. Clobbers a, c, hl.
 LoopCoverNote:
     ld a, [wRollTick]
+; a = a tick of the cursor's segment: the loop grows to include its bar (see above).
+LoopCoverTick:
     ld c, 0                 ; c = bar inside the segment (tick / TICKS_PER_BAR)
 .bar:
     cp TICKS_PER_BAR
@@ -745,10 +747,18 @@ SeqLength:
     ld a, [wDivTicks]
     add e                   ; a = new end
     cp b
-    jp nc, RollRefresh      ; reaches the next event / the end: the note runs into it
+    jr nc, .runsOn          ; reaches the next event / the end: the note runs into it
     ld b, a
     call CellHL
     ld [hl], CELL_OFF
+    ld a, b
+    dec a                   ; the last tick of the note: its bar must be inside the loop
+    call LoopCoverTick
+    jp RollRefresh
+.runsOn:
+    ld a, b
+    dec a
+    call LoopCoverTick
     jp RollRefresh
 .shorten:
     ld a, [wDivTicks]

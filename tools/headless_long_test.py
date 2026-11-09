@@ -235,6 +235,22 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "a")
     pb.tick(10)
     check("a note inside the loop leaves the length alone", v("wSeqBars") == 6, v("wSeqBars"))
+    # lengthening a note (A held + RIGHT) over the loop end lengthens the loop too
+    mem[sym["wSeqBars"]] = 1
+    mem[sym["wRollSeg"]] = 0
+    mem[sym["wRollCell"]] = 15                # the last cell of bar 1 (tick 45)
+    mem[sym["wRollTick"]] = 45
+    mem[sym["wRollNote"]] = 67
+    pb.button_press("a")
+    pb.tick(4)
+    check("the note was placed in bar 1 (the loop is still 1 bar)", v("wSeqBars") == 1, v("wSeqBars"))
+    pb.button_press("right")
+    pb.tick(3)
+    pb.button_release("right")
+    pb.tick(3)
+    pb.button_release("a")
+    pb.tick(10)
+    check("A held + RIGHT: the note grows into bar 2 and the loop with it", v("wSeqBars") == 2, v("wSeqBars"))
     pb.stop(save=False)
 
 # --- playback across the segment edge
