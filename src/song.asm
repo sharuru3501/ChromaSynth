@@ -96,10 +96,16 @@ SongNext:
 
 ; a = pattern number (0..NUM_PATS-1): edit it. In loop mode it is played from now on too.
 SongSetEdit:
+    push af
+    call TsStore            ; the pattern that was edited keeps its time signature and length
+    pop af
+; (SongEditTo: the same without TsStore: after a load the arrays are the truth)
+SongEditTo:
     ld [wEditPat], a
     inc a
     ld [wEditBank], a
     ld [$FF70], a           ; the piano roll reads this bank
+    call TsLoadEdit         ; the new one's time signature and length become the live ones
     ld a, [wSongMode]
     and a
     jr nz, .mark
@@ -143,6 +149,65 @@ SongBarStart:
     ld a, b
     ld [wPlayBank], a
     call SeqSilence
+    call PlayInfo           ; the new pattern's bar length and loop end
+    ld a, [wBarIdx]         ; it goes on at the same bar number (its own bar length), or from the
+    ld b, a                 ; start when that is past its end
+    ld a, [wPBarTicks]
+    ld e, a
+    ld d, 0
+    ld hl, 0
+.pos:
+    ld a, b
+    and a
+    jr z, .posDone
+    add hl, de
+    dec b
+    jr .pos
+.posDone:                   ; hl = the tick the bar starts at
+    ld a, [wLoopSeg]
+    ld de, 0
+    and a
+    jr z, .total
+    ld de, SEQ_TICKS
+.total:
+    ld a, [wLoopTail]
+    add e
+    ld e, a
+    jr nc, .compare
+    inc d                   ; de = ticks in the whole loop of the new pattern
+.compare:
+    ld a, h
+    cp d
+    jr c, .inside
+    jr nz, .past
+    ld a, l
+    cp e
+    jr c, .inside
+.past:
+    ld hl, 0
+    xor a
+    ld [wBarIdx], a         ; (the loop of the new pattern starts over)
+.inside:
+    ld a, h
+    and a
+    jr nz, .second          ; 256 or more
+    ld a, l
+    cp SEQ_TICKS
+    jr c, .first
+.second:
+    ld de, -SEQ_TICKS
+    add hl, de
+    ld a, 1
+    ld [wSeqSeg], a
+    ld a, l
+    ld [wSeqTick], a
+    jr .placed
+.first:
+    xor a
+    ld [wSeqSeg], a
+    ld a, l
+    ld [wSeqTick], a
+.placed:
     ld a, [wDirtySong]
     or 1
     ld [wDirtySong], a
@@ -169,11 +234,67 @@ SongLoaded:
     xor a
     ld [wChain], a          ; a song has at least one step
 .keep:
-    call TsUpdate           ; the song's time signature
+    xor a                   ; the per-pattern time signatures and lengths: bad values are blanked, and a
+    ld [wBCBar], a          ; song saved before they existed (all 0) takes the one in the MIDI block
+.pat:                       ; (wBCBar = the pattern index: a free variable here)
+    ld a, [wBCBar]
+    ld e, a
+    ld d, 0
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [hl]
+    cp 17
+    jr c, .tsnOk
+    xor a
+    ld [hl], a
+.tsnOk:
+    ld b, a                 ; b = numerator
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [hl]
+    cp 3
+    jr c, .tsdOk
+    xor a
+    ld [hl], a
+.tsdOk:
+    or b
+    jr nz, .bars            ; this pattern has its own time signature
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [wPatch + MIDI_BLOCK + PM_TSN]
+    ld [hl], a
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [wPatch + MIDI_BLOCK + PM_TSD]
+    ld [hl], a
+.bars:
+    ld hl, wPatBars
+    add hl, de
+    ld a, [hl]
+    cp MAX_BARS + 1
+    jr c, .barsOk
+    xor a
+.barsOk:
+    and a
+    jr nz, .storeBars
+    ld a, [wSeqBars]        ; (the song's one loop length of before)
+    and a
+    jr nz, .storeBars
+    inc a
+.storeBars:
+    ld [hl], a
+    ld a, [wBCBar]
+    inc a
+    ld [wBCBar], a
+    cp NUM_PATS
+    jr c, .pat
     xor a
     ld [wSongMode], a
     ld [wChainPos], a
-    jp SongSetEdit
+    ld a, 1                 ; the first pattern is edited; its values were not stored over the arrays
+    ld [wEditBank], a
+    xor a
+    jp SongEditTo
 
 ; ---------------------------------------------------------------- the song screen
 ; Called with the LCD off after the screen was cleared.

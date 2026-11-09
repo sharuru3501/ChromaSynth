@@ -125,6 +125,14 @@ wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
+wPatTsn:        ds NUM_PATS ; per pattern: the time signature's numerator ...
+wPatTsd:        ds NUM_PATS ; ... the denominator index ...
+wPatBars:       ds NUM_PATS ; ... and the loop length in bars (the edited pattern's values live in the
+                            ; MIDI block / wSeqBars until TsStore copies them here)
+wPBarTicks:     db          ; ticks in a bar of the PLAYED pattern
+wEdLoopSeg:     db          ; where the loop of the EDITED pattern ends (the ruler): segment ...
+wEdLoopTail:    db          ; ... and ticks in it
+wBarIdx:        db          ; index of the bar that is playing (0-based; $FF just before the first)
 wBarPos:        db          ; ticks since the bar began (0 = a bar begins with the next tick played)
 wQueuedBank:    db          ; WRAM bank of the pattern that takes over at the next bar line (0 = none)
 wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)

@@ -131,6 +131,9 @@ MidiRealtime:
     ld [wSeqTick], a        ; start from the beginning; the next clock plays tick 0
     ld [wSeqSeg], a
     ld [wBarPos], a
+    dec a
+    ld [wBarIdx], a
+    xor a
     ld [wExtTicks], a
     call SongRestart
 .continue:

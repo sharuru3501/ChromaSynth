@@ -42,6 +42,9 @@ SeqToggle:
     ld [wSeqTick], a
     ld [wSeqSeg], a
     ld [wBarPos], a
+    dec a
+    ld [wBarIdx], a         ; $FF: the first bar is index 0
+    xor a
     call SongRestart        ; from the first chain step (or the edited pattern in loop mode)
     ld a, 1
     ld [wFollow], a         ; the roll scrolls along with the playhead
@@ -135,14 +138,18 @@ SeqStep:
     ld [wSongWrap], a
     call SeqSilence         ; a note of the pattern that just ended must not carry into the next
 .noWrap:
+    call PlayInfo           ; the bar length and the loop end of the pattern that is played
     ld a, [wBarPos]         ; a bar begins when the ticks since the last one are 0
     and a
     jr nz, .inBar
+    ld hl, wBarIdx
+    inc [hl]                ; (the first bar after a loop start / play start is index 0: it begins at $FF)
     call SongBarStart       ; a pattern chosen while playing takes over here
+    call PlayInfo           ; (it may be another pattern now)
 .inBar:
     ld a, [wBarPos]
     inc a
-    ld hl, wBarTicks
+    ld hl, wPBarTicks
     cp [hl]
     jr c, .barStore
     xor a
@@ -190,8 +197,7 @@ SeqStep:
     jr c, .ch
     ld a, [wEditBank]       ; the piano roll reads the edited pattern
     ld [$FF70], a
-    call ComputeLoopEnd     ; where the loop ends: (last segment, ticks in it)
-    ld hl, wLoopSeg
+    ld hl, wLoopSeg         ; where the loop ends (PlayInfo): (last segment, ticks in it)
     ld a, [wSeqTick]
     inc a
     ld c, a                 ; c = the next tick
@@ -208,6 +214,9 @@ SeqStep:
     ld [wSeqTick], a
     ld [wSeqSeg], a
     ld [wBarPos], a         ; (the first tick of the loop starts a bar)
+    dec a
+    ld [wBarIdx], a         ; $FF: the bar that starts now is index 0
+    xor a
     ld a, [wSongMode]
     and a
     call nz, SongNext       ; the chain goes on with its next pattern
@@ -233,39 +242,19 @@ SeqStep:
     ret z
     jp RollFollow
 
-; The time signature (PM_TSN / PM_TSD of the MIDI block) -> wBeatTicks, wBarTicks, wMaxBars.
-; Called when it changes (the edit page), after a load and when the roll is drawn.
-; Clobbers a, bc, de, hl.
+; The time signature of the EDITED pattern (PM_TSN / PM_TSD of the MIDI block) -> wBeatTicks,
+; wBarTicks, wMaxBars. Called when it changes (the edit page), after a load, when the edited
+; pattern changes and when the roll is drawn. Clobbers a, bc, de, hl.
 TsUpdate:
     ld a, [wPatch + MIDI_BLOCK + PM_TSD]
-    cp 3
-    jr c, .den
-    xor a                   ; (an unknown denominator index: /4)
-.den:
-    ld e, a
-    ld d, 0
-    ld hl, TsBeatTicks
-    add hl, de
-    ld a, [hl]
-    ld [wBeatTicks], a
-    ld c, a                 ; c = ticks of the beat unit
-    ld a, [wPatch + MIDI_BLOCK + PM_TSN]
-    and a
-    jr nz, .num
-    ld a, 4                 ; (0: a song saved before the time signature existed: 4/4)
-.num:
-    cp 17
-    jr c, .numOk
-    ld a, 16
-.numOk:
-    ld b, a
-    xor a
-.mul:
-    add c
-    dec b
-    jr nz, .mul             ; a = numerator * beat ticks (at most 16 * 12 = 192)
-    ld [wBarTicks], a
     ld c, a
+    ld a, [wPatch + MIDI_BLOCK + PM_TSN]
+    call TsBarTicks         ; a = bar ticks, c = beat ticks
+    ld [wBarTicks], a
+    ld b, a
+    ld a, c
+    ld [wBeatTicks], a
+    ld c, b                 ; c = bar ticks
     ld hl, 2 * SEQ_TICKS    ; the pattern holds 384 ticks: whole bars of them
     ld b, 0                 ; b = 384 / barTicks
 .div:
@@ -291,22 +280,162 @@ TsUpdate:
     ld [wMaxBars], a
     ret
 
+; a = numerator (0 = 4, more than 16 = 16), c = denominator index (0 = /4, 1 = /8, 2 = /16, else /4)
+; -> a = ticks in a bar, c = ticks in a beat. Keeps b. Clobbers d, e, hl.
+TsBarTicks:
+    push af
+    ld a, c
+    cp 3
+    jr c, .den
+    xor a
+.den:
+    ld e, a
+    ld d, 0
+    ld hl, TsBeatTicks
+    add hl, de
+    ld a, [hl]
+    ld c, a                 ; c = ticks of the beat unit
+    pop af
+    and a
+    jr nz, .num
+    ld a, 4
+.num:
+    cp 17
+    jr c, .numOk
+    ld a, 16
+.numOk:
+    ld d, a
+    xor a
+.mul:
+    add c
+    dec d
+    jr nz, .mul             ; a = numerator * beat ticks (at most 16 * 12 = 192)
+    ret
+
 TsBeatTicks:
     db 12, 6, 3
 
-; wLoopSeg / wLoopTail = where a loop of wSeqBars bars ends: the last segment and the ticks
-; played in it (1..SEQ_TICKS), at most 384 ticks. Clobbers a, bc, de, hl.
-ComputeLoopEnd:
-    ld a, [wBarTicks]
+; The edited pattern's time signature and loop length -> its slot in wPatTsn / wPatTsd / wPatBars.
+TsStore:
+    call EditIndex
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [wPatch + MIDI_BLOCK + PM_TSN]
+    ld [hl], a
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [wPatch + MIDI_BLOCK + PM_TSD]
+    ld [hl], a
+    ld hl, wPatBars
+    add hl, de
+    ld a, [wSeqBars]
+    ld [hl], a
+    ret
+
+; The reverse: the edited pattern's values from its slot into the MIDI block and wSeqBars.
+TsLoadEdit:
+    call EditIndex
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [hl]
+    ld [wPatch + MIDI_BLOCK + PM_TSN], a
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [hl]
+    ld [wPatch + MIDI_BLOCK + PM_TSD], a
+    ld hl, wPatBars
+    add hl, de
+    ld a, [hl]
+    and a
+    jr nz, .bars
+    inc a
+.bars:
+    ld [wSeqBars], a
+    jp TsUpdate
+
+; -> de = the edited pattern's index (0..NUM_PATS-1). Clobbers a.
+EditIndex:
+    ld a, [wEditBank]
+    dec a
+    cp NUM_PATS
+    jr c, .ok
+    xor a
+.ok:
     ld e, a
     ld d, 0
+    ret
+
+; Where the loop of the PLAYED pattern ends and its bar length -> wLoopSeg / wLoopTail, wPBarTicks.
+; The played pattern is usually the edited one (its values are live: the MIDI block and wSeqBars);
+; another one comes from its slot. Clobbers a, bc, de, hl.
+PlayInfo:
+    ld a, [wPlayBank]
+    ld hl, wEditBank
+    cp [hl]
+    jr nz, .other
+    ld a, [wBarTicks]
+    ld c, a
     ld a, [wSeqBars]
+    ld b, a
+    jr .have
+.other:
+    dec a
+    cp NUM_PATS
+    jr c, .idx
+    xor a
+.idx:
+    ld e, a
+    ld d, 0
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [hl]
+    ld c, a
+    ld hl, wPatBars
+    add hl, de
+    ld a, [hl]
+    push af                 ; the bars
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [hl]
+    call TsBarTicks         ; a = bar ticks
+    ld c, a
+    pop af
+    ld b, a
+.have:
+    ld a, c
+    ld [wPBarTicks], a
+    call LoopEndOf          ; b = bars, c = bar ticks -> d = segment, e = ticks in it
+    ld a, d
+    ld [wLoopSeg], a
+    ld a, e
+    ld [wLoopTail], a
+    ret
+
+; The loop end of the EDITED pattern (for the ruler) -> wEdLoopSeg / wEdLoopTail.
+ComputeLoopEnd:
+    ld a, [wBarTicks]
+    ld c, a
+    ld a, [wSeqBars]
+    ld b, a
+    call LoopEndOf
+    ld a, d
+    ld [wEdLoopSeg], a
+    ld a, e
+    ld [wEdLoopTail], a
+    ret
+
+; b = loop length in bars (0 = 1), c = ticks in a bar -> d = the last segment of the loop, e = the
+; ticks played in it (1..SEQ_TICKS); never more than 384 ticks. Clobbers a, b, hl.
+LoopEndOf:
+    ld a, b
     and a
     jr nz, .bars
     inc a
 .bars:
     ld b, a
     ld hl, 0
+    ld d, 0
+    ld e, c
 .mul:
     add hl, de
     dec b
@@ -317,9 +446,8 @@ ComputeLoopEnd:
     ld a, l
     cp SEQ_TICKS + 1
     jr nc, .second
-    ld [wLoopTail], a       ; a loop inside the first segment
-    xor a
-    ld [wLoopSeg], a
+    ld e, a                 ; a loop inside the first segment
+    ld d, 0
     ret
 .second:
     ld de, -SEQ_TICKS
@@ -333,9 +461,8 @@ ComputeLoopEnd:
 .cap:
     ld a, SEQ_TICKS         ; (never more than 2 segments)
 .tail:
-    ld [wLoopTail], a
-    ld a, 1
-    ld [wLoopSeg], a
+    ld e, a
+    ld d, 1
     ret
 
 ; -> de = tick length (8.8 frames) for wBpm. Clobbers a, hl.

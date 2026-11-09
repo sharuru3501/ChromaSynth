@@ -12,6 +12,8 @@
 ;   +183  the patterns, one after the other: NUM_PATS x NUM_CH x NUM_SEGS x SEQ_TICKS bytes
 ;   +6327 checksum = (sum of the data bytes) xor $A5
 ;   +6328 name     (NAME_LEN bytes, indices into NameChars; not in the checksum)
+;   +6336 per pattern: numerator x4, denominator index x4, loop bars x4 (not in the checksum;
+;         a song saved before they existed holds $00 there: the loader fills the defaults)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
@@ -281,6 +283,7 @@ CopyBytes:
 ; Write the current state to the selected slot, then read it back to verify.
 ; -> a = message code (MSG_SAVED, MSG_FAIL, MSG_INUSE).
 SaveAll:
+    call TsStore            ; the edited pattern's time signature and length into the arrays
     call SramOpen
     call SlotBase
     call SlotWritable       ; (clobbers de)
@@ -332,6 +335,9 @@ SaveAll:
     inc de
     ld hl, wName
     ld bc, NAME_LEN
+    call CopyBytes
+    ld hl, wPatTsn          ; per pattern: time signature and loop length (not in the checksum)
+    ld bc, 3 * NUM_PATS
     call CopyBytes
     call SlotBase
     call ValidateSave
@@ -396,6 +402,9 @@ LoadAll:
     inc hl                  ; the checksum, then the name
     ld de, wName
     ld bc, NAME_LEN
+    call CopyBytes
+    ld de, wPatTsn
+    ld bc, 3 * NUM_PATS
     call CopyBytes
     call SanitizeName
     call SramClose

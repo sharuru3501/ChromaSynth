@@ -689,12 +689,12 @@ BuildCols:
 ; c = tick inside the page's segment -> carry set if that position is before the loop end.
 ; Keeps bc, de.
 InLoop:
-    ld hl, wLoopSeg         ; (BuildCols computed it)
+    ld hl, wEdLoopSeg       ; (BuildCols computed it)
     ld a, [wPageSeg]
     cp [hl]
     jr c, .inside           ; an earlier segment than the loop's last one
     jr nz, .outside         ; a later one
-    ld hl, wLoopTail
+    ld hl, wEdLoopTail
     ld a, c
     cp [hl]                 ; the last segment: tick < ticks played in it
     ret

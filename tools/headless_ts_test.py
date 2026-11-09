@@ -188,7 +188,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(14):
         combo(pb, "select", "right")
     check("3/4: the longest loop is 10 bars (384 / 36)", v("wSeqBars") == 10, v("wSeqBars"))
-    check("... which ends in segment 2 after 168 ticks (360 - 192)", (v("wLoopSeg"), v("wLoopTail")) == (1, 168), (v("wLoopSeg"), v("wLoopTail")))
+    check("... which ends in segment 2 after 168 ticks (360 - 192)", (v("wEdLoopSeg"), v("wEdLoopTail")) == (1, 168), (v("wEdLoopSeg"), v("wEdLoopTail")))
     for _ in range(14):
         combo(pb, "select", "left")
     check("... and the shortest is 1 bar", v("wSeqBars") == 1, v("wSeqBars"))
@@ -232,6 +232,10 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "right")
     pb.tick(40)
     mem[sym["wSeqBars"]] = 4             # 144 ticks
+    for i in range(4):                   # every pattern is 3/4, 4 bars (the other patterns' own values)
+        mem[sym["wPatTsn"] + i] = 3
+        mem[sym["wPatTsd"] + i] = 0
+        mem[sym["wPatBars"] + i] = 4
     mem[sym["wBpm"]] = 100
     combo(pb, "start", "left")
     combo(pb, "start", "left")
@@ -248,8 +252,8 @@ with tempfile.TemporaryDirectory() as tmp:
             if v("wPlayBank") != 0 and v("wPlayBank") == queued:
                 at = v("wSeqCur")
                 break
-        # wSeqCur is the tick played before the switch: the bar line is the next tick (a multiple of 36)
-        check(f"3/4: pattern {queued} takes over on a bar line", at is not None and (at + 1) % 36 == 0, at)
+        # wSeqCur is the tick of the bar line (a multiple of 36) or the one before it, depending on the frame
+        check(f"3/4: pattern {queued} takes over on a bar line", at is not None and at % 36 in (0, 35), at)
         if want == 4:
             combo(pb, "select", "right")
     combo(pb, "select", "start")
@@ -297,6 +301,135 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     check("after a reboot the song is loaded from slot 1 with its 6/8", (mem[TSN], mem[TSD]) == (6, 1) and (mem[sym["wBarTicks"]], mem[sym["wBeatTicks"]]) == (36, 6),
           (mem[TSN], mem[TSD]))
+    pb.stop(save=False)
+
+# --- every pattern has its own time signature and loop length
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    ram = pathlib.Path(str(rom) + ".ram")
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
+    for b in range(1, 5):
+        for i in range(2048):
+            mem[b, 0xD000 + i] = 0
+    mem[1, 0xD000] = 60
+    mem[2, 0xD000] = 64
+    combo(pb, "start", "up")             # the song screen
+    pb.tick(20)
+    check("every pattern starts as 4/4, 2 bars", [mem[PATN + i] for i in range(4)] == [4] * 4 and [mem[PATB + i] for i in range(4)] == [2] * 4,
+          ([mem[PATN + i] for i in range(4)], [mem[PATB + i] for i in range(4)]))
+    # pattern 2: 3/4, 3 bars (set through the live values of the edited pattern: the MIDI block and wSeqBars)
+    combo(pb, "select", "right")
+    check("editing pattern 2 loads its values (4/4, 2 bars)", (mem[TSN], mem[TSD], v("wSeqBars"), v("wBarTicks")) == (4, 0, 2, 48),
+          (mem[TSN], mem[TSD], v("wSeqBars"), v("wBarTicks")))
+    mem[TSN] = 3
+    mem[sym["wSeqBars"]] = 3
+    mem[sym["wBpm"]] = 240
+    combo(pb, "select", "left")          # back to pattern 1: pattern 2's values are stored
+    check("pattern 2's 3/4, 3 bars are stored when another pattern is edited", (mem[PATN + 1], mem[PATB + 1]) == (3, 3), (mem[PATN + 1], mem[PATB + 1]))
+    check("pattern 1 is 4/4 again (bar 48 ticks, loop 2 bars)", (mem[TSN], v("wSeqBars"), v("wBarTicks")) == (4, 2, 48), (mem[TSN], v("wSeqBars"), v("wBarTicks")))
+    # the chain 1, 2: pattern 1 plays 96 ticks, pattern 2 plays 108 ticks (3 bars of 36)
+    mem[sym["wChain"]:sym["wChain"] + 3] = bytes([0, 1, 0xFF])
+    combo(pb, "select", "up")            # song mode
+    combo(pb, "select", "start")
+    longest = {}
+    for _ in range(700):
+        pb.tick(1)
+        key = v("wPlayBank")
+        longest[key] = max(longest.get(key, 0), v("wSeqTick") + 0)
+    combo(pb, "select", "start")
+    check("song mode: pattern 1 loops 96 ticks, pattern 2 loops 108 ticks (its own time signature and length)",
+          longest.get(1) == 95 and longest.get(2) == 107, longest)
+    combo(pb, "select", "up")            # loop mode again
+    pb.stop(save=False)
+
+# --- a queued pattern takes over at the bar line of the pattern that plays; its own bar length goes on from there
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
+    mem[PATN] = 4                        # pattern 1: 4/4 (bar 48), pattern 2: 3/4 (bar 36), 4 bars each
+    mem[PATN + 1] = 3
+    for i in range(4):
+        mem[PATB + i] = 4
+    mem[sym["wSeqBars"]] = 4
+    mem[sym["wBpm"]] = 100
+    combo(pb, "start", "up")
+    combo(pb, "select", "start")
+    pb.tick(30)
+    changes = []
+    last = v("wPlayBank")
+    combo(pb, "select", "right")         # queue pattern 2
+    for _ in range(500):
+        pb.tick(1)
+        if v("wPlayBank") != last:
+            changes.append((last, v("wPlayBank"), v("wSeqTick")))   # (the next tick to play: the new position + 1 or 2)
+            last = v("wPlayBank")
+            break
+    # the switch is on pattern 1's bar line; pattern 2 goes on at the same bar NUMBER, at its own bar length: a multiple of 36
+    check("1 -> 2: pattern 2 starts on one of its own bar lines (a multiple of 36), at the bar number that was playing",
+          len(changes) == 1 and (changes[0][2] - 1) % 36 in (0, 1, 2) and changes[0][2] > 36, changes)
+    combo(pb, "select", "left")          # queue pattern 1 while pattern 2 (3/4) plays
+    for _ in range(500):
+        pb.tick(1)
+        if v("wPlayBank") != last:
+            pb.tick(2)                   # (SeqStep may straddle the frame: let it finish before reading the position)
+            changes.append((last, v("wPlayBank"), v("wSeqTick")))   # (the next tick to play: the new position + 1..2)
+            break
+    check("2 -> 1: pattern 1 starts on one of its own bar lines (a multiple of 48)", len(changes) == 2 and (changes[1][2] - 1) % 48 in (0, 1, 2), changes)
+    combo(pb, "select", "start")
+    pb.stop(save=False)
+
+# --- the per-pattern values are saved; a song saved without them gets the song's time signature everywhere
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    ram = pathlib.Path(str(rom) + ".ram")
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
+    combo(pb, "start", "up")
+    combo(pb, "select", "right")         # edit pattern 2: 6/8, 5 bars
+    mem[TSN] = 6
+    mem[TSD] = 1
+    mem[sym["wSeqBars"]] = 5
+    combo(pb, "select", "right")         # pattern 3: 7/8, 3 bars
+    mem[TSN] = 7
+    mem[TSD] = 1
+    mem[sym["wSeqBars"]] = 3
+    combo(pb, "select", "left")
+    combo(pb, "select", "left")          # pattern 1: 3/4, 2 bars
+    mem[TSN] = 3
+    mem[TSD] = 0
+    combo(pb, "select", "a", 60)
+    check("saved", v("wMsg") == 1, v("wMsg"))
+    pb.stop(save=True)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    got = ([mem[PATN + i] for i in range(3)], [mem[PATD + i] for i in range(3)], [mem[PATB + i] for i in range(3)])
+    check("after a reboot every pattern keeps its time signature and length", got == ([3, 6, 7], [0, 1, 1], [2, 5, 3]), got)
+    check("... pattern 1 is the edited one: 3/4, bar 36, 2 bars", (mem[TSN], v("wBarTicks"), v("wSeqBars")) == (3, 36, 2), (mem[TSN], v("wBarTicks"), v("wSeqBars")))
+    pb.stop(save=False)
+    # a song saved before the per-pattern values existed: their bytes in the slot are $00
+    SLOT = 12 * 8192 + 6336
+    data = bytearray(ram.read_bytes())
+    for i in range(12):
+        data[SLOT + i] = 0
+    ram.write_bytes(bytes(data))
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    got = ([mem[PATN + i] for i in range(4)], [mem[PATD + i] for i in range(4)])
+    check("an older song: every pattern takes the song's time signature (the MIDI block's 3/4)", got == ([3] * 4, [0] * 4), got)
+    check("... and the song's loop length", [mem[PATB + i] for i in range(4)] == [2] * 4, [mem[PATB + i] for i in range(4)])
     pb.stop(save=False)
 
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")

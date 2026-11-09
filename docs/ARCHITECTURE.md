@@ -77,6 +77,7 @@ D-pad/A/B/Start/Select のみ。Patch画面: 項目選択+値増減。Sequencer�
 - 試験(`headless_long_test.py`): チャンネル替え・分割替え・ループ長・音程の移動を 600 フレーム続けても、150 BPM で 300 ティック(誤差 4% 以内)が鳴る(以前は 25% 少なかった)。
 
 ## 拍子
+- (M17)拍子とループ小節数は**パターンごと**: `wPatTsn/wPatTsd/wPatBars`(各 `NUM_PATS` バイト)。編集中のパターンだけ、MIDI ブロックの `PM_TSN/PM_TSD` と `wSeqBars` が正(`TsStore` が編集の切り替え・保存の前に配列へ書き、`TsLoadEdit` が編集に入るとき配列から読む)。再生側は `PlayInfo` が `wPlayBank` のパターンについて `wPBarTicks`・`wLoopSeg/wLoopTail` を出す(編集中と同じパターンなら生きている値、違えば配列から)。`SongBarStart` は切り替え後に `PlayInfo` をやり直し、位置 = `wBarIdx × wPBarTicks`(ループの外なら 0)。保存は +6336 の 12 バイト(チェックサム外、0 = 既定)。
 - 拍子は、パッチの MIDI ブロックの 2 バイト(`PM_TSN` = 分子 1〜16、`PM_TSD` = 分母の添字 0/1/2 = 4/8/16)で、曲と一緒に保存される。0 / 範囲外は 4/4 として扱う(拍子ができる前の保存は、その位置が `$00` だった)。
 - `TsUpdate` が、`wBeatTicks`(12 / 6 / 3)、`wBarTicks`(分子 × 1 拍、最大 192)、`wMaxBars`(384 ÷ 1 小節、最大 15)を計算する。呼ぶのは、起動時、読み込みのあと、MIDI ページの値の変更のあと、ピアノロールを描くとき(`BuildCols`)。
 - 小節の数(`wSeqBars`)から、ループの終わり(`wLoopSeg` / `wLoopTail`)を作るのは `ComputeLoopEnd`(以前の表 `LoopEndTab` は無くなった)。`SeqStep` は、ティックごとにこれを呼ぶ。

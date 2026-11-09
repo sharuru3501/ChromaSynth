@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[1, P + 513] = 77
     mem[patch + 1] = 9
     mem[sym["wBpm"]] = 133
-    mem[sym["wSeqBars"]] = 144
+    mem[sym["wSeqBars"]] = 6
     combo(pb, "select", "a")
     check("SELECT+A -> SAVED", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     pb.tick(100)
@@ -102,7 +102,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("reboot: pattern restored", mem[1, P + 513] == 77, mem[1, P + 513])
     check("reboot: patch restored", mem[patch + 1] == 9, mem[patch + 1])
     check("reboot: BPM restored", mem[sym["wBpm"]] == 133, mem[sym["wBpm"]])
-    check("reboot: loop length restored", mem[sym["wSeqBars"]] == 144, mem[sym["wSeqBars"]])
+    check("reboot: loop length restored", mem[sym["wSeqBars"]] == 6, mem[sym["wSeqBars"]])
     check("reboot: untouched cells keep defaults", mem[1, P] == 60 and mem[1, P + 1024] == 48)
 
     # --- SELECT+B reloads the saved copy over unsaved edits
