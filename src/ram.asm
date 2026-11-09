@@ -125,6 +125,13 @@ wSeqTick:       db          ; next tick to play inside the segment (0..SEQ_TICKS
 wSeqCur:        db          ; tick that was played last (playhead)
 wSeqAcc:        dw          ; 8.8 frame accumulator
 wBpm:           db
+wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)
+wBeatTicks:     db          ; ticks in the beat unit: 12 (/4), 6 (/8), 3 (/16)
+wMaxBars:       db          ; the longest loop in bars: 384 ticks / wBarTicks, at most MAX_BARS
+wLoopSeg:       db          ; where the loop ends: the last segment ...
+wLoopTail:      db          ; ... and the ticks played in it (ComputeLoopEnd)
+wBCInBar:       db          ; BuildCols: ticks into the bar at the column that is being built
+wBCBar:         db          ; BuildCols: bar index (0-based) of that column
 wSeqBars:       db          ; loop length in bars (1..MAX_BARS)
 wSeqSeg:        db          ; segment (4 bars) of the next tick to play
 wSeqCurSeg:     db          ; segment of the tick that was played last (playhead)

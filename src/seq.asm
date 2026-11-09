@@ -176,13 +176,8 @@ SeqStep:
     jr c, .ch
     ld a, [wEditBank]       ; the piano roll reads the edited pattern
     ld [$FF70], a
-    ld a, [wSeqBars]        ; where the loop ends: (last segment, ticks in it)
-    dec a
-    add a
-    ld e, a
-    ld d, 0
-    ld hl, LoopEndTab
-    add hl, de
+    call ComputeLoopEnd     ; where the loop ends: (last segment, ticks in it)
+    ld hl, wLoopSeg
     ld a, [wSeqTick]
     inc a
     ld c, a                 ; c = the next tick
@@ -190,7 +185,7 @@ SeqStep:
     cp [hl]                 ; compared with the last segment
     jr c, .midLoop          ; before it: only the segment end can come
     jr nz, .wrap            ; (the loop was shortened under the playhead)
-    inc hl
+    ld hl, wLoopTail
     ld a, c
     cp [hl]
     jr c, .store            ; before the loop end
@@ -223,9 +218,110 @@ SeqStep:
     ret z
     jp RollFollow
 
-; The loop end for 1..MAX_BARS bars: (index of the last segment, ticks played in it).
-LoopEndTab:
-    db 0, 48,  0, 96,  0, 144,  0, 192,  1, 48,  1, 96,  1, 144,  1, 192
+; The time signature (PM_TSN / PM_TSD of the MIDI block) -> wBeatTicks, wBarTicks, wMaxBars.
+; Called when it changes (the edit page), after a load and when the roll is drawn.
+; Clobbers a, bc, de, hl.
+TsUpdate:
+    ld a, [wPatch + MIDI_BLOCK + PM_TSD]
+    cp 3
+    jr c, .den
+    xor a                   ; (an unknown denominator index: /4)
+.den:
+    ld e, a
+    ld d, 0
+    ld hl, TsBeatTicks
+    add hl, de
+    ld a, [hl]
+    ld [wBeatTicks], a
+    ld c, a                 ; c = ticks of the beat unit
+    ld a, [wPatch + MIDI_BLOCK + PM_TSN]
+    and a
+    jr nz, .num
+    ld a, 4                 ; (0: a song saved before the time signature existed: 4/4)
+.num:
+    cp 17
+    jr c, .numOk
+    ld a, 16
+.numOk:
+    ld b, a
+    xor a
+.mul:
+    add c
+    dec b
+    jr nz, .mul             ; a = numerator * beat ticks (at most 16 * 12 = 192)
+    ld [wBarTicks], a
+    ld c, a
+    ld hl, 2 * SEQ_TICKS    ; the pattern holds 384 ticks: whole bars of them
+    ld b, 0                 ; b = 384 / barTicks
+.div:
+    ld a, l
+    sub c
+    ld l, a
+    ld a, h
+    sbc 0
+    ld h, a
+    jr c, .divDone
+    inc b
+    jr .div
+.divDone:
+    ld a, b
+    cp MAX_BARS + 1
+    jr c, .maxOk
+    ld a, MAX_BARS
+.maxOk:
+    and a
+    jr nz, .max
+    inc a                   ; (a bar longer than the pattern cannot happen: 192 at most)
+.max:
+    ld [wMaxBars], a
+    ret
+
+TsBeatTicks:
+    db 12, 6, 3
+
+; wLoopSeg / wLoopTail = where a loop of wSeqBars bars ends: the last segment and the ticks
+; played in it (1..SEQ_TICKS), at most 384 ticks. Clobbers a, bc, de, hl.
+ComputeLoopEnd:
+    ld a, [wBarTicks]
+    ld e, a
+    ld d, 0
+    ld a, [wSeqBars]
+    and a
+    jr nz, .bars
+    inc a
+.bars:
+    ld b, a
+    ld hl, 0
+.mul:
+    add hl, de
+    dec b
+    jr nz, .mul             ; hl = bars * bar ticks
+    ld a, h
+    and a
+    jr nz, .second          ; 256 or more: past the first segment
+    ld a, l
+    cp SEQ_TICKS + 1
+    jr nc, .second
+    ld [wLoopTail], a       ; a loop inside the first segment
+    xor a
+    ld [wLoopSeg], a
+    ret
+.second:
+    ld de, -SEQ_TICKS
+    add hl, de              ; ticks past the first segment
+    ld a, h
+    and a
+    jr nz, .cap
+    ld a, l
+    cp SEQ_TICKS + 1
+    jr c, .tail
+.cap:
+    ld a, SEQ_TICKS         ; (never more than 2 segments)
+.tail:
+    ld [wLoopTail], a
+    ld a, 1
+    ld [wLoopSeg], a
+    ret
 
 ; -> de = tick length (8.8 frames) for wBpm. Clobbers a, hl.
 GetTickLen:
@@ -607,8 +703,11 @@ SeqSelectHeld:
 .noLeft:
     cp 1
     ret c                   ; below one bar
-    cp MAX_BARS + 1
-    ret nc
+    ld c, a
+    ld a, [wMaxBars]
+    cp c
+    ret c                   ; more bars than the pattern holds
+    ld a, c
     cp b
     ret z
     ld [wSeqBars], a
@@ -651,19 +750,43 @@ LoopCoverNote:
     ld a, [wRollTick]
 ; a = a tick of the cursor's segment: the loop grows to include its bar (see above).
 LoopCoverTick:
-    ld c, 0                 ; c = bar inside the segment (tick / TICKS_PER_BAR)
+    ld l, a                 ; hl = the tick counted from the start of the pattern
+    ld h, 0
+    ld a, [wRollSeg]
+    and a
+    jr z, .first
+    ld de, SEQ_TICKS
+    add hl, de
+.first:
+    ld a, [wBarTicks]
+    ld e, a
+    ld d, 0
+    ld c, 0                 ; c = the bar index (0-based): hl / bar ticks
 .bar:
-    cp TICKS_PER_BAR
+    ld a, h
+    cp d
     jr c, .have
-    sub TICKS_PER_BAR
+    jr nz, .sub
+    ld a, l
+    cp e
+    jr c, .have
+.sub:
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a
     inc c
     jr .bar
 .have:
-    ld a, [wRollSeg]
-    add a
-    add a                   ; a segment is 4 bars
-    add c
+    ld a, c
     inc a                   ; bar number, 1-based
+    ld hl, wMaxBars
+    cp [hl]
+    jr c, .limited
+    ld a, [hl]              ; (past the longest loop: the loop becomes that long)
+.limited:
     ld hl, wSeqBars
     cp [hl]
     ret c                   ; inside the loop already

@@ -1048,8 +1048,8 @@ DefaultPatch:                       ; byte order: see synth.inc (16-21: arp1 arp
     db 2, 15, 0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 2, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH2
     db 0, 0,  0, 0, 0, 0, 0, 3,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 2, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH3
     db 0, 15, 0, 2, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; CH4: decays at pace 2
-    db 1, 2, 3, 4, 2, 1, 1, 0,  7, 7, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; MIDI: CH1-4 listen to MIDI ch 1-4,
-                                                              ; bend 2, velocity on, mod wheel on, sync off, master 7/7
+    db 1, 2, 3, 4, 2, 1, 1, 0,  7, 7, 4, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0, 0, 0   ; MIDI: CH1-4 listen to MIDI ch 1-4,
+                                                              ; bend 2, velocity on, mod wheel on, sync off, master 7/7, time 4/4
     ASSERT @ - DefaultPatch == NUM_PATCHES * PATCH_SIZE
 
 DirtyBits:  db %00000001, %00000010, %00000100, %00001000

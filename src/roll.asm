@@ -447,7 +447,63 @@ MarkAllRender:
 ; other beat lines, nothing after the loop end. The page starts on a beat, so the
 ; bar/beat marks stay where they are when the grid division changes.
 ; Runs outside VBlank: at most about 400 ticks scanned.
+; The beat phase (ticks into the beat), the ticks into the bar and the bar index (0-based) at the
+; first column of the page. Keeps bc, de.
+BCInitPhases:
+    push bc
+    push de
+    ld a, [wPageTick]
+    ld l, a
+    ld h, 0
+    ld a, [wPageSeg]
+    and a
+    jr z, .first
+    ld de, SEQ_TICKS
+    add hl, de              ; hl = the tick counted from the start of the pattern
+.first:
+    ld a, [wBarTicks]
+    ld e, a
+    ld d, 0
+    ld b, 0                 ; b = bar index: hl / bar ticks
+.bar:
+    ld a, h
+    cp d
+    jr c, .barDone
+    jr nz, .sub
+    ld a, l
+    cp e
+    jr c, .barDone
+.sub:
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a
+    inc b
+    jr .bar
+.barDone:
+    ld a, l
+    ld [wBCInBar], a
+    ld a, b
+    ld [wBCBar], a
+    ld a, [wBeatTicks]
+    ld e, a
+    ld a, [wBCInBar]
+.phase:
+    cp e
+    jr c, .phaseDone
+    sub e
+    jr .phase
+.phaseDone:
+    ld [wBCPhase], a
+    pop de
+    pop bc
+    ret
+
 BuildCols:
+    call TsUpdate
+    call ComputeLoopEnd
     ld a, [wSelCh]
     add a
     add HIGH(wPatterns)
@@ -484,20 +540,7 @@ BuildCols:
     ld a, [wPageSeg]
     add b
     ld b, a
-    ld a, c                 ; beat phase of the first column: tick mod 12, tick / 12
-    ld e, 0
-.mod:
-    cp TICKS_PER_BEAT
-    jr c, .modDone
-    sub TICKS_PER_BEAT
-    inc e
-    jr .mod
-.modDone:
-    ld [wBCPhase], a
-    ld a, [wPageSeg]
-    swap a                  ; a segment is 16 beats
-    add e
-    ld [wBCBeat], a         ; absolute beat number (bar = beat / 4)
+    call BCInitPhases       ; the beat phase, the tick in the bar and the bar of the first column
     xor a
     ld [wBCCol], a
 .col:
@@ -511,11 +554,11 @@ BuildCols:
     ld a, [wBCPhase]        ; beat / bar line column?
     and a
     jr nz, .noBeat
-    ld a, [wBCBeat]
-    and 3
+    ld a, [wBCInBar]
+    and a
     ld a, 2                 ; beat line
     jr nz, .flagSet
-    ld a, 2 | 8             ; bar line (first beat of a bar)
+    ld a, 2 | 8             ; bar line (the first beat of a bar)
     jr .flagSet
 .noBeat:
     xor a
@@ -533,9 +576,7 @@ BuildCols:
     ld a, T_TICK
     jr .rulerSet
 .barNumber:
-    ld a, [wBCBeat]
-    srl a
-    srl a
+    ld a, [wBCBar]
     inc a                   ; bar number, 1-based
     call NibbleTile
 .rulerSet:
@@ -574,21 +615,34 @@ BuildCols:
     inc c
     dec e
     jr nz, .tick
-    ; advance the beat phase by one column
+    ; advance the beat phase and the position in the bar by one column
     ld a, [wDivTicks]
     ld e, a
     ld a, [wBCPhase]
     add e
-    cp TICKS_PER_BEAT
+    ld hl, wBeatTicks
+.phase:
+    cp [hl]
     jr c, .phaseOk
-    sub TICKS_PER_BEAT
-    push af
-    ld a, [wBCBeat]
-    inc a
-    ld [wBCBeat], a
-    pop af
+    sub [hl]
+    jr .phase
 .phaseOk:
     ld [wBCPhase], a
+    ld a, [wBCInBar]
+    add e
+    ld hl, wBarTicks
+.inBar:
+    cp [hl]
+    jr c, .inBarOk
+    sub [hl]
+    push af
+    ld a, [wBCBar]
+    inc a
+    ld [wBCBar], a
+    pop af
+    jr .inBar
+.inBarOk:
+    ld [wBCInBar], a
     call BCStoreCol
     jp .col
 .padFill:                   ; columns the page does not use
@@ -635,30 +689,20 @@ BuildCols:
 ; c = tick inside the page's segment -> carry set if that position is before the loop end.
 ; Keeps bc, de.
 InLoop:
-    push de
-    ld a, [wSeqBars]
-    dec a
-    add a
-    ld e, a
-    ld d, 0
-    ld hl, LoopEndTab
-    add hl, de
+    ld hl, wLoopSeg         ; (BuildCols computed it)
     ld a, [wPageSeg]
     cp [hl]
     jr c, .inside           ; an earlier segment than the loop's last one
     jr nz, .outside         ; a later one
-    inc hl
+    ld hl, wLoopTail
     ld a, c
     cp [hl]                 ; the last segment: tick < ticks played in it
-    pop de
     ret
 .inside:
     scf
-    pop de
     ret
 .outside:
     and a
-    pop de
     ret
 
 ; Store the current column (wBCPitch, wBCHead | wBCFlag) and move to the next one.

@@ -130,6 +130,7 @@ SongLoaded:
     xor a
     ld [wChain], a          ; a song has at least one step
 .keep:
+    call TsUpdate           ; the song's time signature
     xor a
     ld [wSongMode], a
     ld [wChainPos], a

@@ -550,6 +550,9 @@ ChangeValue:
     xor a                   ; a big step stops at 0
 .store:
     ld [hl], a
+    push bc
+    call TsUpdate           ; (the time signature may have changed)
+    pop bc
     ld a, b
     jp MarkEditRow
 
