@@ -7,6 +7,7 @@ RGBFIX  ?= rgbfix
 BUILD     ?= build
 SLOT_BANK0 ?= 0
 SRAM_CODE ?= 3
+CGB_FLAG  ?= -C            # public build: Game Boy Color only (the patterns live in the GBC's switchable work RAM banks; a DMG has only one)
 ifeq ($(SLOT_BANK0),0)
 EXTRA_AS  :=
 else
@@ -22,14 +23,14 @@ INCS    := $(wildcard inc/*.inc) $(wildcard src/*.inc)
 all: $(TARGET)
 
 card:
-	$(MAKE) BUILD=build-card SLOT_BANK0=12 SRAM_CODE=4
+	$(MAKE) BUILD=build-card SLOT_BANK0=12 SRAM_CODE=4 CGB_FLAG=-c
 
 $(BUILD)/%.o: src/%.asm $(INCS) | $(BUILD)
 	$(RGBASM) -Weverything -E $(EXTRA_AS) -I inc/ -I src/ -o $@ $<
 
 $(TARGET): $(OBJS)
 	$(RGBLINK) -p 0xFF -m $(TARGET:.gb=.map) -n $(TARGET:.gb=.sym) -o $@ $(OBJS)
-	$(RGBFIX) -v -p 0xFF -c -t CHROMASYNTH -m MBC5+RAM+BATTERY -r $(SRAM_CODE) -l 0x33 -n 0 $@
+	$(RGBFIX) -v -p 0xFF $(CGB_FLAG) -t CHROMASYNTH -m MBC5+RAM+BATTERY -r $(SRAM_CODE) -l 0x33 -n 0 $@
 
 $(BUILD):
 	mkdir -p $(BUILD)
