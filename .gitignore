@@ -1,4 +1,6 @@
 build/
+build-card/
+build-8k/
 *.gb
 *.gbc
 *.sav

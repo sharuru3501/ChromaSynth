@@ -179,6 +179,16 @@ wRollPage:      db          ; visible page index
 wPageTick:      db          ; tick of the first visible column (= page * wPageSpan)
 wPageCell:      db          ; cell index of the first visible column (= page * wPageCols)
 wNtStart:       dw          ; SeqLength: the edited note's start (absolute tick)
+wWaveMark:      db          ; $A5 once the custom waves hold something (saved with the song, right before them)
+wWaves:         ds 16 * 4   ; the custom CH3 waves W1-W4, 16 bytes each (wave RAM format: two 4-bit samples a byte, high nibble first)
+wWaveSel:       db          ; the custom wave the editor shows (0-3)
+wWaveCur:       db          ; the sample the cursor is on (0-31)
+wWavePre:       db          ; the preset that START+A copies next
+wWaveBase:      db          ; WaveRender scratch
+wWaveJ:         db
+wWaveIdx:       db
+wDirtyWave:     db          ; wave editor rows to copy to the screen (bit 0 = graph top, 1 = graph bottom, 2 = values, 3 = info)
+wWaveBuf:       ds 20 * 4   ; those rows, ready to copy
 wFollow:        db          ; 1 = the view follows the playhead
 wPlayX:         db          ; wanted playhead X in OAM coordinates ($FF = hidden)
 wPlayShown:     db          ; playhead X currently in OAM ($FF = hidden)
@@ -188,6 +198,7 @@ wRRPitch:       db          ; RenderRow scratch
 wRRBlack:       db
 wRRCur:         db
 wSaveSum:       db          ; SaveAll running checksum
+wNumSlots:      db          ; save slots this cartridge has room for (InitSlots: from the header's RAM size)
 wSlot:          db          ; selected save slot 0..NUM_SLOTS-1
 wSlotUsed:      db          ; bit n = slot n holds a valid save (cached; scanned at boot, kept up to date)
 wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)

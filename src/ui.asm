@@ -56,15 +56,17 @@ BuildScreen:
     ld [wPlayX], a
     ld a, [wScreen]
     and a
-    jr z, .play
+    jp z, .play
     cp SCREEN_SEQ
     jp z, BuildSeq
     cp SCREEN_KBD
-    jr z, .kbd
+    jp z, .kbd
     cp SCREEN_SLOT
     jp z, .slot
     cp SCREEN_SONG
     jp z, BuildSong
+    cp SCREEN_WAVE
+    jp z, BuildWave
     jp .edit
 .slot:
     ld hl, _SCRN0 + 4
@@ -213,6 +215,8 @@ UpdateUI:
     jp z, UpdateSlot
     cp SCREEN_SONG
     jp z, UpdateSong
+    cp SCREEN_WAVE
+    jp z, UpdateWave
     jp UpdateEdit
 .play:
     ld a, [wDirty]
@@ -341,8 +345,9 @@ UpdateSlot:
     and [hl]
     ld [hl], a
     ld a, c
-    cp NUM_SLOTS
-    ret nc                  ; (the dirty byte starts with all bits set)
+    ld hl, wNumSlots
+    cp [hl]
+    ret nc                  ; (the dirty byte starts with all bits set; slots this cartridge has no room for stay blank)
     ld b, c                 ; b = slot
     ld a, c
     swap a
@@ -968,7 +973,7 @@ PT_Pulse2:
     PARAM 0, "    "
     PARAM 0, "    "
 PT_Wave:
-    PARAM 3, "WAVE"
+    PARAM 7, "WAVE"
     PARAM 2, "LVL "
     PARAM 0, "    "
     PARAM 0, "    "

@@ -41,6 +41,7 @@ python3 tools/mcu_{mode,soak,longrun}_test.py   # 実機(コンソール経由)�
 11. 時間の単位は**ティック(1拍=12)**。1 フレームに 2 ティック以上処理しない。グリッド分割は表示/入力の単位で、データはいつもティック。ページは拍から始まる整数拍(幅は `tools/gen_divs.py`)。
 12. 編集操作は変わった行だけ再描画(`RollRefresh`)。全行(`RollRefreshAll`)はページ/表示窓/チャンネル/ロード時のみ。押してから反映まで 4 フレーム以内。
 13. プロトコル(ケーブル方式・ケーブルなしリンク・外付けブリッジ)を変えるときは、参照実装・ROM・C・テストを同時に直す。詳細は `chromatic-hw` スキル。**ノートオンの 4 シンボル・4 ビットの検査は縮めない**(違う音が鳴らないことが最優先)。ROM を先に、MCU を後に書く。
-14. **本体 ESP32 とスマートカードへの書き込みは、毎回ユーザーの確認を取る**(手順は `docs/MCU_FLASH_SAFETY.md`、`docs/CARTRIDGE.md`)。カードの**ページ 1(LSDj)とバックアップは壊さない**、書くのはページ 2 だけ。
+14. **ROM のビルドは 2 種類**: 既定の `make` は公開用(普通の MBC5 + SRAM 32 KB、保存はバンク 0〜3)、`make card` は作者の EMS スマートカード用(SRAM 128 KB、保存はバンク 12〜15)。**スマートカードに書く ROM は `make card` の `build-card/chromasynth.gb` だけ**(既定のビルドを書くと、保存が LSDj の領域に当たる)。公開用の文書は普通のカートリッジ向け(`docs/CARTRIDGES.md`)に書き、スマートカード固有の話は `docs/CARTRIDGE.md` に閉じる。
+    **本体 ESP32 とスマートカードへの書き込みは、毎回ユーザーの確認を取る**(手順は `docs/MCU_FLASH_SAFETY.md`、`docs/CARTRIDGE.md`)。カードの**ページ 1(LSDj)とバックアップは壊さない**、書くのはページ 2 だけ。
 15. **MCU から SELECT+A / SELECT+B が出るボタンの組み合わせを送らない**(共有 SRAM の LSDj の曲データを壊す)。
 16. 大きな docs(`BLE_MIDI.md`、`MCU_FLASH_SAFETY.md`、`CHROMATIC_LINK.md`)は冒頭の「現状」と目次を読んでから、必要な節だけ読む。日付つきの記録は `docs/log/` に分けてある(必要なときだけ読む)。

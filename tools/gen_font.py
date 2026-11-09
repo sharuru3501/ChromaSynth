@@ -85,6 +85,8 @@ ROLL_TILES = {  # tile index -> pixels
     74: BAR(CELL_B),
     75: TICK,
 }
+for _h in range(1, 9):  # wave editor bars: _h pixels high, 6 wide, from the bottom
+    ROLL_TILES[75 + _h] = ["00000000"] * (8 - _h) + ["00333300"] * _h
 
 
 def pixels_to_tile(px):

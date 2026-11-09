@@ -1,3 +1,5 @@
+> **この文書は、作者個人の環境(EMS 64M スマートカード + LSDj)の記録です。** 普通のカートリッジに書く場合は [CARTRIDGES.md](CARTRIDGES.md) を読んでください。ここに出てくる「保存スロットはバンク 12〜15」は `make card` のビルドの話で、既定の `make` は SRAM のバンク 0〜3 に保存します。
+
 # GB USB Smart Card 64M(EMS 64M)の扱い
 
 ChromaSynth を動かすカートリッジ。LSDJ v9.4.0 が入っている個体(ユーザー所有)。

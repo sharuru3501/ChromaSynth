@@ -68,7 +68,8 @@ DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothin
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
 DEF MSG_FRAMES EQU 90
 
-; Save slots (src/sram.asm): the last four 8 KB banks of the 128 KB SRAM, 4 slots of 8 KB.
+; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM
+; is enough); the maintainer's shared EMS card keeps LSDj in banks 0-11, so `make card` builds with SLOT_BANK0 = 12.
 DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x up to 8 bars); pattern p lives in WRAM bank p + 1
 DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
 DEF CHAIN_END  EQU $FF
@@ -76,7 +77,9 @@ DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksu
 DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
 DEF NUM_SLOTS  EQU 4
 DEF SLOT_SIZE  EQU 8192    ; one 8 KB SRAM bank per slot
-DEF SLOT_BANK0 EQU 12      ; slot n in bank 12 + n (banks 12-15)
+IF !DEF(SLOT_BANK0)
+DEF SLOT_BANK0 EQU 0       ; slot n in bank SLOT_BANK0 + n (override: rgbasm -D SLOT_BANK0=12)
+ENDC
 
 ; D-pad auto-repeat (frames)
 DEF REPEAT_DELAY EQU 16
@@ -85,6 +88,7 @@ DEF REPEAT_RATE  EQU 4
 DEF SCREEN_PLAY EQU 0
 DEF SCREEN_EDIT EQU 1
 DEF SCREEN_SEQ  EQU 2
+DEF SCREEN_WAVE EQU 6       ; CH3 wave editor: START+A on the edit screen (CH3, WAVE = a custom wave) opens it, START+B goes back
 DEF SCREEN_SONG EQU 5       ; song screen: START+UP opens it, START+DOWN goes back
 DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN opens it from play/edit/sequencer, START+UP goes back
 DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/clink.asm)
@@ -114,6 +118,9 @@ DEF T_NOTE_BODY EQU 69
 DEF T_CUR_EMP   EQU 70
 DEF T_CUR_NOTE  EQU 71
 DEF T_PLAYHEAD  EQU 72
+DEF T_BAR1      EQU 76      ; wave editor: a bar 1..8 pixels high (T_BAR1 + height - 1)
+DEF WAVE_CUSTOM EQU 4       ; WAVE values 0-3 are presets, 4-7 are the custom waves W1-W4
+DEF NUM_CUSTOM  EQU 4
 DEF TILE_INV    EQU 128     ; add to a text tile for the inverted version
 
 DEF BPM_MIN   EQU 60

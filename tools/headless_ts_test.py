@@ -419,7 +419,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("... pattern 1 is the edited one: 3/4, bar 36, 2 bars", (mem[TSN], v("wBarTicks"), v("wSeqBars")) == (3, 36, 2), (mem[TSN], v("wBarTicks"), v("wSeqBars")))
     pb.stop(save=False)
     # a song saved before the per-pattern values existed: their bytes in the slot are $00
-    SLOT = 12 * 8192 + 6336
+    SLOT = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192 + 6336   # slot 1: bank 0 (public build) or 12 (EMS-card build)
     data = bytearray(ram.read_bytes())
     for i in range(12):
         data[SLOT + i] = 0
