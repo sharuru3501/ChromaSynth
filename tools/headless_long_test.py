@@ -347,6 +347,37 @@ with tempfile.TemporaryDirectory() as tmp:
           [r for r in range(18) if final[r * 20:(r + 1) * 20] != picture()[r * 20:(r + 1) * 20]])
     pb.stop(save=False)
 
+
+# --- playing across a page boundary: the next page is built ahead and shown as the playhead gets there
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")
+    pb.tick(40)
+    mem[sym["wBpm"]] = 200                       # a tick every 1.5 frames: a turn that lags shows
+    mem[sym["wSeqBars"]] = 3
+    pb.tick(20)
+    combo(pb, "select", "start")
+    samples = []                                  # (tick, segment, bar number tile on the ruler, playhead visible)
+    for _ in range(420):
+        pb.tick(1)
+        samples.append((v("wSeqCur"), v("wSeqCurSeg"), screen_row_of(mem, 0)[2], v("wPlayShown") != 0xFF))
+    combo(pb, "select", "start")
+    # 1/16: a page is one bar (48 ticks). The ruler's first bar number is the bar of the shown page.
+    lag = []
+    for tick, seg, ruler, vis in samples:
+        want = ord("1") - 32 + tick // 48
+        if tick % 48 >= 2:                        # two ticks after the page started: it must be the shown one
+            lag.append(ruler != want)
+    check("every page turn is on screen two ticks after the playhead enters the new page (no lag)", sum(lag) <= 3, (sum(lag), len(lag)))
+    hidden = [1 for tick, seg, ruler, vis in samples if tick % 48 >= 2 and not vis]
+    check("the playhead is visible except for the first ticks of a page", len(hidden) <= 4, len(hidden))
+    pb.stop(save=False)
+
 # --- the status line shows the loop length; a note placed after the loop end lengthens the loop
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"

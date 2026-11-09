@@ -718,7 +718,7 @@ for i in range(120):
         last = t_
     bass.add(cur(2))
     if v("wPlayX") != 0xFF:
-        samples.append((v("wSeqCur"), v("wPageTick"), v("wPlayX"), v("wPlayShown")))
+        samples.append((v("wSeqCur"), v("wShTick"), v("wPlayX"), v("wPlayShown")))
     if i == 30:
         shot("10_roll_playing")
 check("tempo: 48 ticks in 2 s at 120 BPM (12 ticks per beat)", 46 <= ticks <= 50, ticks)
