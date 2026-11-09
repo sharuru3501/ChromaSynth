@@ -89,8 +89,8 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "right")
     pb.tick(40)
     table = [  # (numerator, denominator index, beat ticks, bar ticks, longest loop in bars)
-        (4, 0, 12, 48, 8), (3, 0, 12, 36, 10), (2, 0, 12, 24, 15), (5, 0, 12, 60, 6), (6, 1, 6, 36, 10),
-        (3, 1, 6, 18, 15), (7, 1, 6, 42, 9), (5, 2, 3, 15, 15), (4, 0, 12, 48, 8),
+        (4, 0, 12, 48, 8), (3, 0, 12, 36, 8), (2, 0, 12, 24, 8), (5, 0, 12, 60, 6), (6, 1, 6, 36, 8),
+        (3, 1, 6, 18, 8), (7, 1, 6, 42, 8), (5, 2, 3, 15, 8), (4, 0, 12, 48, 8),
     ]
     for n, d, beat, bar, maxbars in table:
         mem[TSN] = n
@@ -187,8 +187,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("3/4: a note in bar 3 (tick 72) makes the loop 3 bars", v("wSeqBars") == 3, v("wSeqBars"))
     for _ in range(14):
         combo(pb, "select", "right")
-    check("3/4: the longest loop is 10 bars (384 / 36)", v("wSeqBars") == 10, v("wSeqBars"))
-    check("... which ends in segment 2 after 168 ticks (360 - 192)", (v("wEdLoopSeg"), v("wEdLoopTail")) == (1, 168), (v("wEdLoopSeg"), v("wEdLoopTail")))
+    check("3/4: the longest loop is 8 bars (the pattern limit; 384 / 36 would be 10)", v("wSeqBars") == 8, v("wSeqBars"))
+    check("... which ends in segment 2 after 96 ticks (288 - 192)", (v("wEdLoopSeg"), v("wEdLoopTail")) == (1, 96), (v("wEdLoopSeg"), v("wEdLoopTail")))
     for _ in range(14):
         combo(pb, "select", "left")
     check("... and the shortest is 1 bar", v("wSeqBars") == 1, v("wSeqBars"))

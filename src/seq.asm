@@ -1219,8 +1219,24 @@ NoteEnded:
 SeqDelete:
     call FindNote
     ret c
-    xor a
-    ld [hl], a              ; note-on gone
+    push de                 ; the note-on's tick
+    ld c, 0                 ; c = what stays in the note-on's cell
+.prev:                      ; a note right before this one runs into it (no OFF between): it must keep its
+    ld a, d                 ; length, so an OFF takes the place of the deleted note-on
+    or e
+    jr z, .prevDone
+    dec de
+    call AbsHL
+    ld a, [hl]
+    and a
+    jr z, .prev
+    cp CELL_OFF
+    jr z, .prevDone
+    ld c, CELL_OFF
+.prevDone:
+    pop de
+    call AbsHL
+    ld [hl], c              ; note-on gone
     call FindEnd            ; de = end tick, hl = the cell there
     ld a, d
     cp 1

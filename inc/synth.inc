@@ -96,7 +96,7 @@ DEF SEQ_TICKS  EQU 192      ; ticks per segment (4 bars of 4/4); a position is (
 DEF SEQ_STRIDE EQU 512      ; pattern bytes per channel: two 256-byte pages, one per segment of SEQ_TICKS ticks
 DEF TOTAL_TICKS EQU 384     ; ticks in a whole pattern (NUM_SEGS x SEQ_TICKS)
 DEF NUM_SEGS   EQU 2        ; segments per pattern: a pattern is up to 8 bars (2 x 4 bars)
-DEF MAX_BARS   EQU 15          ; loop length in bars is at most this (and at most 384 ticks: wMaxBars)
+DEF MAX_BARS   EQU 8           ; loop length in bars is at most this (and at most 384 ticks: wMaxBars)
 DEF SEQ_PAGE   EQU 16       ; grid columns per piano-roll page
 DEF ROLL_ROWS  EQU 16       ; pitch rows visible
 DEF RING_ROWS  EQU 32       ; rows of a BG map: pitch p always lives in map row (1 - p) mod 32; SCY picks the visible 18

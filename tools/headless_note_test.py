@@ -101,6 +101,14 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "b", 8)
     check("delete: the note and its OFF in the next segment",
           cell(0, 189) == 0 and cell(1, 3) == 0, (cell(0, 189), cell(1, 3)))
+    # a note that runs into the next one keeps its length when that one is deleted
+    for i in range(256):
+        put(0, i, 0); put(1, i, 0)
+    put(0, 0, 60); put(0, 12, 62); put(0, 24, OFF)       # (the first has no OFF: it ends at the second)
+    cursor(0, 12, 62)
+    tap(pb, "b", 8)
+    check("deleting the next note: the first keeps its length (an OFF where the deleted note started)",
+          cell(0, 0) == 60 and cell(0, 12) == OFF and cell(0, 24) == 0, (cell(0, 0), cell(0, 12), cell(0, 24)))
     # two notes of the same pitch side by side stay two notes
     put(0, 0, 60); put(0, 3, OFF)
     cursor(0, 3, 60)
