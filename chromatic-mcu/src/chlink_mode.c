@@ -9,10 +9,13 @@
 #include "chlink_link.h"
 #include "chlink_proto.h"
 #include "esp_console.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "osd_shared.h"
 #include "pwrmgr.h"
 
@@ -28,6 +31,46 @@ static TaskHandle_t s_mode_task = NULL;
 static volatile ChMidiMode s_mode = CHM_OFF;      // requested (shown by the menu)
 static volatile ChMidiMode s_applied = CHM_OFF;   // what the mode task has finished setting up
 static volatile uint32_t s_switches = 0;
+// The Mac app (ChromaSynth Link) sends `hb` every 3 s while it holds the USB mode. Once a heartbeat has been seen, 10 s without
+// one (the cable was pulled, the app quit) puts the saved mode back. Helpers that never send `hb` are not affected.
+static volatile int64_t s_hb_us = 0;
+static volatile bool s_hb_seen = false;
+static ChMidiMode s_boot_mode = CHM_OFF;          // the mode saved by the last OSD selection (applied a few seconds after boot)
+
+// The mode chosen in the OSD menu (or by `mode set`) is kept in flash (NVS namespace "chlink", key "mode"), so the next boot starts
+// in it. A `mode <m>` typed on the console (what the Mac helper does) is temporary and is not saved.
+static void persist(ChMidiMode m)
+{
+    nvs_handle_t h;
+    if (nvs_open("chlink", NVS_READWRITE, &h) != ESP_OK)
+    {
+        return;
+    }
+    uint8_t old = 0xFF;
+    (void)nvs_get_u8(h, "mode", &old);
+    if (old != (uint8_t)m)
+    {
+        (void)nvs_set_u8(h, "mode", (uint8_t)m);
+        (void)nvs_commit(h);
+    }
+    nvs_close(h);
+}
+
+static ChMidiMode load_saved(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    ChMidiMode m = CHM_OFF;
+    if (nvs_open("chlink", NVS_READONLY, &h) == ESP_OK)
+    {
+        if (nvs_get_u8(h, "mode", &v) == ESP_OK && v < CHM_COUNT)
+        {
+            m = (ChMidiMode)v;
+        }
+        nvs_close(h);
+    }
+    return m;
+}
 
 const char *ChMode_Name(ChMidiMode m)
 {
@@ -76,15 +119,25 @@ static void apply(ChMidiMode m)
 static void mode_task(void *arg)
 {
     (void)arg;
+    if (s_boot_mode != CHM_OFF)
+    {
+        vTaskDelay(pdMS_TO_TICKS(3000));      // let the rest of the firmware start first (the stock code is still initialising)
+        ChMode_Request(s_boot_mode);
+    }
     for (;;)
     {
         ChMidiMode m;
-        if (xQueueReceive(s_q, &m, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(s_q, &m, pdMS_TO_TICKS(1000)) == pdTRUE)
         {
             while (xQueueReceive(s_q, &m, 0) == pdTRUE)
             {
             }                                // only the latest request counts
             apply(m);
+        }
+        else if (s_hb_seen && s_applied == CHM_USB && esp_timer_get_time() - s_hb_us > 10 * 1000 * 1000LL)
+        {
+            s_hb_seen = false;               // the Mac side is gone: back to the saved mode
+            ChMode_Request(load_saved());
         }
     }
 }
@@ -95,18 +148,40 @@ static int cmd_mode(int argc, char **argv)
     if (argc >= 2)
     {
         ChMidiMode m = CHM_COUNT;
-        if (!strcmp(argv[1], "off")) m = CHM_OFF;
-        else if (!strcmp(argv[1], "ble")) m = CHM_BLE;
-        else if (!strcmp(argv[1], "usb")) m = CHM_USB;
+        bool save = false;
+        int arg = 1;
+        if (!strcmp(argv[1], "set") && argc >= 3)
+        {
+            save = true;                      // `mode set ble`: also the mode of the next boot
+            arg = 2;
+        }
+        if (!strcmp(argv[arg], "saved")) m = load_saved();      // `mode saved`: the mode of the next boot, now
+        else if (!strcmp(argv[arg], "off")) m = CHM_OFF;
+        else if (!strcmp(argv[arg], "ble")) m = CHM_BLE;
+        else if (!strcmp(argv[arg], "usb")) m = CHM_USB;
         if (m == CHM_COUNT)
         {
-            printf("usage: mode [off|ble|usb]\n");
+            printf("usage: mode [set] [off|ble|usb|saved]   (`set` also saves it for the next boot)\n");
             return -1;
+        }
+        if (save)
+        {
+            persist(m);
         }
         ChMode_Request(m);
         vTaskDelay(pdMS_TO_TICKS(800));   // let the mode task finish (starting BLE takes a moment)
     }
-    printf("MIDI mode %s (applied %s), %u switches\n", ChMode_Name(s_mode), ChMode_Name(s_applied), (unsigned)s_switches);
+    printf("MIDI mode %s (applied %s), saved for boot: %s, %u switches\n", ChMode_Name(s_mode), ChMode_Name(s_applied),
+           ChMode_Name(load_saved()), (unsigned)s_switches);
+    return 0;
+}
+
+static int cmd_hb(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    s_hb_us = esp_timer_get_time();
+    s_hb_seen = true;
     return 0;
 }
 
@@ -158,9 +233,12 @@ static int cmd_tasks(int argc, char **argv)
 
 void ChMode_Init(void)
 {
+    (void)nvs_flash_init();                 // the stock firmware has done it already; harmless then
+    s_boot_mode = load_saved();
     s_q = xQueueCreate(4, sizeof(ChMidiMode));
     const esp_console_cmd_t cmds[] = {
         {.command = "mode", .help = "MIDI mode: mode [off|ble|usb]", .func = &cmd_mode},
+        {.command = "hb", .help = "heartbeat of the Mac app (USB mode falls back to the saved mode after 10 s without it)", .func = &cmd_hb},
         {.command = "m", .help = "wired MIDI message (hex): m 90 3c 64", .func = &cmd_m},
         {.command = "tasks", .help = "least free stack of our tasks (bytes)", .func = &cmd_tasks},
     };
@@ -218,10 +296,12 @@ OSD_Result_t ChMode_OnButton(const Button_t Button, const ButtonState_t State, v
     if (Button == kButton_A)
     {
         ChMode_Request((ChMidiMode)((s_mode + 1) % CHM_COUNT));
+        persist(s_mode);                    // the OSD choice is kept for the next boot
     }
     else if (Button == kButton_B)
     {
         ChMode_Request((ChMidiMode)((s_mode + CHM_COUNT - 1) % CHM_COUNT));
+        persist(s_mode);
     }
     if (s_label != NULL)
     {

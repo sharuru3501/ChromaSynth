@@ -1,0 +1,31 @@
+# ChromaSynth Link(Mac のメニューバーアプリ)
+
+Chromatic で動く ChromaSynth を、Mac の DAW(Ableton Live など)や MIDI キーボードから鳴らすための小さなアプリです。**Bluetooth(BLE MIDI)と USB-C の両方**に対応し、接続は自動です。
+
+## できること
+- DAW の「MIDI To」に **`ChromaSynth`** という出力が出る(アプリが動いている間)。Audio MIDI 設定での Bluetooth の接続は**不要**(両方でつなぐと音が 2 回鳴る)。
+- **Bluetooth**: Chromatic の MIDI モードが BLE のとき、アプリが探して自動で接続し、切れたらつなぎ直す。
+- **USB-C**: ケーブルをつなぐと(`/dev/cu.usbmodem*` が現れる)自動で USB に切り替え、ノートを送る。抜くと、3 秒ごとの `hb`(ハートビート)が止まり、Chromatic は **10 秒後に保存してあるモード**へ戻る。
+- メニューバーの `♪●`(接続中)/ `♪○`(未接続)と、メニューの状態表示、「ログイン時に開く」。
+- ハードの MIDI キーボードも自動で聴く(IAC バスと `ChromaSynth` は除く)。
+- ループ(Live が自分の出力を自分に返す)の検出つき: 1 秒に 60 通を超えると、静かになるまで捨てる。
+- ChromaSynth の ROM は **キーボード画面**にしておく(ESP32 が送るのはそのときだけ)。
+
+## 作る・動かす
+```bash
+tools/mac/build_app.sh          # build/ChromaSynthLink.app(Xcode のコマンドラインツールの swiftc が要る)
+open build/ChromaSynthLink.app
+```
+初回は、Bluetooth の許可のダイアログが出ます(許可してください)。「ログイン時に開く」をメニューで入れると、次のログインから自動で起動します。
+
+コマンドライン: `ChromaSynthLink --selftest`(変換などの自己試験)、`--dry-run`(送らずに行を出す。Bluetooth の許可は要らない)、`--list`。試験は `tools/mac/test.sh`(ハード不要)。
+
+## Chromatic 側(本体の ESP32)
+- OSD の System > MIDI MODE で選んだモード(OFF / BLE / USB)は**保存され、次の起動でも引き継がれる**(起動の 3 秒後に適用)。電池を節約したいときは OFF に戻す。
+- コンソールの `mode usb` などは**一時的**(保存しない)。保存するのは `mode set ble` など。`mode saved` は保存してあるモードに戻す。
+- `hb` を一度でも受けた USB モードは、10 秒途切れると保存モードへ戻る。`hb` を送らない古い helper(`tools/chromasynth_usb_bridge.swift`)には影響しない。
+
+## 未確認
+- 実機での BLE の自動接続・再接続、USB の自動切り替えと保存モードへの復帰(ESP32 の書き込みが要る)。
+- DAW の「MIDI From」に `ChromaSynth` を出すこと(ROM → DAW の上り。M15)。
+- 署名なしの `.app`(ad-hoc 署名)を、他の Mac で開く手順(公開のときに整える)。
