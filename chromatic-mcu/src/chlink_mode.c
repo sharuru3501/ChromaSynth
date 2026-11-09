@@ -223,11 +223,8 @@ static int cmd_m(int argc, char **argv)
         if (held == note) held = 0xFF;
         break;
     case CHL_ACT_ALL_OFF:
-        if (held != 0xFF)
-        {
-            (void)ChLinkLink_Note(false, held, 0);
-            held = 0xFF;
-        }
+        (void)ChLinkLink_Release();       // always: this firmware may have restarted and not know what sounds
+        held = 0xFF;
         break;
     default:
         break;

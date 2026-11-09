@@ -63,11 +63,8 @@ static void on_midi(void *ctx, uint8_t status, uint8_t d1, uint8_t d2)
         if (s_last_note == note) s_last_note = 0xFF;
         break;
     case CHL_ACT_ALL_OFF:
-        if (s_last_note != 0xFF)
-        {
-            (void)ChLinkLink_Note(false, s_last_note, 0);
-            s_last_note = 0xFF;
-        }
+        (void)ChLinkLink_Release();      // always: this firmware may have restarted and not know what sounds
+        s_last_note = 0xFF;
         break;
     default: break;
     }

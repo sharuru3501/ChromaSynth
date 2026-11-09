@@ -189,7 +189,10 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
         for c in s.characteristics ?? [] where c.uuid == Link.midiCharacteristic {
             characteristic = c
-            if transport != .usb { transport = .ble }
+            if transport != .usb {
+                transport = .ble
+                p.writeValue(Data(blePacketBytes([0xB0, 123, 0], timestamp: 0)), for: c, type: .withoutResponse)   // all notes off: nothing may hang from before
+            }
             print("Bluetooth: connected")
         }
     }
