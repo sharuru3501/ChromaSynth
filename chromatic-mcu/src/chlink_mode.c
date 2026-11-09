@@ -31,9 +31,8 @@ static TaskHandle_t s_mode_task = NULL;
 static volatile ChMidiMode s_mode = CHM_OFF;      // requested (shown by the menu)
 static volatile ChMidiMode s_applied = CHM_OFF;   // what the mode task has finished setting up
 static volatile uint32_t s_switches = 0;
-// The Mac app (ChromaSynth Link) sends `hb` every 3 s while it holds the USB mode. Once a heartbeat has been seen, 10 s without
-// one (the cable was pulled, the app quit) puts the saved mode back. The app sends `hb` every second: 3 s is quick, and still
-// three missed beats. Helpers that never send `hb` are not affected.
+// The Mac app (ChromaSynth Link) sends `hb` every 0.5 s while it holds the USB mode. Once a heartbeat has been seen, 10 s without
+// one (the cable was pulled, the app quit) puts the saved mode back. The app sends `hb` every half second: 2 s is four missed beats. Helpers that never send `hb` are not affected.
 static volatile bool s_requested = false;         // something has asked for a mode since the boot (then the saved mode is not applied over it)
 static volatile int64_t s_hb_us = 0;
 static volatile bool s_hb_seen = false;
@@ -138,14 +137,14 @@ static void mode_task(void *arg)
     for (;;)
     {
         ChMidiMode m;
-        if (xQueueReceive(s_q, &m, pdMS_TO_TICKS(1000)) == pdTRUE)
+        if (xQueueReceive(s_q, &m, pdMS_TO_TICKS(250)) == pdTRUE)
         {
             while (xQueueReceive(s_q, &m, 0) == pdTRUE)
             {
             }                                // only the latest request counts
             apply(m);
         }
-        else if (s_hb_seen && s_applied == CHM_USB && esp_timer_get_time() - s_hb_us > 3 * 1000 * 1000LL)
+        else if (s_hb_seen && s_applied == CHM_USB && esp_timer_get_time() - s_hb_us > 2 * 1000 * 1000LL)
         {
             s_hb_seen = false;               // the Mac side is gone: back to the saved mode
             ChMode_Request(load_saved());

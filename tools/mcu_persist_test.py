@@ -4,7 +4,7 @@
 It only talks to the console (flashes nothing, presses no buttons). Opening the port resets the ESP32 once (a power cycle of the console is what reboots it for the real test: see below).
   1. a mode saved with `mode set ble` is applied again after a reboot (3 s after boot)
   2. `mode usb` (temporary) is not saved
-  3. after `hb` has been seen, 3 s without it puts the saved mode back (the app sends one every second)
+  3. after `hb` has been seen, 2 s without it puts the saved mode back (the app sends one every half second)
   4. `mode saved` puts the saved mode back at once
 It ends by saving OFF again (`mode set off`).
   python3 tools/mcu_persist_test.py
@@ -78,14 +78,14 @@ check("after a reboot the saved mode (BLE) is applied again", m == ("BLE", "BLE"
 cmd(p, "mode usb", 2.0)
 m = mode(p)
 check("`mode usb` is temporary: USB applied, BLE still saved", m == ("USB", "USB", "BLE"), m)
-for _ in range(6):                               # a heartbeat every second
+for _ in range(10):                              # a heartbeat every half second
     cmd(p, "hb", 0.1)
-    time.sleep(0.9)
+    time.sleep(0.4)
 m = mode(p)
 check("with heartbeats, USB stays", m == ("USB", "USB", "BLE"), m)
-time.sleep(6)                                    # no heartbeat: back to the saved mode after 3 s (+ the BLE start)
+time.sleep(5)                                    # no heartbeat: back to the saved mode after 2 s (+ the BLE start)
 m = mode(p)
-check("3 s without a heartbeat: back to the saved mode (BLE)", m is not None and m[1] == "BLE", m)
+check("2 s without a heartbeat: back to the saved mode (BLE)", m is not None and m[1] == "BLE", m)
 cmd(p, "mode usb", 2.0)
 cmd(p, "mode saved", 2.5)
 m = mode(p)

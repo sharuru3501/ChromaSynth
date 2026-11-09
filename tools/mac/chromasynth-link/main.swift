@@ -104,10 +104,8 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private func tick() {
         ticks += 1
         pollUSB()
-        if ticks % 4 == 0 {                       // once a second
-            connectKeyboards()
-            if transport == .usb { send("hb") }   // the heartbeat: without it the ESP32 leaves USB mode after 3 s
-        }
+        if transport == .usb, ticks % 2 == 0 { send("hb") }   // the heartbeat, twice a second: without it the ESP32 leaves USB mode after 2 s
+        if ticks % 4 == 0 { connectKeyboards() }               // once a second
     }
 
     // ---- MIDI in
