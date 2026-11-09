@@ -148,8 +148,8 @@ MainLoop:
     ld [wFrames], a
     call CLinkUp            ; palette RAM is only writable now, so before anything else
     call UpdateUI           ; VRAM is only writable now, so do this first
-    call DrainMidi
     call VoiceTick
+    call DrainMidi
     call SeqTick
     call RollPlayheadCalc
     call MsgTick
