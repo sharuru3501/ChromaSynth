@@ -521,16 +521,18 @@ BuildCols:
     xor a
 .flagSet:
     ld [wBCFlag], a
-    and a                   ; ruler tile: only beat columns inside the loop get a mark
-    ld a, 0
+    and a                   ; ruler tile: bar numbers over the bar lines (all MAX_BARS bars, also after the
+    ld a, 0                 ; loop end), a tick over the other beat lines inside the loop
     jr z, .rulerSet
-    call InLoop
-    ld a, 0
-    jr nc, .rulerSet        ; after the loop end: blank
     ld a, [wBCFlag]
     bit 3, a
+    jr nz, .barNumber
+    call InLoop
+    ld a, 0
+    jr nc, .rulerSet        ; after the loop end: no tick on an ordinary beat
     ld a, T_TICK
-    jr z, .rulerSet         ; ordinary beat: a tick on the beat line
+    jr .rulerSet
+.barNumber:
     ld a, [wBCBeat]
     srl a
     srl a

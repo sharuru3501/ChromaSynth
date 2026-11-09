@@ -392,6 +392,19 @@ with tempfile.TemporaryDirectory() as tmp:
     def shown_row(r):
         return screen_row_of(mem, r)
 
+    check("the ruler numbers the bars of the page even after the loop end (loop 2 bars, page 1: bar 1)", shown_row(0)[2] == ord("1") - 32, shown_row(0)[:6])
+    mem[sym["wRollSeg"]] = 1
+    mem[sym["wRollCell"]] = 0
+    mem[sym["wRollTick"]] = 0
+    tap(pb, "left")                          # out of segment 2 and back: the ruler of bar 5's page
+    tap(pb, "right")
+    pb.tick(30)
+    check("... and a page after the loop end (loop 2 bars) still shows its bar number: 5", shown_row(0)[2] == ord("5") - 32, shown_row(0)[:6])
+    mem[sym["wRollSeg"]] = 0
+    mem[sym["wRollCell"]] = 0
+    mem[sym["wRollTick"]] = 0
+    tap(pb, "left")
+    pb.tick(30)
     st = shown_row(17)
     check("the status line ends with the loop length: L2", st[18] == ord("L") - 32 and st[19] == ord("2") - 32, st)
     check("the ruler ends with the pattern: P1", shown_row(0)[18:20] == bytes([ord("P") - 32 + 0x80, ord("1") - 32 + 0x80]), shown_row(0))
