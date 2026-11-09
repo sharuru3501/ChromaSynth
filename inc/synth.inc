@@ -85,6 +85,7 @@ DEF REPEAT_RATE  EQU 4
 DEF SCREEN_PLAY EQU 0
 DEF SCREEN_EDIT EQU 1
 DEF SCREEN_SEQ  EQU 2
+DEF SCREEN_WAVE EQU 6       ; CH3 wave editor: START+A on the edit screen (CH3, WAVE = a custom wave) opens it, START+B goes back
 DEF SCREEN_SONG EQU 5       ; song screen: START+UP opens it, START+DOWN goes back
 DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN opens it from play/edit/sequencer, START+UP goes back
 DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/clink.asm)
@@ -114,6 +115,9 @@ DEF T_NOTE_BODY EQU 69
 DEF T_CUR_EMP   EQU 70
 DEF T_CUR_NOTE  EQU 71
 DEF T_PLAYHEAD  EQU 72
+DEF T_BAR1      EQU 76      ; wave editor: a bar 1..8 pixels high (T_BAR1 + height - 1)
+DEF WAVE_CUSTOM EQU 4       ; WAVE values 0-3 are presets, 4-7 are the custom waves W1-W4
+DEF NUM_CUSTOM  EQU 4
 DEF TILE_INV    EQU 128     ; add to a text tile for the inverted version
 
 DEF BPM_MIN   EQU 60

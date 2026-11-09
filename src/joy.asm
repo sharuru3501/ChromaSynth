@@ -243,13 +243,13 @@ HandleJoy:
     bit PADB_START, a
     jp z, .noStart          ; START alone does nothing: it only modifies
     bit PADB_SELECT, a
-    jr z, .nav
+    jp z, .nav
     bit PADB_START, d
-    jr z, .startHeld
+    jp z, .startHeld
     push de                 ; SELECT+START: sequencer play/stop
     call SeqToggle
     pop de
-    jr .startHeld
+    jp .startHeld
 .nav:
     ; START+DOWN opens the slot list (from play / edit / sequencer), START+UP goes back
     ld a, [wJoyPrev]
@@ -265,6 +265,8 @@ HandleJoy:
     jr z, .fromSlot
     cp SCREEN_SONG
     jr z, .fromSong
+    cp SCREEN_WAVE
+    jp z, .startHeld        ; the wave editor is left with START+B only
     ld [wScreenBack], a
     bit PADB_DOWN, c
     ld a, SCREEN_SLOT
@@ -289,6 +291,8 @@ HandleJoy:
     jr z, .startHeld        ; the slot list is left with START+UP only
     cp SCREEN_SONG
     jr z, .startHeld        ; the song screen with START+DOWN only
+    cp SCREEN_WAVE
+    jr z, .startHeld
     ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
     ld a, [wJoyPrev]
     bit PADB_START, a
@@ -373,6 +377,18 @@ HandleJoy:
     jp z, SongInput
     cp SCREEN_SEQ
     jp z, SeqInput
+    cp SCREEN_WAVE
+    jp z, WaveInput
+    ld a, [wJoy]            ; the edit screen: START+A on CH3 opens the wave editor
+    bit PADB_START, a
+    jr z, .editPlain
+    ld a, [wSelCh]
+    cp 2
+    jr nz, .editPlain
+    bit PADB_A, d
+    jr z, .editPlain
+    jp WaveOpen
+.editPlain:
     call EditInput
     ld a, [wJoy]
     bit PADB_B, a

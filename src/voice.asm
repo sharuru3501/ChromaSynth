@@ -568,15 +568,21 @@ VoiceWave:
     ldh [rNR34], a
     ret
 
-; Copy preset wave (patch byte 0 of CH3) into wave RAM (CH3 must be stopped).
+; Copy the wave (patch byte 0 of CH3: a preset or a custom wave) into wave RAM (CH3 must be stopped).
 LoadWave:
     push de
     push bc
     ld a, [wPatch + 2 * PATCH_SIZE + P_MAIN]
+    ld de, Waves
+    cp WAVE_CUSTOM
+    jr c, .preset
+    sub WAVE_CUSTOM         ; a custom wave W1-W4
+    and NUM_CUSTOM - 1
+    ld de, wWaves
+.preset:
     swap a                  ; * 16 bytes
     ld l, a
     ld h, 0
-    ld de, Waves
     add hl, de
     ld de, _AUD3WAVERAM
     ld b, 16

@@ -73,6 +73,7 @@ EntryPoint:
     ld [wEditBank], a
     ld [wPlayBank], a
     call ChainReset
+    call WaveDefaults
     ld a, 120
     ld [wBpm], a
     ld a, 2                 ; the demo is two bars long

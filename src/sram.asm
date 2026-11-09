@@ -14,6 +14,8 @@
 ;   +6328 name     (NAME_LEN bytes, indices into NameChars; not in the checksum)
 ;   +6336 per pattern: numerator x4, denominator index x4, loop bars x4 (not in the checksum;
 ;         a song saved before they existed holds $00 there: the loader fills the defaults)
+;   +6348 the custom CH3 waves: a mark byte ($A5), then W1-W4 of 16 bytes (not in the checksum;
+;         without the mark the loader uses the default waves)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
@@ -339,6 +341,9 @@ SaveAll:
     ld hl, wPatTsn          ; per pattern: time signature and loop length (not in the checksum)
     ld bc, 3 * NUM_PATS
     call CopyBytes
+    ld hl, wWaveMark        ; the custom CH3 waves (not in the checksum)
+    ld bc, 1 + 16 * NUM_CUSTOM
+    call CopyBytes
     call SlotBase
     call ValidateSave
     jr c, .fail
@@ -406,8 +411,14 @@ LoadAll:
     ld de, wPatTsn
     ld bc, 3 * NUM_PATS
     call CopyBytes
+    ld de, wWaveMark
+    ld bc, 1 + 16 * NUM_CUSTOM
+    call CopyBytes
     call SanitizeName
     call SramClose
+    ld a, [wWaveMark]       ; a song saved before the custom waves existed: the default waves
+    cp $A5
+    call nz, WaveDefaults
     call SongLoaded         ; (clamps the chain, edits pattern 1 in loop mode)
     and a                   ; clear carry
     ret
