@@ -305,9 +305,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 if n > 0 {
                     let chunk = String(decoding: buf[0..<n], as: UTF8.self)
                     lineBuf += chunk
-                    while let nl = lineBuf.firstIndex(where: { $0 == "\n" }) {          // `u 90 3c 64`: the ROM's MIDI out
-                        let line = String(lineBuf[lineBuf.startIndex..<nl])
-                        lineBuf.removeSubrange(lineBuf.startIndex...nl)
+                    for line in takeLines(&lineBuf) {                                  // `u 90 3c 64`: the ROM's MIDI out
                         if let msg = uplinkMessage(fromLine: line) { DispatchQueue.main.async { me.fromChromatic(msg) } }
                     }
                     if lineBuf.count > 200 { lineBuf = "" }

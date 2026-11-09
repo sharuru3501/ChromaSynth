@@ -29,7 +29,8 @@ open build/ChromaSynthLink.app
 
 ## Chromatic のシーケンサーを DAW に録音する(ROM → DAW、M15)
 - DAW の MIDI 入力に **`ChromaSynth`** が出る(出力と同じ名前)。ChromaSynth の MIDI ページで SYNC = OUT にして、ROM をキーボード画面にして、SELECT+START で再生すると、シーケンサーのノート・クロック・スタート/停止がここに流れる。
-- ROM のクロックは 1 拍 12 回なので、アプリが 1 つおきに足して 24 回にする。詳しくは [M15_DESIGN.md](M15_DESIGN.md)。
+- ROM のクロックは 1 拍 12 回なので、アプリが 1 つおきに足して 24 回にする。
+- DAW なしで確かめるには、`swiftc -O tools/mac/midi_listen.swift -o build/midi_listen` のあと `build/midi_listen ChromaSynth 12`: 12 秒間に届いたクロック・ノート・スタート/停止の数を数える(USB で、実機の ROM のノートとクロックが、仮想入力に届くことを確認した 2026-11-10)。詳しくは [M15_DESIGN.md](M15_DESIGN.md)。
 
 ## Chromatic の側でモードを切り替えたとき
 - Chromatic のメニュー(System > MIDI MODE)で USB から BLE などへ切り替えると、アプリは 2 秒おきに `mode` で問い合わせて**切り替えを検知**し、USB のポートを手放して、BLE に切り替える(メニューの表示は `Chromatic MIDI mode: …`)。ケーブルを抜き差しするか、「Connect」を選ぶまで、USB を勝手に取り戻さない(メニューで選んだモードを尊重する)。

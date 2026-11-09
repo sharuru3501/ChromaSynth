@@ -172,6 +172,15 @@ func uplinkMessage(fromLine line: String) -> [UInt8]? {
     return out
 }
 
+/// Complete lines of a growing text buffer (the console ends lines with \r\n, which Swift treats as ONE character: splitting on \n
+/// alone never finds it). The incomplete rest stays in the buffer.
+func takeLines(_ buf: inout String) -> [String] {
+    let t = buf.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    var parts = t.components(separatedBy: "\n")
+    buf = parts.removeLast()
+    return parts
+}
+
 /// The ROM sends a clock every tick, 12 a beat; a DAW wants 24 a beat. Every clock is followed by a second one half an interval
 /// later (the interval being the one between the last two clocks). Start / stop / continue forget the interval. Pure: the time is
 /// passed in.
@@ -200,6 +209,11 @@ func selftestUplink() -> Int {
     check("console line, 3 bytes", uplinkMessage(fromLine: "u 90 3c 64\r\n") == [0x90, 0x3c, 0x64])
     check("console line, 1 byte", uplinkMessage(fromLine: "u f8") == [0xF8])
     check("console line: an echoed command is not a message", uplinkMessage(fromLine: "up on") == nil && uplinkMessage(fromLine: "mcu> hb") == nil)
+    var lb = "u 90 3c 64\r\nu f8\r\nu 9"
+    let got = takeLines(&lb)
+    check("console lines end with \\r\\n: two complete lines, the rest is kept", got == ["u 90 3c 64", "u f8"] && lb == "u 9")
+    lb += "0 3e 64\r\n"
+    check("the rest completes with the next chunk", takeLines(&lb) == ["u 90 3e 64"] && lb == "")
     var c = ClockDoubler()
     check("the first clock: no interval yet", c.secondClock(after: [0xF8], at: 1.000) == nil)
     let d = c.secondClock(after: [0xF8], at: 1.040)
