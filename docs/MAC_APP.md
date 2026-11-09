@@ -5,9 +5,11 @@ Chromatic で動く ChromaSynth を、Mac の DAW(Ableton Live など)や MIDI �
 ## できること
 - DAW の「MIDI To」に **`ChromaSynth`** という出力が出る(アプリが動いている間)。Audio MIDI 設定での Bluetooth の接続は**不要**(両方でつなぐと音が 2 回鳴る)。
 - **Bluetooth**: Chromatic の MIDI モードが BLE のとき、アプリが探して自動で接続し、切れたらつなぎ直す。
-- **USB-C**: ケーブルをつなぐと(`/dev/cu.usbmodem*` が現れる)自動で USB に切り替え、ノートを送る。抜くと、3 秒ごとの `hb`(ハートビート)が止まり、Chromatic は **10 秒後に保存してあるモード**へ戻る。
+- **USB-C**: ケーブルをつなぐと(`/dev/cu.usbmodem*` が現れる)自動で USB に切り替え、ノートを送る。抜くと、1 秒ごとの `hb`(ハートビート)が止まり、Chromatic は **3 秒後に保存してあるモード**へ戻る(BLE の起動と接続で、合わせて 5〜6 秒)。
 - メニューバーの `♪●`(接続中)/ `♪○`(未接続)と、メニューの状態表示、「ログイン時に開く」。
-- ハードの MIDI キーボードも自動で聴く(IAC バスと `ChromaSynth` は除く)。
+- ハードの MIDI キーボードを直接聴くのは、メニューの「Play MIDI keyboards directly」を入れたときだけ(既定は切)。DAW がキーボードを `ChromaSynth` に送っているとき、入れると音が 2 回鳴る。
+- メニューの **Disconnect / Connect**: 手動で接続を切る / つなぐ。切ると、つなぐまで自動では何もつながない。
+- **Ableton Live の初回の設定**: Live の環境設定 > Tempo & MIDI の出力ポートの一覧に `ChromaSynth` が出るので、**その行の「Track」(トラック)を入れる**。入れないと、トラックの「MIDI To」に出ない(一度入れれば覚える)。
 - ループ(Live が自分の出力を自分に返す)の検出つき: 1 秒に 60 通を超えると、静かになるまで捨てる。
 - ChromaSynth の ROM は **キーボード画面**にしておく(ESP32 が送るのはそのときだけ)。
 
@@ -23,7 +25,7 @@ open build/ChromaSynthLink.app
 ## Chromatic 側(本体の ESP32)
 - OSD の System > MIDI MODE で選んだモード(OFF / BLE / USB)は**保存され、次の起動でも引き継がれる**(起動の 3 秒後に適用)。電池を節約したいときは OFF に戻す。
 - コンソールの `mode usb` などは**一時的**(保存しない)。保存するのは `mode set ble` など。`mode saved` は保存してあるモードに戻す。
-- `hb` を一度でも受けた USB モードは、10 秒途切れると保存モードへ戻る。`hb` を送らない古い helper(`tools/chromasynth_usb_bridge.swift`)には影響しない。
+- `hb` を一度でも受けた USB モードは、3 秒途切れると保存モードへ戻る。モードが変わるとき(と BLE が切れたとき)は、鳴っている音を止める。起動直後に helper がモードを頼んでいたら、保存モードは上書きしない。`hb` を送らない古い helper(`tools/chromasynth_usb_bridge.swift`)には影響しない。
 
 ## 未確認
 - 実機での BLE の自動接続・再接続、USB の自動切り替えと保存モードへの復帰(ESP32 の書き込みが要る)。

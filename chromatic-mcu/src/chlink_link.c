@@ -405,6 +405,7 @@ static void link_task(void *arg)
             case CHL_CMD_MIDI: ok = do_midi(cmds[i].a, cmds[i].b, cmds[i].c, false); break;
             case CHL_CMD_HELLO: ok = handshake(); break;
             case CHL_CMD_SYNC: ok = do_sync(); break;
+            case CHL_CMD_RELEASE: ok = do_release(false); break;   // the sounding note stops (a mode switch, a lost connection)
             }
             last_tx = xTaskGetTickCount();
             if (!ok)
@@ -460,6 +461,11 @@ void ChLinkLink_SetEnabled(bool on)
 bool ChLinkLink_Note(bool on, uint8_t note, uint8_t vel127)
 {
     return queue_cmd(CHL_CMD_PLAY, on, note, vel127);
+}
+
+bool ChLinkLink_Release(void)
+{
+    return queue_cmd(CHL_CMD_RELEASE, 0, 0, 0);
 }
 
 bool ChLinkLink_Midi(uint8_t b0, uint8_t b1, uint8_t b2)

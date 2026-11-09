@@ -4,11 +4,13 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 tools/mac/build_app.sh > /dev/null
 build/ChromaSynthLink.app/Contents/MacOS/ChromaSynthLink --selftest
+# A running DAW that listens to all MIDI inputs and sends to "ChromaSynth" plays the test keyboard's notes a second time.
+if pgrep -x Live > /dev/null; then echo "SKIP end to end: Ableton Live is running (it would echo the test notes into ChromaSynth)"; exit 0; fi
 # end to end: a virtual MIDI keyboard plays; the app (--dry-run) must print the console lines for its notes
 swiftc -O tools/test_virtual_midi_keyboard.swift -o build/test_virtual_midi_keyboard
 OUT=build/link_e2e.out
 rm -f "$OUT"
-build/ChromaSynthLink.app/Contents/MacOS/ChromaSynthLink --dry-run > "$OUT" 2>&1 &
+build/ChromaSynthLink.app/Contents/MacOS/ChromaSynthLink --dry-run --keyboards > "$OUT" 2>&1 &
 PID=$!
 sleep 2
 DEST=ChromaSynth build/test_virtual_midi_keyboard > /dev/null

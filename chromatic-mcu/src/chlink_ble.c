@@ -137,6 +137,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         s_disconnects++;
+        (void)ChLinkLink_Release();              // the Mac is gone: a note that was held must not hang
+        s_last_note = 0xFF;
         s_disc_reason = ev->disconnect.reason;   // 0x13 remote user terminated, 0x08 supervision timeout, ...
         s_connected = false;
         s_notify_on = 0;

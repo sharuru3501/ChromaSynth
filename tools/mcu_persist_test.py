@@ -4,7 +4,7 @@
 It only talks to the console (flashes nothing, presses no buttons). Opening the port resets the ESP32 once (a power cycle of the console is what reboots it for the real test: see below).
   1. a mode saved with `mode set ble` is applied again after a reboot (3 s after boot)
   2. `mode usb` (temporary) is not saved
-  3. after `hb` has been seen, 10 s without it puts the saved mode back
+  3. after `hb` has been seen, 3 s without it puts the saved mode back (the app sends one every second)
   4. `mode saved` puts the saved mode back at once
 It ends by saving OFF again (`mode set off`).
   python3 tools/mcu_persist_test.py
@@ -78,23 +78,23 @@ check("after a reboot the saved mode (BLE) is applied again", m == ("BLE", "BLE"
 cmd(p, "mode usb", 2.0)
 m = mode(p)
 check("`mode usb` is temporary: USB applied, BLE still saved", m == ("USB", "USB", "BLE"), m)
-for _ in range(4):                               # a heartbeat every 3 s
+for _ in range(6):                               # a heartbeat every second
     cmd(p, "hb", 0.1)
-    time.sleep(3)
+    time.sleep(0.9)
 m = mode(p)
 check("with heartbeats, USB stays", m == ("USB", "USB", "BLE"), m)
-time.sleep(13)                                   # no heartbeat: back to the saved mode after 10 s
+time.sleep(6)                                    # no heartbeat: back to the saved mode after 3 s (+ the BLE start)
 m = mode(p)
-check("10 s without a heartbeat: back to the saved mode (BLE)", m is not None and m[1] == "BLE", m)
+check("3 s without a heartbeat: back to the saved mode (BLE)", m is not None and m[1] == "BLE", m)
 cmd(p, "mode usb", 2.0)
 cmd(p, "mode saved", 2.5)
 m = mode(p)
 check("`mode saved` puts the saved mode back at once", m is not None and m[1] == "BLE", m)
 cmd(p, "mode usb", 2.0)                          # no heartbeat has been sent since: the older helpers keep USB
 m = mode(p)
-time.sleep(13)
+time.sleep(7)
 m2 = mode(p)
-check("a helper that never sends `hb` is not switched back", m == ("USB", "USB", "BLE") and m2 is not None and m2[1] == "USB", (m, m2))
+check("a helper that never sends `hb` is not switched back", m is not None and m[:3] == ("USB", "USB", "BLE") and m2 is not None and m2[1] == "USB", (m, m2))
 cmd(p, "mode set off", 3.0)
 p.close()                                        # (in OFF the ESP32 light-sleeps and the console stops answering: look after a reboot)
 p = open_port(path)

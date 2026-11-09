@@ -32,7 +32,9 @@ static volatile ChMidiMode s_mode = CHM_OFF;      // requested (shown by the men
 static volatile ChMidiMode s_applied = CHM_OFF;   // what the mode task has finished setting up
 static volatile uint32_t s_switches = 0;
 // The Mac app (ChromaSynth Link) sends `hb` every 3 s while it holds the USB mode. Once a heartbeat has been seen, 10 s without
-// one (the cable was pulled, the app quit) puts the saved mode back. Helpers that never send `hb` are not affected.
+// one (the cable was pulled, the app quit) puts the saved mode back. The app sends `hb` every second: 3 s is quick, and still
+// three missed beats. Helpers that never send `hb` are not affected.
+static volatile bool s_requested = false;         // something has asked for a mode since the boot (then the saved mode is not applied over it)
 static volatile int64_t s_hb_us = 0;
 static volatile bool s_hb_seen = false;
 static ChMidiMode s_boot_mode = CHM_OFF;          // the mode saved by the last OSD selection (applied a few seconds after boot)
@@ -89,11 +91,17 @@ void ChMode_Request(ChMidiMode m)
         return;
     }
     s_mode = m;
+    s_requested = true;
     (void)xQueueSend(s_q, &m, 0);
 }
 
 static void apply(ChMidiMode m)
 {
+    if (s_applied != CHM_OFF)
+    {
+        (void)ChLinkLink_Release();           // a note that the old source left sounding stops before the switch
+        vTaskDelay(pdMS_TO_TICKS(150));       // (the link task sends it)
+    }
     switch (m)
     {
     case CHM_BLE:
@@ -122,7 +130,10 @@ static void mode_task(void *arg)
     if (s_boot_mode != CHM_OFF)
     {
         vTaskDelay(pdMS_TO_TICKS(3000));      // let the rest of the firmware start first (the stock code is still initialising)
-        ChMode_Request(s_boot_mode);
+        if (!s_requested)                     // (a helper that already asked for a mode keeps what it asked)
+        {
+            ChMode_Request(s_boot_mode);
+        }
     }
     for (;;)
     {
@@ -134,7 +145,7 @@ static void mode_task(void *arg)
             }                                // only the latest request counts
             apply(m);
         }
-        else if (s_hb_seen && s_applied == CHM_USB && esp_timer_get_time() - s_hb_us > 10 * 1000 * 1000LL)
+        else if (s_hb_seen && s_applied == CHM_USB && esp_timer_get_time() - s_hb_us > 3 * 1000 * 1000LL)
         {
             s_hb_seen = false;               // the Mac side is gone: back to the saved mode
             ChMode_Request(load_saved());
@@ -171,8 +182,8 @@ static int cmd_mode(int argc, char **argv)
         ChMode_Request(m);
         vTaskDelay(pdMS_TO_TICKS(800));   // let the mode task finish (starting BLE takes a moment)
     }
-    printf("MIDI mode %s (applied %s), saved for boot: %s, %u switches\n", ChMode_Name(s_mode), ChMode_Name(s_applied),
-           ChMode_Name(load_saved()), (unsigned)s_switches);
+    printf("MIDI mode %s (applied %s), saved for boot: %s, %u switches, hb %s\n", ChMode_Name(s_mode), ChMode_Name(s_applied),
+           ChMode_Name(load_saved()), (unsigned)s_switches, s_hb_seen ? "seen" : "not seen");
     return 0;
 }
 
