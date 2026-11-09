@@ -274,8 +274,11 @@ static bool do_note_on(uint8_t note, uint8_t vel)
 }
 
 // Release the note that is sounding (2 symbols), or ping (the same length: only keeps the link up).
+static volatile uint32_t s_releases = 0;
+
 static bool do_release(bool ping)
 {
+    if (!ping) s_releases++;
     uint8_t s[CHL_RELEASE_SYMBOLS];
     chl_encode_release(ping, s);
     return send_packet(s, CHL_RELEASE_SYMBOLS, true);
@@ -405,6 +408,7 @@ static void link_task(void *arg)
             case CHL_CMD_MIDI: ok = do_midi(cmds[i].a, cmds[i].b, cmds[i].c, false); break;
             case CHL_CMD_HELLO: ok = handshake(); break;
             case CHL_CMD_SYNC: ok = do_sync(); break;
+            case CHL_CMD_RELEASE: ok = do_release(false); break;   // the sounding note stops (a mode switch, a lost connection)
             }
             last_tx = xTaskGetTickCount();
             if (!ok)
@@ -460,6 +464,11 @@ void ChLinkLink_SetEnabled(bool on)
 bool ChLinkLink_Note(bool on, uint8_t note, uint8_t vel127)
 {
     return queue_cmd(CHL_CMD_PLAY, on, note, vel127);
+}
+
+bool ChLinkLink_Release(void)
+{
+    return queue_cmd(CHL_CMD_RELEASE, 0, 0, 0);
 }
 
 bool ChLinkLink_Midi(uint8_t b0, uint8_t b1, uint8_t b2)
@@ -529,6 +538,7 @@ static int cmd_link(int argc, char **argv)
                s_armed ? "yes" : "no", (unsigned)s_hold_ms, s_phase ? 'B' : 'A');
         printf("packets sent %u, aborted %u, dropped %u, handshakes %u, queued %u\n", (unsigned)s_sent, (unsigned)s_aborted,
                (unsigned)s_dropped, (unsigned)s_handshakes, (unsigned)uxQueueMessagesWaiting(s_q));
+        printf("release packets sent %u (a mode switch, a lost connection, all-notes-off)\n", (unsigned)s_releases);
         printf("retransmitted %u (after a nack or a lost symbol), re-synced %u, stale note-offs not sent %u, sounding note %d\n",
                (unsigned)s_retries, (unsigned)s_resyncs, (unsigned)s_stale_off, s_cur_note == 0xFF ? -1 : (int)s_cur_note);
         printf("gave up the link %u times (a packet failed twice) + %u (the slot was not ours before a keep-alive)\n",

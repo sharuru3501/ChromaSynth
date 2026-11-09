@@ -1,7 +1,8 @@
 #pragma once
 // The MIDI mode of the Chromatic: OFF (nothing runs, the ESP32 light-sleeps as stock), BLE (Bluetooth MIDI), USB (notes
 // from a Mac helper over the USB-C serial port). Chosen from the console (`mode`) or from the OSD menu (System > MIDI MODE).
-// It always starts as OFF. See docs/BLE_MIDI.md.
+// The OSD choice is saved in flash and is the mode of the next boot (applied 3 s after boot); a mode set from the console
+// (`mode usb`, what the Mac helper does) is temporary, `mode set <m>` saves it. See docs/BLE_MIDI.md.
 #include <stdbool.h>
 #include <stdint.h>
 

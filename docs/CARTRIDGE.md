@@ -184,6 +184,10 @@ ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクト�
 - ガードが 2 回止まった(SRAM の基準との差)。差は**バンク 12〜15(ChromaSynth の保存スロット 1)の 53 / 35 バイトだけ**で、LSDj 側(先頭 96KB)はバックアップと完全に一致。実機で ChromaSynth の保存(SELECT+A)をしたため。ChromaSynth の領域の差は新しい基準にして続行(`after_m17c` / `after_m17d`)。LSDj 側の照合は弱めていない。
 - カードがつながっていないときは `Could not find device` で止まり、何も書かれない(2 回)。
 
+## 4.31 M9c・公開用ビルド整理・M11(止まらない音の対策)の ROM に入れ替えた結果(2026-11-09)
+- 同じ日に、ガードつきのページ 2 書き込みを繰り返した(`make card` のビルド。最後が M11 の「リンクが落ちたら残った音を止める」ROM)。書くたびに、ページ 1 は LSDj のバックアップと一致、ページ 2 に ROM が正確に入っていること、SRAM の LSDj 側がバックアップと一致していることを確認した。
+- ガードが止まったのは、(1) ChromaSynth の保存スロット(バンク 12〜15)の差(実機での保存。LSDj 側は無傷)と、(2) ライターが Mac から見えなかったとき(`Could not find device`。何も書かれない)。Chromatic の USB(`Chromatic - Player 01` と FPGA 用の `GWU2X`)は EMS のライターではない。ライターは VID `0x4670` で見える。
+
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
 - **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。

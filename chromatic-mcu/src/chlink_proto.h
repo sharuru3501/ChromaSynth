@@ -79,7 +79,7 @@ typedef struct
     uint32_t t_us;  // when it was queued (the MCU's microsecond clock; only for latency statistics)
 } chl_cmd_t;
 
-enum { CHL_CMD_PLAY = 0, CHL_CMD_MIDI = 1, CHL_CMD_HELLO = 2, CHL_CMD_SYNC = 3 };
+enum { CHL_CMD_PLAY = 0, CHL_CMD_MIDI = 1, CHL_CMD_HELLO = 2, CHL_CMD_SYNC = 3, CHL_CMD_RELEASE = 4 };
 
 // The ROM is mono: a note-off is ignored when a newer note has replaced the note it names, and a later
 // note-on makes an earlier note-off pointless. Drops every PLAY note-off (a == 0) that has a later PLAY

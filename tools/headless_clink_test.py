@@ -543,6 +543,16 @@ check("linked: it gets there", len(late) > 30, len(late))
 check("every uplink write to palette RAM happened in VBlank (LY 144..151)",
       up_write_ly and all(144 <= ly < 152 for ly in up_write_ly), (min(up_write_ly), max(up_write_ly), len(up_write_ly)))
 
+# ---------------------------------------------------------------- a note left sounding by a link that goes away stops
+mem[sym["wClTimer"]] = 0
+general(*cl.HELLO)
+pb.tick(3)
+play(1, 60)
+pb.tick(3)
+check("linked: a note sounds", v("wClLinked") == 1 and cur(0) == 60, (v("wClLinked"), cur(0)))
+pb.tick(260)
+check("no packet for 4.2 s: the link is dropped and the note it left sounding stops (no stuck note)", v("wClLinked") == 0 and cur(0) == 0, (v("wClLinked"), cur(0)))
+
 print()
 print("ALL PASSED" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

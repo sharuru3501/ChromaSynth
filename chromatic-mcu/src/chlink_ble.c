@@ -63,11 +63,8 @@ static void on_midi(void *ctx, uint8_t status, uint8_t d1, uint8_t d2)
         if (s_last_note == note) s_last_note = 0xFF;
         break;
     case CHL_ACT_ALL_OFF:
-        if (s_last_note != 0xFF)
-        {
-            (void)ChLinkLink_Note(false, s_last_note, 0);
-            s_last_note = 0xFF;
-        }
+        (void)ChLinkLink_Release();      // always: this firmware may have restarted and not know what sounds
+        s_last_note = 0xFF;
         break;
     default: break;
     }
@@ -137,6 +134,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         s_disconnects++;
+        (void)ChLinkLink_Release();              // the Mac is gone: a note that was held must not hang
+        s_last_note = 0xFF;
         s_disc_reason = ev->disconnect.reason;   // 0x13 remote user terminated, 0x08 supervision timeout, ...
         s_connected = false;
         s_notify_on = 0;

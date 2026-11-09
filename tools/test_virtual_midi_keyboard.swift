@@ -27,7 +27,7 @@ var dest = MIDIEndpointRef()
 for i in 0..<MIDIGetNumberOfDestinations() {
     var name: Unmanaged<CFString>?
     MIDIObjectGetStringProperty(MIDIGetDestination(i), kMIDIPropertyDisplayName, &name)
-    if (name?.takeRetainedValue() as String?) == "ChromaSynth USB" { dest = MIDIGetDestination(i) }
+    if (name?.takeRetainedValue() as String?) == (ProcessInfo.processInfo.environment["DEST"] ?? "ChromaSynth USB") { dest = MIDIGetDestination(i) }
 }
 if dest != 0 {
     var out = MIDIPortRef()

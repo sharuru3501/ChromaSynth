@@ -44,6 +44,11 @@ CLinkRx:
     jr c, .noLink
     xor a
     ld [wClLinked], a
+    ld a, [wClCh]           ; the link is gone (the ESP32 reset, the Mac went away): a note it left sounding stops
+    cp NUM_CH
+    jr nc, .noLink
+    ld c, a
+    call NoteOff
 .noLink:
     ld a, [wClN]
     and a
