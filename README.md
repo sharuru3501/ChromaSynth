@@ -1,8 +1,9 @@
-# ChromaSynth
+# ChromaSynth for ModRetro Chromatic
 
 ModRetro **Chromatic**(ゲームボーイ / GBC 互換機)のカートリッジで動く、**シンセサイザー + ピアノロール・シーケンサー**の ROM です。
 音を作り、打ち込み、Chromatic で再生する。さらに、**Chromatic の内蔵 ESP32 を使って、Mac の DAW(Ableton Live など)から、ケーブルなしで(Bluetooth MIDI)、または USB-C の有線で、演奏できます**。
 
+> **これは非公式のファンメイドのプロジェクトで、ModRetro 社とは、公認・提携・後援の関係がありません。**「ModRetro」「Chromatic」は、それぞれの権利者の名前です。ここでは、対応する機器を示すためにだけ使っています。
 > 状態: 個人の開発中のプロジェクトです。実機(Chromatic + EMS 64M スマートカード)で動作確認した範囲は、`docs/ROADMAP.md` の状態欄に書いています。
 > 確認していないことを「確認済み」とは書かない方針です(`AGENTS.md` のルール 7)。
 > **対応カートリッジ**: 普通の **GBC 用カートリッジ**向けです。**SRAM 32 KB の通常版(保存 4 曲、`make`)と、SRAM 8 KB の機能制限版(保存 1 曲、`make small`)**があります。マッパーは MBC5 を推奨([docs/CARTRIDGES.md](docs/CARTRIDGES.md))。作者は EMS スマートカードで使っていますが、ROM は特定のカードに依存しません。

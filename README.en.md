@@ -1,7 +1,8 @@
-# ChromaSynth
+# ChromaSynth for ModRetro Chromatic
 
 A **synthesizer + piano-roll sequencer** ROM for the **ModRetro Chromatic** (Game Boy / Game Boy Color compatible handheld). Make a sound, program a pattern, play it on the Chromatic. With the Chromatic's built-in ESP32 it can also be **played from a DAW such as Ableton Live over Bluetooth MIDI or USB-C**, and the sequencer can be **recorded into the DAW**.
 
+> **This is an unofficial, fan-made project. It is not affiliated with, endorsed by or sponsored by ModRetro.** "ModRetro" and "Chromatic" are the names of their owners and are used here only to say which hardware this is for.
 > Status: a personal project in progress. What has been checked on real hardware (Chromatic + EMS 64M smart card) is listed in the status column of [docs/ROADMAP.md](docs/ROADMAP.md) (in Japanese). Unverified behaviour is never marked as verified. The project's own documents are mostly in Japanese; this page is the English entry point.
 > **Cartridges**: built for ordinary **Game Boy Color cartridges** (MBC5 recommended, see [docs/CARTRIDGES.md](docs/CARTRIDGES.md)): the normal build needs 32 KB of SRAM (4 saved songs, `make`), the reduced build 8 KB (1 saved song, `make small`). The author uses an EMS smart card (`make card`); the ROM does not depend on it.
 > **License**: MIT for the ROM, tools and Mac app; `chromatic-mcu/` (patches on ModRetro's MCU firmware) is GPL-3.0. See [docs/LICENSES.md](docs/LICENSES.md).
