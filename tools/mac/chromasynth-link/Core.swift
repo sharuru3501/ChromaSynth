@@ -230,40 +230,37 @@ struct ClockBpm {
 /// The ESP32 sometimes misses a message (it is busy sending a keep-alive packet for about 150 ms). So: every clock from the ROM is followed
 /// by a second one half a period later, and when the next one does not come in time, the clock goes on by itself (at the period
 /// measured from the last ticks) for up to 10 ticks, until the ROM's ticks are back or a stop arrives. Pure: the time is passed in.
-struct ClockBridge {
-    var lastTick: Double? = nil
-    var period = 0.04                         // seconds per ROM tick (smoothed)
-    var synthetic = 0
-    var lastBridge = 0.0
-    var odd = 0
-    /// A real clock arrived. -> the delay of the second clock of this tick, or nil when this tick was already sent by the bridge (it came late):
-    /// nothing is sent then, or the DAW would count it twice and run too fast.
-    mutating func tick(at now: Double) -> Double? {
-        if let l = lastTick {
-            let d = now - l                       // the time since the last REAL tick (bridged ticks in between count as ticks)
-            let n = Double(synthetic + 1)
-            let per = d / n
-            // bunched arrivals (a burst after a delay) give wild samples: only values near the known period count;
-            // after 8 odd ones in a row the tempo has really changed, and the period starts again from the sample
-            if per > period * 0.5, per < period * 2 { period = period * 0.9 + per * 0.1; odd = 0 }
-            else { odd += 1; if odd >= 8, per > 0.004, per < 0.4 { period = per; odd = 0 } }
-        }
-        lastTick = now
-        if synthetic > 0 {
-            synthetic -= 1                        // this real tick pays back one that was bridged
-            return nil
-        }
-        return period / 2
+/// Turns the ROM's clocks (12 a beat, they arrive in bursts) into an even stream of 24 a beat for the DAW: Live reads its tempo from the gaps,
+/// so a burst makes it jump. The clocks wait in a small buffer and leave at the average speed of the last seconds.
+struct ClockSmoother {
+    private var arrivals: [(t: Double, n: Int)] = []   // (time, ticks counted so far)
+    private var count = 0
+    private var pending = 0.0                          // clocks (24 a beat) waiting to go
+    private var nextDue = 0.0
+    private var rate = 0.0                             // clocks a second, 0 = not known yet
+    static let target = 5.0, window = 4.0
+    /// A real clock arrived: it is worth two clocks of the DAW.
+    mutating func real(at now: Double) {
+        count += 1
+        arrivals.append((now, count))
+        while let f = arrivals.first, now - f.t > Self.window { arrivals.removeFirst() }
+        if let f = arrivals.first, now - f.t >= 1.0 { rate = Double(count - f.n) * 2 / (now - f.t) }
+        pending += 2
     }
-    /// Called often (every few ms): is a bridging tick due now? (then it counts as one)
-    mutating func bridgeDue(at now: Double) -> Bool {
-        guard let l = lastTick, synthetic < 10 else { return false }
-        let expected = l + period
-        if now >= expected + period * 0.5 && now - lastBridge >= period * 0.9 { synthetic += 1; lastBridge = now; return true }
-        return false
+    /// Called every few ms: how many clocks leave now (usually 0 or 1)?
+    mutating func take(at now: Double) -> Int {
+        guard pending >= 1 else { return 0 }
+        if rate <= 0 { let n = Int(pending); pending -= Double(n); return n }       // no speed known yet: straight through
+        guard now >= nextDue else { return 0 }
+        var r = rate * (1 + 0.005 * (pending - Self.target))                         // a very gentle pull to the buffer's target
+        if pending > 20 { r *= 1.3 }
+        r = min(max(r, rate * 0.7), rate * 1.4)
+        nextDue = max(nextDue + 1 / r, now - 0.5 / r)
+        pending -= 1
+        return 1
     }
-    /// Start / stop / continue: no ticks to bridge.
-    mutating func transport() { lastTick = nil; synthetic = 0; lastBridge = 0 }
+    /// Start / stop / continue: forget the buffer.
+    mutating func transport() { arrivals = []; count = 0; pending = 0; rate = 0 }
 }
 
 func selftestUplink() -> Int {
@@ -306,32 +303,27 @@ func selftestUplink() -> Int {
     var slow: [Int] = []
     for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
     check("a tempo below 60 is not reported", slow.isEmpty)
-    var cbr = ClockBridge()
-    check("the first clock: the second one half the default period later", abs((cbr.tick(at: 1.000) ?? -1) - 0.02) < 1e-9)
-    let d1 = cbr.tick(at: 1.040) ?? -1
-    check("the next clock: a second one half the period later (the period learned)", d1 > 0.0185 && d1 < 0.0215)
-    var emitted = 0
-    var now = 1.040
-    var cb2 = cbr
-    while now < 1.040 + 0.5 { now += 0.002; if cb2.bridgeDue(at: now) { emitted += 1 } }
-    check("a gap of 0.5 s is bridged by about 10 ticks, then it stops", emitted == 10)
-    // ticks every 40 ms for 4 s, with jitter: 20 % of them arrive up to 70 ms late (in bursts): the DAW must get exactly one pair per tick
-    var cb3 = ClockBridge()
-    var pairs = 0
-    var rng: UInt64 = 12345
+    // ticks of 140 BPM (35.7 ms), 25 % of them late by up to 90 ms (in bursts): the DAW must get an even stream
+    var sm = ClockSmoother()
+    var rng: UInt64 = 777
     func rand() -> Double { rng = rng &* 6364136223846793005 &+ 1442695040888963407; return Double((rng >> 33) % 1000) / 1000 }
     var arrivals: [Double] = []
-    for k in 0..<100 { arrivals.append(Double(k) * 0.040 + (rand() < 0.2 ? rand() * 0.070 : 0)) }
+    for k in 0..<700 { arrivals.append(Double(k) * (60.0 / 140 / 12) + (rand() < 0.25 ? rand() * 0.09 : 0)) }
     arrivals.sort()
+    var out: [Double] = []
     var t = 0.0, idx = 0
-    let tEnd = arrivals.last! + 0.055      // (after the last tick the bridge would go on: that is meant, but not counted here)
-    while t < tEnd {
+    while t < 24.5 {
         t += 0.002
-        while idx < arrivals.count, arrivals[idx] <= t { if cb3.tick(at: arrivals[idx]) != nil { pairs += 1 }; idx += 1 }
-        if cb3.bridgeDue(at: t) { pairs += 1 }
+        while idx < arrivals.count, arrivals[idx] <= t { sm.real(at: arrivals[idx]); idx += 1 }
+        for _ in 0..<sm.take(at: t) { out.append(t) }
     }
-    check("late and bunched ticks are not counted twice (100 ticks in, about 100 pairs out)", pairs >= 97 && pairs <= 103)
-    cb3.transport()
-    check("a stop forgets the ticks: nothing to bridge", !cb3.bridgeDue(at: 100))
+    let late = out.filter { $0 > 5 && $0 < 22 }
+    let want = 17.0 * 140 * 24 / 60
+    check("the clocks come at the true speed (17 s: \(late.count) of about \(Int(want)))", abs(Double(late.count) - want) < want * 0.02)
+    var worst = 0.0
+    for i in 0..<(late.count - 8) { let bpm = 60 / ((late[i + 8] - late[i]) / 8 * 24); worst = max(worst, abs(bpm - 140)) }
+    check("the tempo the DAW would read over 8 clocks stays within 4 BPM of 140 (worst \(Int(worst)))", worst < 4)
+    sm.transport()
+    check("a stop forgets the buffer", sm.take(at: 100) == 0)
     return fails
 }
