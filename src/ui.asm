@@ -13,6 +13,7 @@ INCLUDE "synth.inc"
 DEF ROW_CH0    EQU 3
 DEF ROW_STATUS EQU _SCRN0 + 9 * 32
 DEF ROW_SLOT   EQU _SCRN0 + 11 * 32
+DEF ROW_BPM    EQU _SCRN0 + 10 * 32      ; "BPM 120  SYNC 1": the tempo and the sync mode (also on the keyboard screen)
 DEF EDIT_ROWS_PER_FRAME EQU 3
 
 SECTION "UI", ROM0
@@ -117,6 +118,12 @@ BuildScreen:
     call DrawString
     ld hl, ROW_STATUS + 9
     ld de, sRx
+    call DrawString
+    ld hl, ROW_BPM
+    ld de, sBpmLabel
+    call DrawString
+    ld hl, ROW_BPM + 9
+    ld de, sSyncLabel
     call DrawString
     ld hl, ROW_SLOT
     ld de, sSlot
@@ -280,6 +287,12 @@ DrawChannel:
     ret
 
 DrawStatus:
+    ld a, [wBpm]
+    ld hl, ROW_BPM + 4
+    call DrawDec3
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    add '0' - 32
+    ld [ROW_BPM + 14], a
     ld a, [wJoyNote]
     ld hl, ROW_STATUS + 4
     call DrawNoteName
@@ -849,6 +862,8 @@ DrawDec3:
     ret
 
 ; ---------------------------------------------------------------- data
+sBpmLabel:  db "BPM", 0
+sSyncLabel: db "SYNC", 0
 sTitle:       db "CHROMASYNTH", 0
 sHeader:      db " CH  TYPE  NOTE", 0
 sPad:         db "PAD", 0
