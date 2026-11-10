@@ -112,7 +112,6 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var clockOsc = ClockOsc()
     private var romTempoLo = 0
     private var clockTimer: DispatchSourceTimer?
-    private var clockReportTimer: DispatchSourceTimer?
     private var upCount = 0
     private var clockBpm = ClockBpm()
     private var running: UInt8 = 0
@@ -221,11 +220,6 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                 }
                 t.resume()
                 clockTimer = t
-                let r = DispatchSource.makeTimerSource(queue: .main)           // a line in the log every 10 s while clocks come
-                r.schedule(deadline: .now() + 10, repeating: 10)
-                r.setEventHandler { [weak self] in if let me = self, me.clockOsc.hasArrivals { print(me.clockOsc.report()) } }
-                r.resume()
-                clockReportTimer = r
             }
         } else if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
             clockOsc.transport()
