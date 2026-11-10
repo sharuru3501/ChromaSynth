@@ -45,6 +45,23 @@ open build/ChromaSynthLink.app
 - `build/midi_listen ChromaSynth 30`(`swiftc -O tools/mac/midi_listen.swift -o build/midi_listen`): 最初のメッセージが届いてから 30 秒間、チャンネルごとのノートの数を数える。
 - `ChromaSynthLink --no-usb`: USB のポートを取らない(コンソールの試験と併用するとき)。
 
+## DAW に追従する(DAW → Chromatic、M15)
+ChromaSynth の MIDI ページで **SYNC = 3(FOLLOW)**。Live の環境設定 > Tempo & MIDI の**出力**ポート `ChromaSynth` の**同期**を入れる。
+- Live の再生・停止で、シーケンサーが始まる・止まる(約 0.3〜0.4 s 遅れる)。
+- Live のテンポ(BPM)が、Chromatic に届く(変わったときだけ。整数に丸める)。
+- プログラムチェンジ 0〜3 でパターンを切り替える。CC20(デューティ・波形)、CC21(音量)、CC10(パン)で、音色を動かす。ノート(Live → Chromatic)は、これまでどおり MIDI To = `ChromaSynth`。
+- 仕様の詳細は [M15_DESIGN.md](M15_DESIGN.md) の §8。
+
+## 遅れの測定(音で測る)
+Chromatic のイヤホンジャックと Mac のオーディオ入力を、3.5 mm ケーブルでつなぐ(マイクの許可のダイアログが出る)。ChromaSynth Link を先に動かしておく。
+```bash
+open -n --stdout /tmp/latency.log --stderr /tmp/latency.log build/ChromaSynthLink.app --args --latency down      # MIDI → 音の遅れ(アプリが 12 音を送る。約 15 秒)
+open -n --stdout /tmp/latency.log --stderr /tmp/latency.log build/ChromaSynthLink.app --args --latency up 30     # Chromatic のシーケンサー → DAW(最初の MIDI が届いてから 30 秒)
+cat /tmp/latency.log
+```
+- `down`: 遅れの平均・揺れ(標準偏差)と、MIDI チャンネルごとの左右の音量が出る(PAN で、CH1 を左、CH2 を右などにすると、左右にどれだけ漏れるかが分かる)。出た値を、Live の「トラック ディレイ」(マイナス)に入れる。
+- `up`: シーケンサーのノートの MIDI と、その音のずれが出る。1 本のチャンネルに、拍ごとに 1 音だけのパターンで測ると、正確(近いノートは、数えない)。
+
 ## Chromatic の側でモードを切り替えたとき
 - Chromatic のメニュー(System > MIDI MODE)で USB から BLE などへ切り替えると、アプリは 2 秒おきに `mode` で問い合わせて**切り替えを検知**し、USB のポートを手放して、BLE に切り替える(メニューの表示は `Chromatic MIDI mode: …`)。ケーブルを抜き差しするか、「Connect」を選ぶまで、USB を勝手に取り戻さない(メニューで選んだモードを尊重する)。
 - BLE で接続中にメニューで USB に切り替えると、BLE が切れたことを手がかりに、アプリが USB を取りにいく。

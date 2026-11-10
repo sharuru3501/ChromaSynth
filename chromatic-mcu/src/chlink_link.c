@@ -402,7 +402,9 @@ static void link_task(void *arg)
         chl_cmd_t cmds[32];
         int n = 0;
         // with the uplink on the slot is read back to back (each read takes about 7 ms): the ROM writes one message a frame
-        if (xQueueReceive(s_q, &cmds[0], (s_up_on && s_armed) ? 0 : pdMS_TO_TICKS(POLL_MS)) == pdTRUE)
+        // (also while the link is not armed but the ROM shows a linked slot: polled slowly, a one-off message such as the start $FA is
+        // overwritten by the clock that follows it within a frame, and only the last message of a burst, the stop, would be seen)
+        if (xQueueReceive(s_q, &cmds[0], (s_up_on && (s_armed || s_last_state == RS_OTHER)) ? 0 : pdMS_TO_TICKS(POLL_MS)) == pdTRUE)
         {
             n = 1;
             while (n < 32 && xQueueReceive(s_q, &cmds[n], 0) == pdTRUE) n++;

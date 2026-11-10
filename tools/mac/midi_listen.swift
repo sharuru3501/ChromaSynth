@@ -13,13 +13,14 @@ var firstClocks: [Double] = []
 var perChannel = [Int](repeating: 0, count: 16)
 MIDIClientCreate("listen" as CFString, nil, nil, &client)
 MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
-    if !started { started = true; t0 = Date(); print("first message: counting \(Int(secs)) s from now") }
+    let onlyStart = ProcessInfo.processInfo.environment["UNTIL_START"] != nil     // UNTIL_START=1: the counting begins at the first MIDI start ($FA)
+    if !started && (!onlyStart || list.unsafeSequence().contains(where: { p in withUnsafeBytes(of: p.pointee.data) { Array($0.prefix(Int(p.pointee.length))) }.contains(0xFA) })) { started = true; t0 = Date(); print("first message: counting \(Int(secs)) s from now") }
     for pkt in list.unsafeSequence() {
         let n = Int(pkt.pointee.length)
         let b = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
         for x in b {
             if x == 0xF8 { clocks += 1; if firstClocks.count < 40 { firstClocks.append(Date().timeIntervalSince(t0)) } }
-            else if x == 0xFA { starts += 1 } else if x == 0xFC { stops += 1 }
+            else if x == 0xFA { starts += 1; print(String(format: "%.3f START", Date().timeIntervalSince(t0))) } else if x == 0xFC { stops += 1; print(String(format: "%.3f STOP", Date().timeIntervalSince(t0))) }
         }
         if b.first.map({ $0 & 0xF0 == 0x90 || $0 & 0xF0 == 0x80 }) ?? false { notes += 1; perChannel[Int(b[0] & 0x0F)] += 1; print(String(format: "%.3f ", Date().timeIntervalSince(t0)) + b.map { String(format: "%02x", $0) }.joined(separator: " ")) }
     }

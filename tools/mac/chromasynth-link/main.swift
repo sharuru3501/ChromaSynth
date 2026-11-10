@@ -18,6 +18,13 @@ import ServiceManagement
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--latency") {
+    let mode = i + 1 < args.count ? args[i + 1] : "down"
+    let secs = i + 2 < args.count ? Double(args[i + 2]) ?? 20 : 20
+    let dev: String? = args.firstIndex(of: "--device").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+    runLatency(mode: mode, seconds: secs, device: dev)
+}
+if args.contains("--send-test") { runSendTest() }
 if args.contains("--selftest") { exit(selftest() + selftestUplink() == 0 ? 0 : 1) }
 let dry = args.contains("--dry-run")
 
@@ -102,8 +109,11 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var inPort = MIDIPortRef()
     private var dest = MIDIEndpointRef()
     private var upSource = MIDIEndpointRef()      // "ChromaSynth" as a MIDI input: what the Chromatic's sequencer plays (SYNC = OUT)
-    private var clockDoubler = ClockDoubler()
+    private var clockOsc = ClockOsc()
+    private var romTempoLo = 0
+    private var clockTimer: DispatchSourceTimer?
     private var upCount = 0
+    private var clockBpm = ClockBpm()
     private var running: UInt8 = 0
     private var guardState = FloodGuard()
     private var announcedTrip = 0
@@ -141,6 +151,9 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         MIDIInputPortCreateWithBlock(client, "in" as CFString, &inPort) { [weak self] list, ref in self?.handle(list, from: ref) }
         MIDIDestinationCreateWithBlock(client, "ChromaSynth" as CFString, &dest) { [weak self] list, _ in self?.handle(list, from: nil) }
         MIDISourceCreate(client, "ChromaSynth" as CFString, &upSource)
+        // a fixed id: a DAW that knows the port finds it again after this app restarts (a new id each time left Live on a dead port)
+        MIDIObjectSetIntegerProperty(upSource, kMIDIPropertyUniqueID, 0x43485331)
+        MIDIObjectSetIntegerProperty(dest, kMIDIPropertyUniqueID, 0x43485332)
         if !dry { central = CBCentralManager(delegate: self, queue: nil) }   // (a dry run needs no Bluetooth permission)
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + 0.25, repeating: 0.25)
@@ -167,13 +180,19 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     // ---- the ROM's MIDI out -> the DAW (the source "ChromaSynth")
-    private func emitUp(_ msg: [UInt8]) {
+    private func emitUp(_ msg: [UInt8], at seconds: Double? = nil) {
+        var stamp: MIDITimeStamp = 0                    // 0 = now; a clock carries its exact time (uptime seconds -> host time)
+        if let s = seconds {
+            var tb = mach_timebase_info_data_t()
+            mach_timebase_info(&tb)
+            stamp = MIDITimeStamp(s * 1e9 * Double(tb.denom) / Double(tb.numer))
+        }
         var buf = [UInt8](repeating: 0, count: 64)
         buf.withUnsafeMutableBytes { raw in
             let pl = raw.baseAddress!.assumingMemoryBound(to: MIDIPacketList.self)
             var p = MIDIPacketListInit(pl)
             var m = msg
-            p = MIDIPacketListAdd(pl, 64, p, 0, m.count, &m)
+            p = MIDIPacketListAdd(pl, 64, p, stamp, m.count, &m)
             MIDIReceived(upSource, pl)
         }
     }
@@ -184,10 +203,26 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
             print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
         }
-        emitUp(msg)
-        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
-        if let d = clockDoubler.secondClock(after: msg, at: now) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in self?.emitUp([0xF8]) }
+        if msg.count == 3, msg[0] & 0xF0 == 0x90 { print("Chromatic: note \(msg[1]) on, MIDI channel \((msg[0] & 0x0F) + 1)") }
+        if msg.count == 3, msg[0] == 0xB0, msg[1] == 14 || msg[1] == 15 {       // the ROM's tempo (CC14 low part, CC15 high part): for the clock only
+            if msg[1] == 14 { romTempoLo = Int(msg[2]) } else { clockOsc.setBpm(60 + romTempoLo + 128 * Int(msg[2])) }
+            return
+        }
+        if !(msg.count == 1 && msg[0] == 0xF8) { emitUp(msg) }
+        if msg.count == 1, msg[0] == 0xF8 {
+            clockOsc.real(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9)
+            if clockTimer == nil {                      // the clocks leave on an even beat (see ClockOsc)
+                let t = DispatchSource.makeTimerSource(queue: .main)
+                t.schedule(deadline: .now() + 0.002, repeating: 0.002)
+                t.setEventHandler { [weak self] in
+                    guard let me = self else { return }
+                    for d in me.clockOsc.take(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) { me.emitUp([0xF8], at: d) }
+                }
+                t.resume()
+                clockTimer = t
+            }
+        } else if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
+            clockOsc.transport()
         }
     }
 
@@ -208,6 +243,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         for pkt in list.unsafeSequence() {
             let n = Int(pkt.pointee.length)
             let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
+            followDAW(bytes, stamp: pkt.pointee.timeStamp)
             for line in consoleLines(for: bytes, running: &running) {
                 if !guardState.allow(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) {
                     if guardState.trips != announcedTrip {
@@ -218,6 +254,25 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                     continue
                 }
                 forward(line)
+            }
+        }
+    }
+
+    /// The DAW's clock (Live: Preferences > Tempo & MIDI > the output port ChromaSynth, "Sync" on) gives the tempo; the ROM keeps its own
+    /// clock (the link is too slow for 24 clocks a beat). A start forgets the tempo measured so far. The tempo goes as CC14 (the low
+    /// part, BPM - 60 mod 128) and CC15 (the high part), on MIDI channel 1.
+    private func followDAW(_ bytes: [UInt8], stamp: MIDITimeStamp) {
+        var tbi = mach_timebase_info_data_t()
+        mach_timebase_info(&tbi)
+        // the packet's own time (host ticks) when the DAW gave one: the clocks arrive in bursts, so the arrival time is not their time
+        let now = stamp != 0 ? Double(stamp) * Double(tbi.numer) / Double(tbi.denom) / 1e9 : Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+        for b in bytes {
+            if b == 0xFA { clockBpm.reset() }
+            if b == 0xF8, let bpm = clockBpm.feed(at: now) {
+                let v = bpm - 60
+                print("DAW tempo: \(bpm) BPM")
+                forward(String(format: "m b0 0e %02x", v % 128))
+                forward(String(format: "m b0 0f %02x", v / 128))
             }
         }
     }
