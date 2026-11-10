@@ -24,6 +24,18 @@ Playing, programming and sound design are the same in both; only the number of s
 3. Power on. You see the **Play screen**. Press **A**: a note sounds.
 4. Continue with the first five minutes in [MANUAL.en.md](MANUAL.en.md).
 
+## Do you need Part B?
+| | Part A only (stock ESP32 firmware) | Part A + B (patched ESP32 firmware + the Mac app) |
+|---|---|---|
+| Sound design, piano-roll sequencer, songs, saving, the cartridge on its own | works | works |
+| Play the synthesizer from a DAW or MIDI keyboard over Bluetooth / USB-C | **not available** | works |
+| Record the sequencer into a DAW as MIDI | **not available** | works (over Bluetooth the rhythm can be uneven, see below) |
+| DAW start/stop/tempo/program-change follow | **not available** | works (start/stop and tempo tested; program change/CC not yet) |
+| Audio of the Chromatic into the Mac | the Chromatic appears as a USB audio input (`Chromatic - Player 01`). That is a Chromatic hardware feature, not part of this project. The author measured it only with the patched firmware installed; **it is not tested with the stock firmware** (not expected to depend on it) | same |
+| MIDI through the link cable | implemented in the ROM, not tested on hardware, needs your own bridge | same |
+
+If the ROM on its own is enough for you, **you do not need to flash the ESP32. Skip Part B.** If you want the DAW features, Part B tells you how; once the firmware is flashed, the menu-bar app makes the connection easy.
+
 ## Part B. Play and record with a DAW (Mac, optional)
 
 What this gives you: the Chromatic shows up in your DAW as a MIDI port named `ChromaSynth`. You can play the Chromatic's synthesizer from the DAW's keyboard or clips, record the Chromatic's sequencer into the DAW as four MIDI tracks, and let the DAW start/stop and set the tempo of the sequencer. It works over Bluetooth (no cable) or USB-C.
@@ -42,16 +54,26 @@ The stock firmware cannot talk to the ROM. This project patches ModRetro's open 
 - The author has tested the patched firmware on one Chromatic only.
 
 ### B2. The Mac app (ChromaSynth Link)
-A small menu-bar app that connects to the Chromatic (Bluetooth or USB, automatically) and gives the DAW the MIDI ports. No ready-made app is distributed yet; you build it:
+A small menu-bar app that connects to the Chromatic (Bluetooth or USB, automatically) and gives the DAW the MIDI ports. Needs macOS 13 or later. The release has a universal build (Intel and Apple silicon; the author tested the Intel part only).
+
+**Option 1: the ready-made app** (Releases page, `ChromaSynthLink-v0.1.0-mac.zip`; check it with `SHA256SUMS.txt`)
+1. Unzip it and drag `ChromaSynthLink.app` into your Applications folder.
+2. **The app is not signed by Apple** (that costs a yearly developer fee), so macOS refuses the first launch. Open it anyway, in one of these ways:
+   - Right-click (or Control-click) the app > **Open** > **Open**.
+   - or open it once, then System Settings > **Privacy & Security** > scroll down > **Open Anyway** (macOS 15 and later needs this route).
+   - or in Terminal: `xattr -dr com.apple.quarantine /Applications/ChromaSynthLink.app`
+3. Allow **Bluetooth** when asked. A `♪○` / `♪●` icon appears in the menu bar. In its menu you can turn on "Open at login".
+
+**Option 2: build it yourself** (the source is in this repository, so you can read what it does):
 ```bash
 xcode-select --install          # once: gives you swiftc
 git clone https://github.com/sharuru3501/ChromaSynth.git
 cd ChromaSynth
-tools/mac/build_app.sh
+tools/mac/build_app.sh          # UNIVERSAL=1 tools/mac/build_app.sh makes the Intel + Apple silicon app
 open build/ChromaSynthLink.app
 ```
-- The app is not signed. If macOS refuses to open it, right-click it and choose Open.
-- Allow Bluetooth when asked. Use the menu-bar item (`♪●` connected, `♪○` not connected) to see the state, and "Open at login" if you want it always running.
+An app you build yourself does not carry the quarantine mark, so macOS opens it without the warning.
+
 - Do **not** also pair the Chromatic in "Audio MIDI Setup": every note would sound twice.
 - More about the app: [MAC_APP.md](MAC_APP.md) (Japanese).
 

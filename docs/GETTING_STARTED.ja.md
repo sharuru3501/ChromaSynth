@@ -24,6 +24,18 @@ ChromaSynth は ROM です。ゲームボーイカラー用のカートリッジ
 3. 電源を入れると、**プレイ画面**が出ます。**A** を押すと、音が鳴ります。
 4. 続きは、[MANUAL.md](MANUAL.md) の「はじめの 5 分」へ。
 
+## パート B は必要か
+| | パート A だけ(純正の ESP32 のファームウェア) | パート A + B(パッチ済みの ESP32 のファームウェア + Mac のアプリ) |
+|---|---|---|
+| 音作り、ピアノロールのシーケンサー、曲、保存、カートリッジ単体での演奏 | 使える | 使える |
+| DAW や MIDI キーボードから、Bluetooth / USB-C で鳴らす | **使えない** | 使える |
+| シーケンサーを DAW に MIDI で録音する | **使えない** | 使える(Bluetooth では、リズムが不揃いになることがある。下を参照) |
+| DAW の開始/停止/テンポ/プログラムチェンジへの追従 | **使えない** | 使える(開始/停止とテンポは確認済み。プログラムチェンジと CC は未確認) |
+| Chromatic の音声を Mac に入れる | Chromatic が USB オーディオ入力(`Chromatic - Player 01`)として見える。これは Chromatic のハードの機能で、このプロジェクトのものではない。作者は、パッチ済みのファームウェアを入れた状態でしか測っていない。**純正のファームウェアでは、試していない**(関係しない見込み) | 同じ |
+| リンクケーブルでの MIDI | ROM には実装があるが、実機は未確認。自分でブリッジを用意する必要がある | 同じ |
+
+ROM だけで十分なら、**ESP32 への書き込みは不要です。パート B は読み飛ばしてください。** DAW との連携がほしい人は、パート B の手順で進めます。ファームウェアを書いたあとは、メニューバーのアプリで、かんたんにつながります。
+
 ## パート B: DAW で鳴らす・録音する(Mac、任意)
 
 できること: Chromatic が、DAW に、`ChromaSynth` という MIDI ポートとして現れます。DAW のキーボードやクリップから、Chromatic のシンセを鳴らせます。Chromatic のシーケンサーを、4 つの MIDI トラックとして DAW に録音できます。DAW の再生・停止とテンポで、シーケンサーを動かせます。Bluetooth(ケーブルなし)でも、USB-C でも使えます。
@@ -42,16 +54,26 @@ DAW <-> ChromaSynth Link(Mac のアプリ) <-> Bluetooth か USB-C <-> Chromatic
 - 作者は、パッチ済みのファームウェアを、1 台の Chromatic でしか試していません。
 
 ### B2. Mac のアプリ(ChromaSynth Link)
-Chromatic に(Bluetooth か USB で、自動的に)つなぎ、DAW に MIDI ポートを出す、メニューバーの小さなアプリです。ビルド済みのアプリは、まだ配っていません。自分でビルドします。
+Chromatic に(Bluetooth か USB で、自動的に)つなぎ、DAW に MIDI ポートを出す、メニューバーの小さなアプリです。macOS 13 以降が要ります。リリースには、Intel と Apple シリコンの両方に対応した版が入っています(作者は、Intel の側しか試していません)。
+
+**方法 1: できあがったアプリを使う**(Releases の `ChromaSynthLink-v0.1.0-mac.zip`。`SHA256SUMS.txt` で照合してください)
+1. zip を解凍して、`ChromaSynthLink.app` を「アプリケーション」フォルダへドラッグします。
+2. **このアプリは、Apple の署名を受けていません**(署名には、毎年の開発者費用がかかります)。そのため、macOS が最初の起動を拒みます。次のどれかで、開いてください。
+   - アプリを右クリック(または Control を押しながらクリック)>「**開く**」>「**開く**」。
+   - または、一度開こうとしてから、システム設定 >「**プライバシーとセキュリティ**」> 下へスクロール >「**このまま開く**」(macOS 15 以降は、こちらです)。
+   - または、ターミナルで: `xattr -dr com.apple.quarantine /Applications/ChromaSynthLink.app`
+3. **Bluetooth** の許可を求められたら、許可します。メニューバーに `♪○` / `♪●` が出ます。メニューで「ログイン時に開く」を入れられます。
+
+**方法 2: 自分でビルドする**(ソースがこのリポジトリにあるので、中身を読めます)
 ```bash
 xcode-select --install          # 一度だけ(swiftc が入る)
 git clone https://github.com/sharuru3501/ChromaSynth.git
 cd ChromaSynth
-tools/mac/build_app.sh
+tools/mac/build_app.sh          # Intel と Apple シリコン両方なら: UNIVERSAL=1 tools/mac/build_app.sh
 open build/ChromaSynthLink.app
 ```
-- アプリは署名されていません。macOS が開くのを拒んだら、右クリックして「開く」を選びます。
-- Bluetooth の許可を求められたら、許可します。メニューバーの項目(`♪●` 接続中、`♪○` 未接続)で状態を見られます。常に動かしたいなら、「ログイン時に開く」を入れます。
+自分でビルドしたアプリには、ダウンロードの印(quarantine)が付かないので、警告なしで開きます。
+
 - Chromatic を「Audio MIDI 設定」で、ペアリング**しないで**ください(音符が 2 回鳴ります)。
 - アプリの詳細: [MAC_APP.md](MAC_APP.md)。
 

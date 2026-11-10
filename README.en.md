@@ -24,7 +24,7 @@ A **synthesizer + piano-roll sequencer** ROM for the **ModRetro Chromatic** (Gam
 ## Known problems
 - Over BLE, part of the sequencer's clock and notes arrive late or never arrive, so the recorded rhythm can be uneven. The plan to fix it is in [docs/M15_DESIGN.md](docs/M15_DESIGN.md) section 10. Recording the audio over USB (the Chromatic shows up as a USB audio input) is not affected.
 
-> **Warning**: Part B of the getting-started guide (the ESP32 firmware) is risky and entirely at your own risk; there is no warranty. Part A (the ROM on a cartridge) does not need it.
+> **You do not have to flash anything to use the ROM** (Part A of the guide). Flashing the Chromatic's ESP32 (Part B) is only for Bluetooth/USB MIDI with a DAW; it is **risky and entirely at your own risk, with no warranty**. With it, the menu-bar app (a ready-made build is on the Releases page) connects the Chromatic to your DAW.
 
 ## Build and test
 Needs RGBDS v1.0.x (ROM), Python 3 + PyBoy (headless tests), `swiftc` (Mac app), ESP-IDF v5.3 (MCU firmware, only if you change it).
