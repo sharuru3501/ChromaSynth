@@ -1,12 +1,15 @@
-// ChromaSynthLink --latency down|up [seconds]: measures the delay between MIDI and the Chromatic's SOUND, with the Chromatic's headphone
-// output plugged into this Mac's audio input (line in).
+// ChromaSynthLink --latency down|up [seconds] [--device Chromatic]: measures the delay between MIDI and the Chromatic's SOUND, with the Chromatic's sound coming
+// into this Mac: over USB-C (the Chromatic shows up as the audio input "Chromatic - Player 01": --device Chromatic), or from its headphone
+// output plugged into an audio input (then the default input).
 //   down: this tool plays notes on MIDI channels 1-4 into the MIDI output "ChromaSynth" (the running ChromaSynth Link forwards them, like
 //         a DAW would) and records the audio: the delay from the MIDI note to the sound, its spread, and how much of each channel
 //         leaks to the left / right (set the channels' PAN in ChromaSynth to see the separation).
 //   up:   waits for the Chromatic's sequencer (MIDI input "ChromaSynth", SYNC = OUT, keyboard screen), then listens for `seconds` (default 20)
 //         from the first message: the offset between each MIDI note-on arriving and its sound (negative = the sound is first).
 // Needs the microphone permission (the first run asks): run it with `open -n --stdout /tmp/latency.log build/ChromaSynthLink.app --args --latency down`.
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import CoreMIDI
 import Foundation
 
@@ -46,10 +49,41 @@ private func onsets(_ w: [Window], threshold: Float) -> [Double] {
     return out
 }
 
-func runLatency(mode: String, seconds secs: Double) -> Never {
+/// The id of the audio device whose name contains `name` and which has input channels (nil: not found).
+func audioInputDevice(named name: String) -> AudioDeviceID? {
+    var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size)
+    var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids)
+    for id in ids {
+        var nameAddr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var cf: Unmanaged<CFString>?
+        var sz = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        AudioObjectGetPropertyData(id, &nameAddr, 0, nil, &sz, &cf)
+        let n = (cf?.takeRetainedValue() as String?) ?? ""
+        var inAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+        var csz: UInt32 = 0
+        AudioObjectGetPropertyDataSize(id, &inAddr, 0, nil, &csz)
+        guard n.contains(name), csz > 0 else { continue }
+        let buf = UnsafeMutableRawPointer.allocate(byteCount: Int(csz), alignment: 16)
+        defer { buf.deallocate() }
+        AudioObjectGetPropertyData(id, &inAddr, 0, nil, &csz, buf)
+        let list = buf.assumingMemoryBound(to: AudioBufferList.self)
+        if UnsafeMutableAudioBufferListPointer(list).reduce(0, { $0 + Int($1.mNumberChannels) }) > 0 { return id }
+    }
+    return nil
+}
+
+func runLatency(mode: String, seconds secs: Double, device: String?) -> Never {
     setvbuf(stdout, nil, _IOLBF, 0)
     let engine = AVAudioEngine()
     let input = engine.inputNode
+    if let device = device {
+        guard var id = audioInputDevice(named: device), let unit = input.audioUnit else { print("no audio input device with \"\(device)\" in its name"); exit(1) }
+        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+        print("audio input device: \(device)")
+    }
     let format = input.outputFormat(forBus: 0)
     guard format.sampleRate > 0, format.channelCount > 0 else { print("no audio input"); exit(1) }
     let lock = NSLock()
@@ -150,6 +184,64 @@ func runLatency(mode: String, seconds secs: Double) -> Never {
         exit(0)
     }
 
+    if mode == "start" {
+        // start: the Chromatic's MIDI start ($FA) against the first sound that follows it (the sound must have been silent before: stop,
+        // wait 2 s, start again, several times). Counts for `secs` from the first start.
+        var starts: [Double] = []
+        var first: Double? = nil
+        var port = MIDIPortRef()
+        MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
+            let now = hostNow()
+            for pkt in list.unsafeSequence() {
+                let n = Int(pkt.pointee.length)
+                let b = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
+                if b.contains(0xFA) {
+                    lock.lock()
+                    if first == nil { first = now; print("first start: counting \(Int(secs)) s from now; stop, wait 2 s and start again a few times") }
+                    starts.append(now)
+                    lock.unlock()
+                }
+            }
+        }
+        for i in 0..<MIDIGetNumberOfSources() {
+            var s: Unmanaged<CFString>?
+            MIDIObjectGetStringProperty(MIDIGetSource(i), kMIDIPropertyDisplayName, &s)
+            if ((s?.takeRetainedValue() as String?) ?? "") == "ChromaSynth" { MIDIPortConnectSource(port, MIDIGetSource(i), nil); print("listening to the MIDI input ChromaSynth") }
+        }
+        let giveUp = Date(timeIntervalSinceNow: 900)
+        while Date() < giveUp {
+            lock.lock(); let f = first; lock.unlock()
+            if let f = f, hostNow() - f > secs { break }
+            usleep(100_000)
+        }
+        engine.stop()
+        lock.lock()
+        let w = windows, st = starts
+        lock.unlock()
+        var quiet: Float = 1
+        var roll = 0
+        for k in 0..<max(0, w.count - 500) {                     // the quietest half second of the capture
+            if k % 100 == 0 { roll = k }
+            _ = roll
+            let m = w[k..<(k + 500)].map { max($0.l, $0.r) }.max() ?? 1
+            if m < quiet { quiet = m }
+            if quiet == 0 { break }
+        }
+        let thr = max(quiet * 4, 0.01)
+        let ons = onsets(w, threshold: thr)
+        var d: [Double] = []
+        for a in st {
+            if let o = ons.first(where: { $0 >= a - 0.05 && $0 < a + 1.0 }) { d.append(o - a); print(String(format: "  start -> first sound: %.0f ms", (o - a) * 1000)) }
+        }
+        print("MIDI start ($FA) arriving -> the first sound (\(st.count) starts, silence level \(String(format: "%.4f", quiet)), threshold \(String(format: "%.4f", thr))):")
+        print("  " + stats(d))
+        if !d.isEmpty {
+            let mean = d.reduce(0, +) / Double(d.count)
+            print(String(format: "The Chromatic's sound comes about %.0f ms after the MIDI start reaches this Mac (negative: before).", mean * 1000))
+        }
+        exit(0)
+    }
+
     // up: the Chromatic's sequencer
     var arrivals: [Double] = []
     var firstAt: Double? = nil
@@ -180,18 +272,41 @@ func runLatency(mode: String, seconds secs: Double) -> Never {
     lock.lock()
     let w = windows, arr = arrivals
     lock.unlock()
-    let ons = onsets(w, threshold: threshold)
-    var off: [Double] = []
-    for a in arr {
-        let isolated = !arr.contains { $0 != a && abs($0 - a) < 0.2 }
-        if isolated, let o = ons.first(where: { $0 >= a - 0.3 && $0 < a + 0.6 }) { off.append(o - a) }
+    // The sound of a dense pattern has no silences, so single onsets cannot be told apart. Instead: the audio's "attack strength" (how much
+    // louder it got in the last few ms) is laid against the MIDI note-ons, and the shift that fits best is the offset.
+    guard let t0 = w.first?.t, w.count > 2000, !arr.isEmpty else { print("not enough audio or MIDI"); exit(0) }
+    let env = w.map { max($0.l, $0.r) }
+    var attack = [Float](repeating: 0, count: env.count)
+    for k in 14..<(env.count - 4) {
+        let now = (env[k] + env[k + 1] + env[k + 2] + env[k + 3]) / 4
+        let before = (env[k - 10] + env[k - 9] + env[k - 8] + env[k - 7] + env[k - 6] + env[k - 5] + env[k - 4]) / 7
+        attack[k] = max(0, now - before)
     }
-    print("MIDI note-on arriving -> its sound (negative = the sound first), \(arr.count) note-ons, \(off.count) matched (notes closer than 0.2 s to another are skipped):")
-    print("  " + stats(off))
-    if !off.isEmpty {
-        let mean = off.reduce(0, +) / Double(off.count)
-        print(String(format: "Live: the recorded MIDI comes about %.0f ms %@ the audio: move the audio clips / set the track delay by that much.", abs(mean) * 1000, mean < 0 ? "after" : "before"))
+    let idx = arr.map { Int(($0 - t0) * 1000) }
+    var best = (lag: 0, score: Float(-1))
+    var sum: Float = 0, count = 0
+    var scores: [Int: Float] = [:]
+    for lag in -300...700 {
+        var sc: Float = 0
+        for a in idx where a + lag >= 0 && a + lag < attack.count { sc += attack[a + lag] }
+        scores[lag] = sc
+        sum += sc; count += 1
+        if sc > best.score { best = (lag, sc) }
     }
+    let mean = sum / Float(max(count, 1))
+    print(String(format: "%d note-ons; the best fit: the sound comes %d ms after the MIDI note-on arrives (the fit is %.1f times the average: below 2 means no clear answer)", arr.count, best.lag, best.score / max(mean, 1e-9)))
+    var spread: [Double] = []
+    for a in idx {                                       // per note: the strongest attack near the best lag
+        var bestK = -1, bestV: Float = 0.0
+        for k in max(0, a + best.lag - 40)..<min(attack.count, a + best.lag + 40) where attack[k] > bestV { bestV = attack[k]; bestK = k }
+        if bestK >= 0, bestV > 0.02 { spread.append(Double(bestK - a) / 1000) }
+    }
+    print("  per note (within 40 ms of the best fit): " + stats(spread))
+    let off = [Double(best.lag) / 1000]
+    if best.score / max(mean, 1e-9) >= 2 {
+        print(String(format: "Live: the MIDI recorded from the Chromatic's sequencer arrives about %d ms BEFORE its sound reaches the audio input: move the recorded audio about %d ms earlier (or the MIDI later).", best.lag, best.lag))
+    }
+    _ = off
     exit(0)
 }
 

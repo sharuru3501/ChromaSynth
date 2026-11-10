@@ -19,7 +19,7 @@ MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
         let b = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
         for x in b {
             if x == 0xF8 { clocks += 1; if firstClocks.count < 40 { firstClocks.append(Date().timeIntervalSince(t0)) } }
-            else if x == 0xFA { starts += 1 } else if x == 0xFC { stops += 1 }
+            else if x == 0xFA { starts += 1; print(String(format: "%.3f START", Date().timeIntervalSince(t0))) } else if x == 0xFC { stops += 1; print(String(format: "%.3f STOP", Date().timeIntervalSince(t0))) }
         }
         if b.first.map({ $0 & 0xF0 == 0x90 || $0 & 0xF0 == 0x80 }) ?? false { notes += 1; perChannel[Int(b[0] & 0x0F)] += 1; print(String(format: "%.3f ", Date().timeIntervalSince(t0)) + b.map { String(format: "%02x", $0) }.joined(separator: " ")) }
     }

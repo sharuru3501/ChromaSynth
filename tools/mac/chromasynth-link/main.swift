@@ -21,7 +21,8 @@ let args = CommandLine.arguments
 if let i = args.firstIndex(of: "--latency") {
     let mode = i + 1 < args.count ? args[i + 1] : "down"
     let secs = i + 2 < args.count ? Double(args[i + 2]) ?? 20 : 20
-    runLatency(mode: mode, seconds: secs)
+    let dev: String? = args.firstIndex(of: "--device").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+    runLatency(mode: mode, seconds: secs, device: dev)
 }
 if args.contains("--send-test") { runSendTest() }
 if args.contains("--selftest") { exit(selftest() + selftestUplink() == 0 ? 0 : 1) }
