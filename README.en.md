@@ -6,6 +6,14 @@ A **synthesizer + piano-roll sequencer** ROM for the **ModRetro Chromatic** (Gam
 > **Cartridges**: built for ordinary **Game Boy Color cartridges** (MBC5 recommended, see [docs/CARTRIDGES.md](docs/CARTRIDGES.md)): the normal build needs 32 KB of SRAM (4 saved songs, `make`), the reduced build 8 KB (1 saved song, `make small`). The author uses an EMS smart card (`make card`); the ROM does not depend on it.
 > **License**: MIT for the ROM, tools and Mac app; `chromatic-mcu/` (patches on ModRetro's MCU firmware) is GPL-3.0. See [docs/LICENSES.md](docs/LICENSES.md).
 
+## Documentation (start here)
+| you want to know | read |
+|---|---|
+| **How to use this ROM** (get it onto a cartridge, connect it to a DAW) | [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) ([日本語](docs/GETTING_STARTED.ja.md)) |
+| **How to use ChromaSynth** (screens, button patterns, sound parameters) | [docs/MANUAL.en.md](docs/MANUAL.en.md) ([日本語](docs/MANUAL.md)) |
+| Which cartridges work | [docs/CARTRIDGES.md](docs/CARTRIDGES.md) (Japanese) |
+| The Mac app (ChromaSynth Link) | [docs/MAC_APP.md](docs/MAC_APP.md) (Japanese) |
+
 ## What it does
 - **ROM** (`src/`, RGBDS assembly): 4 channels (2 pulse, wave, noise), piano roll, patterns/songs saved to SRAM, 8-bar patterns with per-pattern time signature, custom waveforms.
 - **Cable-less link** ([docs/CHROMATIC_LINK.md](docs/CHROMATIC_LINK.md)): the Chromatic's ESP32 sends notes to the ROM as virtual button presses; the ROM sends its notes, clock and tempo back through palette RAM.

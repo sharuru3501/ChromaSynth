@@ -8,11 +8,18 @@ ModRetro **Chromatic**(ゲームボーイ / GBC 互換機)のカートリッジ�
 > **対応カートリッジ**: 普通の **GBC 用カートリッジ**向けです。**SRAM 32 KB の通常版(保存 4 曲、`make`)と、SRAM 8 KB の機能制限版(保存 1 曲、`make small`)**があります。マッパーは MBC5 を推奨([docs/CARTRIDGES.md](docs/CARTRIDGES.md))。作者は EMS スマートカードで使っていますが、ROM は特定のカードに依存しません。
 > **ライセンス**: ROM・ツール・文書は **MIT**(`LICENSE`)。`chromatic-mcu/` のパッチは、ModRetro の MCU ファームウェア(GPL-3.0)の派生物なので **GPL-3.0** です(`chromatic-mcu/LICENSE.md`)。権利関係の整理は [docs/LICENSES.md](docs/LICENSES.md)(**素案。公開前に作者が確定する**)。
 
+## ドキュメント(はじめての方へ)
+| 読みたいこと | 文書 |
+|---|---|
+| **どうやってこの ROM を使うか**(カートリッジへの書き込み、DAW とのつなぎ方) | [docs/GETTING_STARTED.ja.md](docs/GETTING_STARTED.ja.md)([English](docs/GETTING_STARTED.md)) |
+| **ChromaSynth の使い方**(画面の構成、ボタン操作、音色パラメータ) | [docs/MANUAL.md](docs/MANUAL.md)([English](docs/MANUAL.en.md)) |
+| 対応するカートリッジ | [docs/CARTRIDGES.md](docs/CARTRIDGES.md) |
+| Mac のアプリ(ChromaSynth Link) | [docs/MAC_APP.md](docs/MAC_APP.md) |
+
 ## できること(実機で確認したもの)
 - **ROM**(`src/`、RGBDS アセンブリ): 4 チャンネルの音源(パルス 2、波形、ノイズ)、ピアノロール、パターンの保存(SRAM)、MIDI(リンクケーブルでの入出力。実機は未確認)。
 - **ケーブルなしのリンク**(`docs/CHROMATIC_LINK.md`): Chromatic の内蔵 ESP32 から、ROM へ、仮想ボタンで音符を送る(ROM の「キーボード画面」)。ROM から ESP32 へは、パレット RAM に書いた値を、ESP32 が読む。
-- **Bluetooth MIDI**(`docs/BLE_MIDI.md`): Mac の Audio MIDI Setup で `ChromaSynth` に接続して、Live から弾ける。
-- **有線(USB-C)**: Mac の中継プログラム(`tools/chromasynth_usb_bridge.swift`)が、Live の MIDI を、USB-C のシリアルへ。
+- **Bluetooth MIDI / USB-C**: Mac のメニューバーアプリ **ChromaSynth Link**(`tools/mac/`、[docs/MAC_APP.md](docs/MAC_APP.md))が Chromatic につなぎ、DAW に `ChromaSynth` という MIDI ポートを出す。DAW から鳴らす、Chromatic のシーケンサーを DAW に録音する、DAW の再生・停止とテンポに追従する、ができる。手順は [docs/GETTING_STARTED.ja.md](docs/GETTING_STARTED.ja.md)。
 - **MIDI モード**(OFF / BLE / USB): Chromatic のメニュー(System タブ)から切り替え。OFF のとき、ESP32 は純正のライトスリープに戻る。
 - 遅れは、ノートオンで約 150 ms(MCU の中)、耳に届くまで約 200 ms(見込み)。**違う音が鳴らないことを、遅さより優先している**(`docs/BLE_MIDI.md`)。
 
