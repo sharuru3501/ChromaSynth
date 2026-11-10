@@ -129,6 +129,28 @@ SeqTick:
     jr nz, .tickLoop
     ret
 
+; The tempo as two control changes on MIDI channel 1 (CC14 = (BPM - 60) mod 128, CC15 = (BPM - 60) / 128: the same as the follow
+; mode takes in), once at every bar start, only when SYNC_OUT. Clobbers a, b, c, d, hl.
+SendTempo:
+    ld a, [wBpm]
+    sub BPM_MIN
+    ld d, a
+    ld a, $B0
+    call MidiOutSync
+    ld a, 14
+    call MidiOutSync
+    ld a, d
+    and $7F
+    call MidiOutSync
+    ld a, $B0
+    call MidiOutSync
+    ld a, 15
+    call MidiOutSync
+    ld a, d
+    rlca                    ; bit 7 -> 0 / 1
+    and 1
+    jp MidiOutSync
+
 ; Play the current tick on all channels, then advance.
 SeqStep:
     ld a, [wSongWrap]
@@ -146,6 +168,7 @@ SeqStep:
     inc [hl]                ; (the first bar after a loop start / play start is index 0: it begins at $FF)
     call SongBarStart       ; a pattern chosen while playing takes over here
     call PlayInfo           ; (it may be another pattern now)
+    call SendTempo          ; the DAW-side clock keeps time from this (the clocks themselves arrive late and some get lost)
 .inBar:
     ld a, [wBarPos]
     inc a

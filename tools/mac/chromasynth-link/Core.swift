@@ -230,37 +230,71 @@ struct ClockBpm {
 /// The ESP32 sometimes misses a message (it is busy sending a keep-alive packet for about 150 ms). So: every clock from the ROM is followed
 /// by a second one half a period later, and when the next one does not come in time, the clock goes on by itself (at the period
 /// measured from the last ticks) for up to 10 ticks, until the ROM's ticks are back or a stop arrives. Pure: the time is passed in.
-/// Turns the ROM's clocks (12 a beat, they arrive in bursts) into an even stream of 24 a beat for the DAW: Live reads its tempo from the gaps,
-/// so a burst makes it jump. The clocks wait in a small buffer and leave at the average speed of the last seconds.
-struct ClockSmoother {
-    private var arrivals: [(t: Double, n: Int)] = []   // (time, ticks counted so far)
-    private var count = 0
-    private var pending = 0.0                          // clocks (24 a beat) waiting to go
-    private var nextDue = 0.0
-    private var rate = 0.0                             // clocks a second, 0 = not known yet
-    static let target = 5.0, window = 4.0
-    /// A real clock arrived: it is worth two clocks of the DAW.
+/// The clock for the DAW. The ROM sends one clock a tick (12 a beat) and its tempo once a bar, but the clocks come in bursts and some never
+/// arrive; Live reads its tempo from the gaps. So once the tempo is known this is an oscillator: it ticks at the exact tempo (two DAW clocks
+/// a tick) and only its phase follows the arrivals (the middle of the last seconds' arrivals: most ticks are on time). Lost and
+/// late ticks do not matter. Before that (tempo unknown, or the first 16 ticks of a start) every clock goes through as it comes.
+struct ClockOsc {
+    private(set) var period = 0.0                      // seconds a tick, 0 = the tempo is not known
+    private var queue: [Double] = []                   // times of clocks to send (the pass-through ones)
+    private var times: [Double] = []                   // the first arrivals of a start
+    private var active = false
+    private var phi = 0.0, nextK = 0, half = 0
+    private var errs: [(t: Double, e: Double)] = []
+    private var lastReal = 0.0
+    static let first = 16, window = 4.0, slew = 0.0002
+    /// The tempo from the ROM (a change restarts the phase search).
+    mutating func setBpm(_ bpm: Int) {
+        guard bpm >= 60, bpm <= 240 else { return }
+        let p = 5.0 / Double(bpm)
+        if abs(p - period) > 1e-9 { period = p; restart() }
+    }
+    mutating func restart() { times = []; errs = []; active = false }
+    /// Start / stop / continue.
+    mutating func transport() { restart(); queue = [] }
+    /// A real clock arrived.
     mutating func real(at now: Double) {
-        count += 1
-        arrivals.append((now, count))
-        while let f = arrivals.first, now - f.t > Self.window { arrivals.removeFirst() }
-        if let f = arrivals.first, now - f.t >= 1.0 { rate = Double(count - f.n) * 2 / (now - f.t) }
-        pending += 2
+        if now - lastReal > 0.5 { restart() }
+        lastReal = now
+        guard period > 0 else { queue.append(now); queue.append(now + 0.02); return }
+        if !active {
+            queue.append(now); queue.append(now + period / 2)               // straight through while the phase is searched
+            times.append(now)
+            if times.count >= Self.first {
+                let t0 = times[0]
+                var es: [Double] = [], lastK = 0
+                for t in times {
+                    let k = Int(((t - t0) / period + 0.1).rounded(.down))
+                    es.append((t - t0) - Double(k) * period)
+                    lastK = k
+                }
+                es.sort()
+                phi = t0 + es[es.count / 2]; nextK = lastK + 1; half = 0; active = true; errs = []
+            }
+            return
+        }
+        let k = ((now - phi) / period + 0.1).rounded(.down)
+        errs.append((now, now - (phi + k * period)))
+        while let f = errs.first, now - f.t > Self.window { errs.removeFirst() }
+        // the middle error: most ticks are on time (a late one is spread over all phases, as a delay of more than a tick wraps around)
+        let es = errs.map { $0.e }.sorted()
+        phi += min(max(es[es.count / 2], -Self.slew), Self.slew)
     }
-    /// Called every few ms: how many clocks leave now (usually 0 or 1)?
-    mutating func take(at now: Double) -> Int {
-        guard pending >= 1 else { return 0 }
-        if rate <= 0 { let n = Int(pending); pending -= Double(n); return n }       // no speed known yet: straight through
-        guard now >= nextDue else { return 0 }
-        var r = rate * (1 + 0.005 * (pending - Self.target))                         // a very gentle pull to the buffer's target
-        if pending > 20 { r *= 1.3 }
-        r = min(max(r, rate * 0.7), rate * 1.4)
-        nextDue = max(nextDue + 1 / r, now - 0.5 / r)
-        pending -= 1
-        return 1
+    /// Called every few ms: the exact times of the clocks that are due now (the packet carries the time, so the 2 ms of the caller's timer do not show).
+    mutating func take(at now: Double) -> [Double] {
+        var n: [Double] = []
+        queue.removeAll { if $0 <= now { n.append($0); return true }; return false }
+        guard active else { return n }
+        if now - lastReal > 0.5 { restart(); return n }
+        while n.count < 4 {
+            let t = phi + Double(nextK) * period + (half == 0 ? 0 : period / 2)
+            if t > now { break }
+            if now - t > 4 * period { nextK += Int((now - t) / period) - 1; continue }      // far behind (a stall of this app): jump
+            n.append(t)
+            if half == 0 { half = 1 } else { half = 0; nextK += 1 }
+        }
+        return n
     }
-    /// Start / stop / continue: forget the buffer.
-    mutating func transport() { arrivals = []; count = 0; pending = 0; rate = 0 }
 }
 
 func selftestUplink() -> Int {
@@ -303,27 +337,32 @@ func selftestUplink() -> Int {
     var slow: [Int] = []
     for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
     check("a tempo below 60 is not reported", slow.isEmpty)
-    // ticks of 140 BPM (35.7 ms), 25 % of them late by up to 90 ms (in bursts): the DAW must get an even stream
-    var sm = ClockSmoother()
+    // 140 BPM (35.7 ms a tick): 25 % of the ticks late by up to 90 ms (in bursts), 1.2 % never arrive. The DAW must get an even stream at 140.
+    var osc = ClockOsc()
     var rng: UInt64 = 777
     func rand() -> Double { rng = rng &* 6364136223846793005 &+ 1442695040888963407; return Double((rng >> 33) % 1000) / 1000 }
     var arrivals: [Double] = []
-    for k in 0..<700 { arrivals.append(Double(k) * (60.0 / 140 / 12) + (rand() < 0.25 ? rand() * 0.09 : 0)) }
+    for k in 0..<700 where rand() >= 0.012 { arrivals.append(0.3 + Double(k) * (60.0 / 140 / 12) + (rand() < 0.25 ? rand() * 0.09 : 0)) }
     arrivals.sort()
     var out: [Double] = []
     var t = 0.0, idx = 0
-    while t < 24.5 {
+    osc.setBpm(140)
+    while t < 24.8 {
         t += 0.002
-        while idx < arrivals.count, arrivals[idx] <= t { sm.real(at: arrivals[idx]); idx += 1 }
-        for _ in 0..<sm.take(at: t) { out.append(t) }
+        while idx < arrivals.count, arrivals[idx] <= t { osc.real(at: arrivals[idx]); idx += 1 }
+        for d in osc.take(at: t) { out.append(d) }
     }
-    let late = out.filter { $0 > 5 && $0 < 22 }
-    let want = 17.0 * 140 * 24 / 60
-    check("the clocks come at the true speed (17 s: \(late.count) of about \(Int(want)))", abs(Double(late.count) - want) < want * 0.02)
+    let late = out.filter { $0 > 6 && $0 < 22 }
+    let want = 16.0 * 140 * 24 / 60
+    check("the clocks come at the true speed (16 s: \(late.count) of \(Int(want)))", abs(Double(late.count) - want) <= 2)
     var worst = 0.0
     for i in 0..<(late.count - 8) { let bpm = 60 / ((late[i + 8] - late[i]) / 8 * 24); worst = max(worst, abs(bpm - 140)) }
-    check("the tempo the DAW would read over 8 clocks stays within 4 BPM of 140 (worst \(Int(worst)))", worst < 4)
-    sm.transport()
-    check("a stop forgets the buffer", sm.take(at: 100) == 0)
+    check("the tempo over 8 clocks stays within 1.5 BPM of 140 (worst \(worst))", worst < 1.5)
+    check("the first second goes through as it comes (\(out.filter { $0 < 1.3 }.count) clocks)", out.filter { $0 < 1.3 }.count >= 20)
+    osc.transport()
+    check("a stop forgets: nothing goes", osc.take(at: 100).isEmpty)
+    var unk = ClockOsc()
+    unk.real(at: 1.0)
+    check("tempo unknown: the clock goes through (two clocks)", unk.take(at: 1.05).count == 2)
     return fails
 }

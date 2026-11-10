@@ -109,7 +109,8 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var inPort = MIDIPortRef()
     private var dest = MIDIEndpointRef()
     private var upSource = MIDIEndpointRef()      // "ChromaSynth" as a MIDI input: what the Chromatic's sequencer plays (SYNC = OUT)
-    private var clockSmoother = ClockSmoother()
+    private var clockOsc = ClockOsc()
+    private var romTempoLo = 0
     private var clockTimer: DispatchSourceTimer?
     private var upCount = 0
     private var clockBpm = ClockBpm()
@@ -179,13 +180,19 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     // ---- the ROM's MIDI out -> the DAW (the source "ChromaSynth")
-    private func emitUp(_ msg: [UInt8]) {
+    private func emitUp(_ msg: [UInt8], at seconds: Double? = nil) {
+        var stamp: MIDITimeStamp = 0                    // 0 = now; a clock carries its exact time (uptime seconds -> host time)
+        if let s = seconds {
+            var tb = mach_timebase_info_data_t()
+            mach_timebase_info(&tb)
+            stamp = MIDITimeStamp(s * 1e9 * Double(tb.denom) / Double(tb.numer))
+        }
         var buf = [UInt8](repeating: 0, count: 64)
         buf.withUnsafeMutableBytes { raw in
             let pl = raw.baseAddress!.assumingMemoryBound(to: MIDIPacketList.self)
             var p = MIDIPacketListInit(pl)
             var m = msg
-            p = MIDIPacketListAdd(pl, 64, p, 0, m.count, &m)
+            p = MIDIPacketListAdd(pl, 64, p, stamp, m.count, &m)
             MIDIReceived(upSource, pl)
         }
     }
@@ -197,21 +204,25 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
         }
         if msg.count == 3, msg[0] & 0xF0 == 0x90 { print("Chromatic: note \(msg[1]) on, MIDI channel \((msg[0] & 0x0F) + 1)") }
+        if msg.count == 3, msg[0] == 0xB0, msg[1] == 14 || msg[1] == 15 {       // the ROM's tempo (CC14 low part, CC15 high part): for the clock only
+            if msg[1] == 14 { romTempoLo = Int(msg[2]) } else { clockOsc.setBpm(60 + romTempoLo + 128 * Int(msg[2])) }
+            return
+        }
         if !(msg.count == 1 && msg[0] == 0xF8) { emitUp(msg) }
         if msg.count == 1, msg[0] == 0xF8 {
-            clockSmoother.real(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9)
-            if clockTimer == nil {                      // the clocks leave on an even beat (see ClockSmoother)
+            clockOsc.real(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9)
+            if clockTimer == nil {                      // the clocks leave on an even beat (see ClockOsc)
                 let t = DispatchSource.makeTimerSource(queue: .main)
                 t.schedule(deadline: .now() + 0.002, repeating: 0.002)
                 t.setEventHandler { [weak self] in
                     guard let me = self else { return }
-                    for _ in 0..<me.clockSmoother.take(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) { me.emitUp([0xF8]) }
+                    for d in me.clockOsc.take(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) { me.emitUp([0xF8], at: d) }
                 }
                 t.resume()
                 clockTimer = t
             }
         } else if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
-            clockSmoother.transport()
+            clockOsc.transport()
         }
     }
 
