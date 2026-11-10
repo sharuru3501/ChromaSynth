@@ -1,0 +1,38 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  rom-and-tools:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RGBDS and the Python test tools
+        run: |
+          brew install rgbds
+          rgbasm --version
+          python3 -m venv .venv
+          .venv/bin/pip install pyboy pillow numpy
+      - name: Build the three ROMs (-Weverything: no warnings allowed)
+        run: |
+          make
+          make small
+          make card
+      - name: Generated files are up to date
+        run: |
+          make gen
+          git diff --exit-code -- src inc
+      - name: ROM tests (PyBoy, headless)
+        run: |
+          for t in test midi follow clink save wave note sram; do
+            f=tools/headless_${t}_test.py
+            [ -f "$f" ] || continue
+            echo "== $t"; .venv/bin/python "$f"
+          done
+      - name: MCU protocol core against the Python reference
+        run: make check-mcu
+      - name: Mac app self test (no hardware, no Bluetooth)
+        run: |
+          tools/mac/build_app.sh
+          build/ChromaSynthLink.app/Contents/MacOS/ChromaSynthLink --selftest
