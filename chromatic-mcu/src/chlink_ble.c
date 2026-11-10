@@ -66,6 +66,13 @@ static void on_midi(void *ctx, uint8_t status, uint8_t d1, uint8_t d2)
         (void)ChLinkLink_Release();      // always: this firmware may have restarted and not know what sounds
         s_last_note = 0xFF;
         break;
+    case CHL_ACT_FORWARD:
+        {
+            uint8_t g[3];
+            chl_forward_bytes(status, d1, d2, g);
+            (void)ChLinkLink_Midi(g[0], g[1], g[2]);
+        }
+        break;
     default: break;
     }
 }

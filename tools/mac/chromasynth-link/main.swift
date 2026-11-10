@@ -18,6 +18,11 @@ import ServiceManagement
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--latency") {
+    let mode = i + 1 < args.count ? args[i + 1] : "down"
+    let secs = i + 2 < args.count ? Double(args[i + 2]) ?? 20 : 20
+    runLatency(mode: mode, seconds: secs)
+}
 if args.contains("--selftest") { exit(selftest() + selftestUplink() == 0 ? 0 : 1) }
 let dry = args.contains("--dry-run")
 
@@ -104,6 +109,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var upSource = MIDIEndpointRef()      // "ChromaSynth" as a MIDI input: what the Chromatic's sequencer plays (SYNC = OUT)
     private var clockDoubler = ClockDoubler()
     private var upCount = 0
+    private var clockBpm = ClockBpm()
     private var running: UInt8 = 0
     private var guardState = FloodGuard()
     private var announcedTrip = 0
@@ -208,6 +214,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         for pkt in list.unsafeSequence() {
             let n = Int(pkt.pointee.length)
             let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
+            followDAW(bytes)
             for line in consoleLines(for: bytes, running: &running) {
                 if !guardState.allow(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) {
                     if guardState.trips != announcedTrip {
@@ -218,6 +225,22 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                     continue
                 }
                 forward(line)
+            }
+        }
+    }
+
+    /// The DAW's clock (Live: Preferences > Tempo & MIDI > the output port ChromaSynth, "Sync" on) gives the tempo; the ROM keeps its own
+    /// clock (the link is too slow for 24 clocks a beat). A start forgets the tempo measured so far. The tempo goes as CC14 (the low
+    /// part, BPM - 60 mod 128) and CC15 (the high part), on MIDI channel 1.
+    private func followDAW(_ bytes: [UInt8]) {
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+        for b in bytes {
+            if b == 0xFA { clockBpm.reset() }
+            if b == 0xF8, let bpm = clockBpm.feed(at: now) {
+                let v = bpm - 60
+                print("DAW tempo: \(bpm) BPM")
+                forward(String(format: "m b0 0e %02x", v % 128))
+                forward(String(format: "m b0 0f %02x", v / 128))
             }
         }
     }

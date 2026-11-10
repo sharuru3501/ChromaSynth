@@ -5,11 +5,16 @@ import Foundation
 // ---------------------------------------------------------------- MIDI bytes -> console lines
 /// Turns raw MIDI bytes into console lines ("m 90 3c 64"). Channel messages only; running status is kept per call.
 func consoleLines(for raw: [UInt8], running: inout UInt8) -> [String] {
-    let bytes = raw.filter { $0 < 0xF8 }   // real-time bytes (clock, active sensing) may appear anywhere, even inside a message: skip them
+    let bytes = raw
     var out: [String] = []
     var i = 0
     while i < bytes.count {
         let b = bytes[i]
+        if b >= 0xF8 {                     // real-time bytes (clock, active sensing) may appear anywhere, even inside a message
+            if b == 0xFA || b == 0xFB || b == 0xFC { out.append(String(format: "m %02x 00 00", b)) }   // start / continue / stop go on; the clock does not
+            i += 1
+            continue
+        }
         var status = running
         var data: [UInt8] = []
         if b & 0x80 != 0 {
@@ -26,14 +31,22 @@ func consoleLines(for raw: [UInt8], running: inout UInt8) -> [String] {
             continue
         }
         let need = (status & 0xF0 == 0xC0 || status & 0xF0 == 0xD0) ? 1 : 2
-        while data.count < need, i < bytes.count, bytes[i] & 0x80 == 0 {
-            data.append(bytes[i])
+        while data.count < need, i < bytes.count {
+            let d = bytes[i]
+            if d >= 0xF8 {                 // a real-time byte inside the message: handled, the message goes on
+                if d == 0xFA || d == 0xFB || d == 0xFC { out.append(String(format: "m %02x 00 00", d)) }
+                i += 1
+                continue
+            }
+            if d & 0x80 != 0 { break }
+            data.append(d)
             i += 1
         }
         if data.count == need {
             let hi = status & 0xF0
-            // only what ChromaSynth plays: notes and all-notes-off (the ESP32 ignores the rest anyway; this saves serial traffic)
-            if hi == 0x80 || hi == 0x90 || (hi == 0xB0 && (data[0] == 123 || data[0] == 120)) {
+            // what ChromaSynth plays and follows: notes, all-notes-off, program change (the pattern) and the CCs 10 / 14 / 15 / 20 / 21
+            // (pan, tempo, timbre; the ESP32 ignores the rest anyway, this saves link time)
+            if hi == 0x80 || hi == 0x90 || hi == 0xC0 || (hi == 0xB0 && [123, 120, 10, 14, 15, 20, 21].contains(data[0])) {
                 out.append(String(format: "m %02x %02x %02x", status, data[0], need == 2 ? data[1] : 0))
             }
         }
@@ -61,9 +74,13 @@ func selftest() -> Int {
     r = 0
     check("a CC that is not forwarded", consoleLines(for: [0xB0, 7, 100], running: &r), [])
     r = 0
-    check("program change and pitch bend are not forwarded", consoleLines(for: [0xC0, 5, 0xE0, 0, 64], running: &r), [])
+    check("pitch bend is not forwarded, program change is", consoleLines(for: [0xC0, 5, 0xE0, 0, 64], running: &r), ["m c0 05 00"])
     r = 0
     check("real-time bytes between notes", consoleLines(for: [0x90, 60, 0xF8, 100], running: &r), ["m 90 3c 64"])
+    r = 0
+    check("MIDI start / stop go on, the clock does not", consoleLines(for: [0xFA, 0xF8, 0xF8, 0xFC], running: &r), ["m fa 00 00", "m fc 00 00"])
+    r = 0
+    check("the tempo, timbre and pan CCs go on, others not", consoleLines(for: [0xB0, 14, 60, 0xB0, 15, 1, 0xB1, 20, 100, 0xB2, 21, 64, 0xB3, 10, 0, 0xB0, 74, 5], running: &r), ["m b0 0e 3c", "m b0 0f 01", "m b1 14 64", "m b2 15 40", "m b3 0a 00"])
     r = 0
     check("truncated message", consoleLines(for: [0x90, 60], running: &r), [])
     r = 0
@@ -128,7 +145,11 @@ func blePacketBytes(_ message: [UInt8], timestamp: UInt16) -> [UInt8] {
 
 /// "m 90 3c 64" -> [0x90, 0x3c, 0x64] (the console line is the one place that decides which messages are forwarded).
 func messageBytes(fromLine line: String) -> [UInt8] {
-    line.split(separator: " ").dropFirst().compactMap { UInt8($0, radix: 16) }
+    let b = line.split(separator: " ").dropFirst().compactMap { UInt8($0, radix: 16) }
+    guard let status = b.first else { return b }
+    if status >= 0xF8 { return [status] }                                       // real-time: one byte
+    if status & 0xF0 == 0xC0 || status & 0xF0 == 0xD0 { return Array(b.prefix(2)) }   // program change: two
+    return b
 }
 
 // ---------------------------------------------------------------- the ROM's MIDI out (Chromatic -> DAW)
@@ -181,6 +202,25 @@ func takeLines(_ buf: inout String) -> [String] {
     return parts
 }
 
+/// The DAW's tempo from its MIDI clock (24 a beat): the average over the last beat, rounded to a whole BPM (the ROM's resolution),
+/// reported only when it changes (by at least one BPM from the last one reported). Pure: the time is passed in.
+struct ClockBpm {
+    var stamps: [Double] = []
+    var reported = 0
+    mutating func reset() { stamps = []; reported = 0 }
+    mutating func feed(at now: Double) -> Int? {
+        stamps.append(now)
+        if stamps.count > 25 { stamps.removeFirst(stamps.count - 25) }
+        guard stamps.count == 25, let first = stamps.first else { return nil }
+        let span = now - first                       // 24 clocks
+        guard span > 0 else { return nil }
+        let bpm = Int((60.0 / span).rounded())
+        guard bpm >= 60, bpm <= 240, bpm != reported else { return nil }
+        reported = bpm
+        return bpm
+    }
+}
+
 /// The ROM sends a clock every tick, 12 a beat; a DAW wants 24 a beat. Every clock is followed by a second one half an interval
 /// later (the interval being the one between the last two clocks). Start / stop / continue forget the interval. Pure: the time is
 /// passed in.
@@ -214,6 +254,18 @@ func selftestUplink() -> Int {
     check("console lines end with \\r\\n: two complete lines, the rest is kept", got == ["u 90 3c 64", "u f8"] && lb == "u 9")
     lb += "0 3e 64\r\n"
     check("the rest completes with the next chunk", takeLines(&lb) == ["u 90 3e 64"] && lb == "")
+    var cb = ClockBpm()
+    var reportedBpm: [Int] = []
+    for k in 0..<100 { if let b = cb.feed(at: Double(k) * 60.0 / 120.0 / 24.0) { reportedBpm.append(b) } }
+    check("a clock of 120 BPM is reported once as 120", reportedBpm == [120])
+    reportedBpm = []
+    var tt = 100.0
+    for _ in 0..<60 { tt += 60.0 / 90.0 / 24.0; if let b = cb.feed(at: tt) { reportedBpm.append(b) } }
+    check("a change to 90 BPM is reported", reportedBpm.last == 90)
+    cb.reset()
+    var slow: [Int] = []
+    for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
+    check("a tempo below 60 is not reported", slow.isEmpty)
     var c = ClockDoubler()
     check("the first clock: no interval yet", c.secondClock(after: [0xF8], at: 1.000) == nil)
     let d = c.secondClock(after: [0xF8], at: 1.040)

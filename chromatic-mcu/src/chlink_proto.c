@@ -201,6 +201,9 @@ chl_action_t chl_midi_action(uint8_t status, uint8_t d1, uint8_t d2, uint8_t *no
         return CHL_ACT_NOTE_OFF;
     }
     if (hi == 0xB0 && (d1 == 123 || d1 == 120)) return CHL_ACT_ALL_OFF;
+    if (status == 0xFA || status == 0xFB || status == 0xFC) return CHL_ACT_FORWARD;     // (not the clock: the link is far too slow for it)
+    if (hi == 0xC0) return CHL_ACT_FORWARD;
+    if (hi == 0xB0 && (d1 == 10 || d1 == 14 || d1 == 15 || d1 == 20 || d1 == 21)) return CHL_ACT_FORWARD;
     return CHL_ACT_IGNORE;
 }
 
@@ -218,4 +221,17 @@ int chl_coalesce(chl_cmd_t *cmds, int n)
         if (!drop) cmds[out++] = cmds[i];
     }
     return out;
+}
+
+void chl_forward_bytes(uint8_t status, uint8_t d1, uint8_t d2, uint8_t out[3])
+{
+    out[0] = status;
+    if (status >= 0xF8)
+    {
+        out[1] = 0xFE;
+        out[2] = 0xFE;
+        return;
+    }
+    out[1] = d1;
+    out[2] = ((status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0) ? 0xFE : d2;
 }

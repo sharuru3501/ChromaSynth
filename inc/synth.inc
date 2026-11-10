@@ -47,6 +47,7 @@ DEF PM_TSD  EQU 11          ; time signature: denominator index 0 = 4, 1 = 8, 2 
 DEF SYNC_OFF EQU 0          ; no clock, nothing sent
 DEF SYNC_OUT EQU 1          ; this unit is the master: sends clock/start/stop and the sequencer's notes
 DEF SYNC_IN  EQU 2          ; this unit follows the DAW: clock/start/stop come from the link
+DEF SYNC_FOLLOW EQU 3       ; follows the DAW over the slow cable-less link: start/stop, the tempo (CC14/CC15), program change = pattern, timbre CCs; the ROM keeps its own clock
 ; Link protocol (see docs/BRIDGE.md): both directions use $FD as "nothing to send".
 ; Clock is one $F8 per sequencer tick (12 per beat), not the MIDI standard 24 per beat.
 DEF MIDI_IDLE EQU $FD

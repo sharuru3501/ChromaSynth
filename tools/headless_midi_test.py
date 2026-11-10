@@ -141,7 +141,7 @@ press("down")
 check("row 7 is SYNC (the last row)", v("wEditRow") == 7, v("wEditRow"))
 for _ in range(20):
     press("right", frames=2)
-check("SYNC is clamped at 2 (0 = off, 1 = out, 2 = in)", mem[MB + 7] == 2, mem[MB + 7])
+check("SYNC is clamped at 3 (0 = off, 1 = out, 2 = in, 3 = follow)", mem[MB + 7] == 3, mem[MB + 7])
 mem[MB + 7] = 0
 
 # ---- polyphony: CH1 and CH2 both listen to MIDI channel 1

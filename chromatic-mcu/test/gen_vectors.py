@@ -75,10 +75,13 @@ ble(bytes([0x00, 0x85, 0x90, 60, 100]), [])                                     
 ble(bytes([0x81, 0x85, 0xF0, 1, 2, 3, 0x86, 0xF7, 0x87, 0x90, 60, 100]), [(0x90, 60, 100)])  # SysEx skipped
 ble(bytes([0x81, 0x85, 0xFE]), [(0xFE, 0, 0)])                                    # a realtime byte (active sensing)
 ble(bytes([0x81, 0x85, 0xC1, 7, 0x86, 0xD0, 20]), [(0xC1, 7, 0), (0xD0, 20, 0)]) # one-data-byte messages
-# actions: "act st d1 d2 action note vel" (action: 0 ignore, 1 on, 2 off, 3 all off)
+# actions: "act st d1 d2 action note vel" (action: 0 ignore, 1 on, 2 off, 3 all off, 4 forward as a general packet)
 for st, d1, d2, a, note, vel in [(0x90, 60, 100, 1, 60, 100), (0x93, 72, 1, 1, 72, 1), (0x90, 60, 0, 2, 60, 0), (0x80, 60, 64, 2, 60, 0),
                                 (0x8F, 36, 0, 2, 36, 0), (0xB0, 123, 0, 3, 0, 0), (0xB5, 120, 0, 3, 0, 0), (0xB0, 7, 100, 0, 0, 0),
-                                (0xE0, 0, 64, 0, 0, 0), (0xC0, 5, 0, 0, 0, 0), (0xF8, 0, 0, 0, 0, 0)]:
+                                (0xE0, 0, 64, 0, 0, 0), (0xC0, 5, 0, 4, 0, 0), (0xF8, 0, 0, 0, 0, 0),
+                                (0xFA, 0, 0, 4, 0, 0), (0xFB, 0, 0, 4, 0, 0), (0xFC, 0, 0, 4, 0, 0), (0xC3, 2, 0, 4, 0, 0),
+                                (0xB0, 10, 64, 4, 0, 0), (0xB0, 14, 60, 4, 0, 0), (0xB0, 15, 1, 4, 0, 0), (0xB2, 20, 100, 4, 0, 0), (0xB0, 21, 10, 4, 0, 0),
+                                (0xB0, 1, 50, 0, 0, 0), (0xFE, 0, 0, 0, 0, 0), (0xFF, 0, 0, 0, 0, 0)]:
     out.append("act %d %d %d %d %d %d" % (st, d1, d2, a, note, vel))
 # coalescing: "coal n k a b c ... m k a b c ..." (input then expected)
 def coal(inp, exp):
