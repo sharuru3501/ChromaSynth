@@ -13,7 +13,8 @@ var firstClocks: [Double] = []
 var perChannel = [Int](repeating: 0, count: 16)
 MIDIClientCreate("listen" as CFString, nil, nil, &client)
 MIDIInputPortCreateWithBlock(client, "in" as CFString, &port) { list, _ in
-    if !started { started = true; t0 = Date(); print("first message: counting \(Int(secs)) s from now") }
+    let onlyStart = ProcessInfo.processInfo.environment["UNTIL_START"] != nil     // UNTIL_START=1: the counting begins at the first MIDI start ($FA)
+    if !started && (!onlyStart || list.unsafeSequence().contains(where: { p in withUnsafeBytes(of: p.pointee.data) { Array($0.prefix(Int(p.pointee.length))) }.contains(0xFA) })) { started = true; t0 = Date(); print("first message: counting \(Int(secs)) s from now") }
     for pkt in list.unsafeSequence() {
         let n = Int(pkt.pointee.length)
         let b = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
