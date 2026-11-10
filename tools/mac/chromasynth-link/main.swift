@@ -109,7 +109,8 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var inPort = MIDIPortRef()
     private var dest = MIDIEndpointRef()
     private var upSource = MIDIEndpointRef()      // "ChromaSynth" as a MIDI input: what the Chromatic's sequencer plays (SYNC = OUT)
-    private var clockDoubler = ClockDoubler()
+    private var clockBridge = ClockBridge()
+    private var bridgeTimer: DispatchSourceTimer?
     private var upCount = 0
     private var clockBpm = ClockBpm()
     private var running: UInt8 = 0
@@ -193,9 +194,27 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
         }
         emitUp(msg)
-        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
-        if let d = clockDoubler.secondClock(after: msg, at: now) {
+        if msg.count == 1, msg[0] == 0xF8 {
+            let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+            let d = clockBridge.tick(at: now)
             DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in self?.emitUp([0xF8]) }
+            if bridgeTimer == nil {                     // bridges the ticks the ESP32 misses (a gap makes the DAW say "MIDI sync signal lost")
+                let t = DispatchSource.makeTimerSource(queue: .main)
+                t.schedule(deadline: .now() + 0.005, repeating: 0.005)
+                t.setEventHandler { [weak self] in
+                    guard let me = self else { return }
+                    let n = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+                    if me.clockBridge.bridgeDue(at: n) {
+                        me.emitUp([0xF8])
+                        let half = me.clockBridge.period / 2
+                        DispatchQueue.main.asyncAfter(deadline: .now() + half) { me.emitUp([0xF8]) }
+                    }
+                }
+                t.resume()
+                bridgeTimer = t
+            }
+        } else if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
+            clockBridge.transport()
         }
     }
 

@@ -226,20 +226,35 @@ struct ClockBpm {
     }
 }
 
-/// The ROM sends a clock every tick, 12 a beat; a DAW wants 24 a beat. Every clock is followed by a second one half an interval
-/// later (the interval being the one between the last two clocks). Start / stop / continue forget the interval. Pure: the time is
-/// passed in.
-struct ClockDoubler {
-    var last: Double? = nil
-    /// -> the delay after which a second clock is due, or nil (not for this message, or no interval known yet)
-    mutating func secondClock(after message: [UInt8], at now: Double) -> Double? {
-        guard let b = message.first, message.count == 1 else { return nil }
-        if b == 0xFA || b == 0xFB || b == 0xFC { last = nil; return nil }
-        guard b == 0xF8 else { return nil }
-        defer { last = now }
-        if let l = last, now - l > 0.002, now - l < 0.5 { return (now - l) / 2 }
-        return nil
+/// The ROM sends a clock every tick (12 a beat); a DAW wants 24 a beat and gets nervous ("MIDI sync signal lost") when the clock stutters.
+/// The ESP32 sometimes misses a message (it is busy sending a keep-alive packet for about 150 ms). So: every clock from the ROM is followed
+/// by a second one half a period later, and when the next one does not come in time, the clock goes on by itself (at the period
+/// measured from the last ticks) for up to 10 ticks, until the ROM's ticks are back or a stop arrives. Pure: the time is passed in.
+struct ClockBridge {
+    var lastTick: Double? = nil
+    var period = 0.04                         // seconds per ROM tick (smoothed)
+    var synthetic = 0
+    /// A real clock arrived. -> the delay of the second clock of this tick.
+    mutating func tick(at now: Double) -> Double {
+        if let l = lastTick {
+            let d = now - l                       // the time since the last REAL tick (bridged ticks in between count as ticks)
+            let n = Double(synthetic + 1)
+            let per = d / n
+            if per > 0.004, per < 0.4 { period = period * 0.8 + per * 0.2 }
+        }
+        lastTick = now
+        synthetic = 0
+        return period / 2
     }
+    /// Called often (every few ms): is a bridging tick due now? (then it counts as one)
+    mutating func bridgeDue(at now: Double) -> Bool {
+        guard let l = lastTick, synthetic < 10 else { return false }
+        let expected = l + period * Double(synthetic + 1)
+        if now >= expected + period * 0.5 { synthetic += 1; return true }
+        return false
+    }
+    /// Start / stop / continue: no ticks to bridge.
+    mutating func transport() { lastTick = nil; synthetic = 0 }
 }
 
 func selftestUplink() -> Int {
@@ -282,11 +297,25 @@ func selftestUplink() -> Int {
     var slow: [Int] = []
     for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
     check("a tempo below 60 is not reported", slow.isEmpty)
-    var c = ClockDoubler()
-    check("the first clock: no interval yet", c.secondClock(after: [0xF8], at: 1.000) == nil)
-    let d = c.secondClock(after: [0xF8], at: 1.040)
-    check("the next clock: a second one half an interval later", d != nil && abs(d! - 0.020) < 1e-9)
-    check("start forgets the interval", c.secondClock(after: [0xFA], at: 1.05) == nil && c.secondClock(after: [0xF8], at: 1.06) == nil)
-    check("a note is not doubled", c.secondClock(after: [0x90, 60, 100], at: 1.1) == nil)
+    var cbr = ClockBridge()
+    check("the first clock: the second one half the default period later", abs(cbr.tick(at: 1.000) - 0.02) < 1e-9)
+    let d1 = cbr.tick(at: 1.040)
+    check("the next clock: a second one half the period later (the period learned)", d1 > 0.0185 && d1 < 0.0215)
+    var emitted = 0
+    var now = 1.040
+    var cb2 = cbr
+    while now < 1.040 + 0.5 { now += 0.002; if cb2.bridgeDue(at: now) { emitted += 1 } }
+    check("a gap of 0.5 s is bridged by about 10 ticks, then it stops", emitted == 10)
+    var cb3 = cbr
+    var bridged = 0
+    now = 1.040
+    for k in 1...5 {                                     // ticks every 40 ms, the 3rd one is missing
+        let end = 1.040 + Double(k) * 0.040
+        while now < end - 0.001 { now += 0.002; if cb3.bridgeDue(at: now) { bridged += 1 } }
+        if k != 3 { _ = cb3.tick(at: end); now = end }
+    }
+    check("one missing tick is bridged by exactly one", bridged == 1)
+    cb3.transport()
+    check("a stop forgets the ticks: nothing to bridge", !cb3.bridgeDue(at: 100))
     return fails
 }
