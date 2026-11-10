@@ -79,6 +79,8 @@ wRingHead:      db          ; written by ISR
 wRingTail:      db          ; written by main loop
 wTxHead:        db          ; next free slot in wTx (written by the main loop)
 wTxTail:        db          ; next byte the ISR hands to the bridge
+wCcValue:       db          ; MidiCC scratch: the raw CC value
+wFollowLo:      db          ; SYNC_FOLLOW: the low part of the DAW's BPM (CC14), waiting for CC15
 wExtTicks:      db          ; clock ticks received from the DAW and not played yet (0..4)
 wVBlank:        db          ; frames (VBlank interrupts) since the main loop last looked (capped at 255)
 wFrames:        db          ; the same, taken by the main loop for this pass: 1..4 (more than 1 = frames were lost)

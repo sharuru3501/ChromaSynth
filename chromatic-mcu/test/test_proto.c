@@ -118,7 +118,7 @@ int main(int argc, char **argv)
         {
             uint8_t note = 0xAA, vel = 0xAA;
             const chl_action_t act = chl_midi_action((uint8_t)a[0], (uint8_t)a[1], (uint8_t)a[2], &note, &vel);
-            ok = (int)act == a[3] && (act == CHL_ACT_IGNORE || act == CHL_ACT_ALL_OFF || (note == a[4] && vel == a[5]));
+            ok = (int)act == a[3] && (act == CHL_ACT_IGNORE || act == CHL_ACT_ALL_OFF || act == CHL_ACT_FORWARD || (note == a[4] && vel == a[5]));
             kinds[6]++;
         }
         else if (!strcmp(kind, "coal") && k >= 2)
@@ -154,6 +154,15 @@ int main(int argc, char **argv)
         msgs_t r = {0};
         const int got = chl_blemidi_parse(pkt, len, collect, &r);
         if (got < 0 || (unsigned)got > len) { bad++; printf("BAD fuzz count %d for %u bytes\n", got, len); break; }
+    }
+    {   // forwarding: short messages are padded with $FE
+        uint8_t o[3];
+        chl_forward_bytes(0xFA, 0, 0, o);
+        if (o[0] != 0xFA || o[1] != 0xFE || o[2] != 0xFE) { bad++; printf("BAD forward: start\n"); }
+        chl_forward_bytes(0xC1, 2, 0, o);
+        if (o[0] != 0xC1 || o[1] != 2 || o[2] != 0xFE) { bad++; printf("BAD forward: program change\n"); }
+        chl_forward_bytes(0xB2, 20, 99, o);
+        if (o[0] != 0xB2 || o[1] != 20 || o[2] != 99) { bad++; printf("BAD forward: CC\n"); }
     }
     {   // uplink: new messages are detected by seq
         chl_slot_t sl = {.len = 3, .seq = 2, .ack = 0, .nack = 0, .data = {0x90, 60, 100}};

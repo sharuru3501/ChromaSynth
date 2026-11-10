@@ -141,7 +141,7 @@ press("down")
 check("row 7 is SYNC (the last row)", v("wEditRow") == 7, v("wEditRow"))
 for _ in range(20):
     press("right", frames=2)
-check("SYNC is clamped at 2 (0 = off, 1 = out, 2 = in)", mem[MB + 7] == 2, mem[MB + 7])
+check("SYNC is clamped at 3 (0 = off, 1 = out, 2 = in, 3 = follow)", mem[MB + 7] == 3, mem[MB + 7])
 mem[MB + 7] = 0
 
 # ---- polyphony: CH1 and CH2 both listen to MIDI channel 1
@@ -448,7 +448,10 @@ pb.tick(120)                        # 2 seconds at 120 BPM = 48 ticks = 4 beats
 out = tx_bytes()
 clocks = out.count(0xF8)
 check("one $F8 per tick: about 48 clocks in 2 s at 120 BPM (12 per beat)", 45 <= clocks <= 50, clocks)
-check("the first tick sends C4 on MIDI channel 1 as note-on, velocity 100", [0xF8, 0x90, 60, 100] == out[1:5], out[:8])
+bpm_now = v("wBpm")
+check("at the bar start the tempo goes out as CC14 / CC15 on channel 1, right after the start", out[1:7] == [0xB0, 14, (bpm_now - 60) & 0x7F, 0xB0, 15, (bpm_now - 60) >> 7], out[:8])
+check("the first tick sends C4 on MIDI channel 1 as note-on, velocity 100", [0xF8, 0x90, 60, 100] == out[7:11], out[:12])
+check("the tempo is sent again at every bar start (2 s = 1 bar at 120 BPM in 4/4 -> twice at most)", 1 <= sum(1 for i in range(len(out) - 2) if out[i:i + 2] == [0xB0, 14]) <= 2)
 check("the bass (CH3 -> MIDI channel 3) goes out too: note-on 48 on $92", [0x92, 48, 100] in [out[i:i + 3] for i in range(len(out) - 2)])
 check("a note that ends is sent as note-off ($80, note, 0)", [0x80, 60, 0] in [out[i:i + 3] for i in range(len(out) - 2)])
 check("the queue never overflows or stalls playback", len(out) < 255 and v("wSeqPlay") == 1, len(out))

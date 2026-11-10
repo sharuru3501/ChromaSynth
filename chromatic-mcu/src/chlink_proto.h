@@ -72,7 +72,8 @@ typedef enum
     CHL_ACT_IGNORE = 0,
     CHL_ACT_NOTE_ON = 1,
     CHL_ACT_NOTE_OFF = 2,
-    CHL_ACT_ALL_OFF = 3
+    CHL_ACT_ALL_OFF = 3,
+    CHL_ACT_FORWARD = 4   // sent on as a general packet: MIDI start/continue/stop, program change, CC 10 / 14 / 15 / 20 / 21 (docs/M15_DESIGN.md)
 } chl_action_t;
 
 // MIDI message -> what the keyboard link does with it. The MIDI channel is ignored (omni).
@@ -92,3 +93,7 @@ enum { CHL_CMD_PLAY = 0, CHL_CMD_MIDI = 1, CHL_CMD_HELLO = 2, CHL_CMD_SYNC = 3, 
 // note-on makes an earlier note-off pointless. Drops every PLAY note-off (a == 0) that has a later PLAY
 // note-on in the list, keeping the order of the rest. Returns the new length.
 int chl_coalesce(chl_cmd_t *cmds, int n);
+
+// A message to forward as a general packet: the bytes it lacks are $FE (what the ROM's parser ignores): one byte for the realtime messages,
+// two for the program change / channel pressure.
+void chl_forward_bytes(uint8_t status, uint8_t d1, uint8_t d2, uint8_t out[3]);

@@ -57,9 +57,9 @@ MidiByte:
     ret z
     and $F0
     cp $C0
-    ret z                   ; program change / channel pressure: 1 data byte, ignored
+    jr z, .programChange    ; program change: the pattern (SYNC_FOLLOW only)
     cp $D0
-    ret z
+    ret z                   ; channel pressure: 1 data byte, ignored
     ld a, [wMidiCount]
     and a
     jr nz, .second
@@ -94,11 +94,22 @@ MidiByte:
     ld [wMidiVel], a
     jp MidiNoteOn
 
+.programChange:
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_FOLLOW
+    ret nz
+    ld a, b
+    cp NUM_PATS
+    ret nc
+    jp SongSetEdit          ; the pattern is edited; while playing it takes over at the next bar line
+
 ; Realtime message in a (>= $F8). The bridge sends one $F8 per sequencer tick (12 per
 ; beat) and $FA/$FB/$FC for start/continue/stop. Only acted on in SYNC_IN mode.
 MidiRealtime:
     ld c, a
     ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_FOLLOW
+    jr z, .follow
     cp SYNC_IN
     ret nz
     ld a, c
@@ -143,6 +154,29 @@ MidiRealtime:
     xor a
     ld [wExtTicks], a
     jp MarkSeqStatus
+
+.follow:                    ; start / stop of the DAW; the clock itself never comes (the link is too slow): the ROM keeps its own
+    ld a, c
+    cp $FA
+    jr z, .followStart
+    cp $FB
+    jr z, .followContinue
+    cp $FC
+    ret nz
+    ld a, [wSeqPlay]
+    and a
+    ret z
+    jp SeqToggle            ; stop
+.followStart:
+    ld a, [wSeqPlay]
+    and a
+    call nz, SeqToggle      ; (already running: stop first, then start again from the top)
+    jp SeqToggle
+.followContinue:
+    ld a, [wSeqPlay]
+    and a
+    ret nz
+    jp SeqToggle
 
 ; a = byte -> queue it for the bridge (dropped when the queue is full, e.g. nobody
 ; is clocking the link). Clobbers a, b, hl.
@@ -339,9 +373,19 @@ MidiBend:
 MidiCC:
     ld a, [wMidiData1]
     cp 1
-    jr z, .modWheel
+    jp z, .modWheel
     cp 120
-    jr z, .allOff
+    jp z, .allOff
+    cp 14
+    jp z, .bpmLow
+    cp 15
+    jp z, .bpmHigh
+    cp 20
+    jp z, .ccMain
+    cp 21
+    jp z, .ccVol
+    cp 10
+    jp z, .ccPan
     cp 123
     ret nz
 .allOff:
@@ -358,6 +402,129 @@ MidiCC:
     ld a, c
     cp NUM_CH
     jr c, .offLoop
+    ret
+.bpmLow:                    ; SYNC_FOLLOW: BPM = 60 + CC14 + 128 * CC15 (the app sends CC14, then CC15)
+    ld a, b
+    ld [wFollowLo], a
+    ret
+.bpmHigh:
+    ld a, [wPatch + MIDI_BLOCK + PM_SYNC]
+    cp SYNC_FOLLOW
+    ret nz
+    ld a, [wFollowLo]
+    add 60
+    ld c, a
+    ld a, b
+    and 1
+    ld a, c
+    jr z, .bpmSet
+    add 128
+    jr nc, .bpmSet
+    ld a, BPM_MAX           ; (the sum went past 255)
+    jr .bpmOk
+.bpmSet:
+    cp BPM_MAX + 1
+    jr c, .bpmOk
+    ld a, BPM_MAX
+.bpmOk:
+    ld [wBpm], a
+    ld a, [wDirtySong]
+    or 1
+    ld [wDirtySong], a
+    jp MarkSeqStatus
+; Timbre CCs: for every GB channel that listens to this MIDI channel; the value is scaled to the channel's own range. They change the
+; patch (the next note-on uses it): CC20 = duty (CH1/2: 0-3) / wave (CH3: 0-7) / width (CH4: 0-1), CC21 = volume (0-15; CH3: level 0-2),
+; CC10 = pan (0-31 left, 32-95 both, 96-127 right).
+.ccMain:
+    ld e, P_MAIN
+    jr .ccEach
+.ccVol:
+    ld e, P_VOL
+    jr .ccEach
+.ccPan:
+    ld e, P_PAN
+.ccEach:
+    ld a, b
+    ld [wCcValue], a
+    ld c, 0
+.ccLoop:
+    call IsAssigned         ; keeps c, e
+    and a
+    jr z, .ccNext
+    ld a, [wCcValue]
+    ld b, a                 ; b = the raw value 0-127
+    ld a, e
+    cp P_PAN
+    jr z, .scalePan
+    and a                   ; P_MAIN = 0
+    jr nz, .scaleVol
+    ld a, c                 ; main: CH1/2 value / 32, CH3 value / 16, CH4 value / 64
+    cp 2
+    ld a, b
+    jr c, .main32
+    jr z, .main16
+    swap a                  ; CH4
+    rrca
+    rrca
+    and 1
+    jr .have
+.main32:
+    swap a
+    rrca
+    and 3
+    jr .have
+.main16:
+    swap a
+    and 7
+    jr .have
+.scaleVol:
+    ld a, c
+    cp 2
+    ld a, b
+    jr z, .volWave
+    srl a                   ; value / 8
+    srl a
+    srl a
+    jr .have
+.volWave:
+    cp 86                   ; CH3: output level 0 / 1 / 2
+    ld a, 2
+    jr nc, .have
+    ld a, b
+    cp 43
+    ld a, 1
+    jr nc, .have
+    xor a
+    jr .have
+.scalePan:
+    ld a, b
+    cp 96
+    ld a, 2
+    jr nc, .have
+    ld a, b
+    cp 32
+    ld a, 1
+    jr c, .have
+    xor a
+.have:
+    ld d, a                 ; d = the patch value
+    ld a, c
+    swap a
+    add a                   ; channel * PATCH_SIZE (32)
+    add e                   ; + the parameter
+    push bc
+    ld c, a
+    ld hl, wPatch
+    call HLplusC
+    pop bc
+    ld [hl], d
+.ccNext:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .ccLoop
+    ld a, $FF
+    ld [wDirtyEdit], a      ; (the patch screen shows the new values)
     ret
 .modWheel:
     ld a, [wPatch + MIDI_BLOCK + PM_MODW]
