@@ -181,16 +181,15 @@ func parseBLEMIDI(_ d: [UInt8]) -> [[UInt8]] {
     return out
 }
 
-/// "u 90 3c 64" (a console line of the USB mode) -> [0x90, 0x3c, 0x64]; anything else -> nil.
+/// "u 90 3c 64" (a console line of the USB mode) -> [0x90, 0x3c, 0x64]; anything else -> nil. The ESP32's prompt "mcu>  " has no line end, so
+/// the first message printed after a command (the app sends `hb` twice a second) comes behind it on the same line: "mcu>  u fa". Such a
+/// line counts too, or exactly the one-off messages (the start) would be lost.
 func uplinkMessage(fromLine line: String) -> [UInt8]? {
-    let parts = line.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
-    guard parts.count >= 2, parts.count <= 4, parts[0] == "u" else { return nil }
-    var out: [UInt8] = []
-    for p in parts.dropFirst() {
-        guard p.count == 2, let b = UInt8(p, radix: 16) else { return nil }
-        out.append(b)
-    }
-    return out
+    let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let re = try? NSRegularExpression(pattern: "(?:^|[\\s>])u((?: [0-9a-f]{2}){1,3})$"),
+          let m = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) else { return nil }
+    let hex = (t as NSString).substring(with: m.range(at: 1))
+    return hex.split(separator: " ").compactMap { UInt8($0, radix: 16) }
 }
 
 /// Complete lines of a growing text buffer (the console ends lines with \r\n, which Swift treats as ONE character: splitting on \n
@@ -254,7 +253,9 @@ func selftestUplink() -> Int {
     check("BLE MIDI garbage", parseBLEMIDI([0x00, 0x01]) == [] && parseBLEMIDI([]) == [])
     check("console line, 3 bytes", uplinkMessage(fromLine: "u 90 3c 64\r\n") == [0x90, 0x3c, 0x64])
     check("console line, 1 byte", uplinkMessage(fromLine: "u f8") == [0xF8])
-    check("console line: an echoed command is not a message", uplinkMessage(fromLine: "up on") == nil && uplinkMessage(fromLine: "mcu> hb") == nil)
+    check("console line: an echoed command is not a message", uplinkMessage(fromLine: "up on") == nil && uplinkMessage(fromLine: "mcu> hb") == nil && uplinkMessage(fromLine: "mode") == nil)
+    check("console line behind the prompt: \"mcu>  u fa\" is the start", uplinkMessage(fromLine: "mcu>  u fa") == [0xFA] && uplinkMessage(fromLine: "mcu>  u 90 3c 64\r") == [0x90, 0x3c, 0x64])
+    check("console line: a word that ends in u is not a message", uplinkMessage(fromLine: "menu 12") == nil && uplinkMessage(fromLine: "ubu fa") == nil)
     var lb = "u 90 3c 64\r\nu f8\r\nu 9"
     let got = takeLines(&lb)
     check("console lines end with \\r\\n: two complete lines, the rest is kept", got == ["u 90 3c 64", "u f8"] && lb == "u 9")
