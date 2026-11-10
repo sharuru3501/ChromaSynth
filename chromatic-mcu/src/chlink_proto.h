@@ -49,6 +49,13 @@ typedef enum
 } chl_rom_state_t;
 
 chl_rom_state_t chl_classify(const chl_slot_t *slot);
+
+// ---------------------------------------------------------------- uplink: the ROM's MIDI out (docs/M15_DESIGN.md)
+// When the ROM is linked and its SYNC is OUT it puts one MIDI message (1-3 bytes: clock, start/stop, notes) into the slot per
+// frame and advances `seq` (0..7). Returns the length of a NEW message (copied to out) or 0: nothing new, a beacon, an empty
+// slot. *last_seq = 0xFF before the first call: the first slot seen is only remembered (it may be old). A seq jump of more than
+// one means messages were lost between two reads; the newest one is the one that is returned.
+int chl_up_decode(const chl_slot_t *slot, uint8_t *last_seq, uint8_t out[3]);
 // Before a keep-alive: 1 if the slot is still that of the ROM the MCU linked with (no beacon, the ack of the MCU's last
 // symbol, no nack). Anything else (another or a reset ROM, a stray symbol): stop instead of pressing buttons in a game.
 int chl_link_alive(const chl_slot_t *slot, int last_phase);

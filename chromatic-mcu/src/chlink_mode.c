@@ -94,8 +94,19 @@ void ChMode_Request(ChMidiMode m)
     (void)xQueueSend(s_q, &m, 0);
 }
 
+// USB mode: the ROM's MIDI out as console lines `u 90 3c 64` (the Mac app reads them; `up on` turns it on).
+static void up_to_console(const uint8_t *msg, int len, int64_t t_us)
+{
+    (void)t_us;
+    if (len == 1) printf("u %02x\n", msg[0]);
+    else if (len == 2) printf("u %02x %02x\n", msg[0], msg[1]);
+    else if (len == 3) printf("u %02x %02x %02x\n", msg[0], msg[1], msg[2]);
+}
+
 static void apply(ChMidiMode m)
 {
+    ChLinkLink_SetUp(false);                  // the new mode starts without the uplink: BLE turns it on when the Mac subscribes, USB with `up on`
+    ChLinkLink_SetUpHandler(m == CHM_BLE ? ChLinkBle_UpHandler : m == CHM_USB ? up_to_console : NULL);
     if (s_applied != CHM_OFF)
     {
         (void)ChLinkLink_Release();           // a note that the old source left sounding stops before the switch
@@ -189,6 +200,15 @@ static int cmd_mode(int argc, char **argv)
     return 0;
 }
 
+static int cmd_up(int argc, char **argv)
+{
+    if (argc >= 2 && s_applied == CHM_USB)
+    {
+        ChLinkLink_SetUp(!strcmp(argv[1], "on"));
+    }
+    return 0;
+}
+
 static int cmd_hb(int argc, char **argv)
 {
     (void)argc;
@@ -248,6 +268,7 @@ void ChMode_Init(void)
     s_q = xQueueCreate(4, sizeof(ChMidiMode));
     const esp_console_cmd_t cmds[] = {
         {.command = "mode", .help = "MIDI mode: mode [off|ble|usb]", .func = &cmd_mode},
+        {.command = "up", .help = "USB mode: the ROM's MIDI out as `u 90 3c 64` lines: up on|off", .func = &cmd_up},
         {.command = "hb", .help = "heartbeat of the Mac app (USB mode falls back to the saved mode after 10 s without it)", .func = &cmd_hb},
         {.command = "m", .help = "wired MIDI message (hex): m 90 3c 64", .func = &cmd_m},
         {.command = "tasks", .help = "least free stack of our tasks (bytes)", .func = &cmd_tasks},

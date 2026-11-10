@@ -18,7 +18,7 @@ import ServiceManagement
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
-if args.contains("--selftest") { exit(selftest() == 0 ? 0 : 1) }
+if args.contains("--selftest") { exit(selftest() + selftestUplink() == 0 ? 0 : 1) }
 let dry = args.contains("--dry-run")
 
 func midiName(_ o: MIDIObjectRef) -> String {
@@ -29,6 +29,43 @@ func midiName(_ o: MIDIObjectRef) -> String {
 
 func serialPorts() -> [String] {
     ((try? FileManager.default.contentsOfDirectory(atPath: "/dev")) ?? []).filter { $0.hasPrefix("cu.usbmodem") }.sorted().map { "/dev/" + $0 }
+}
+
+// --emit-test: a stand-in for the Chromatic. Creates the MIDI input "ChromaSynth" and plays notes on MIDI channels 1-4 (four
+// notes each, a start at the beginning, a stop at the end), to see what a DAW does with them. Quit the app first.
+if args.contains("--emit-test") {
+    var client = MIDIClientRef()
+    var src = MIDIEndpointRef()
+    MIDIClientCreate("ChromaSynth emit test" as CFString, nil, nil, &client)
+    MIDISourceCreate(client, "ChromaSynth" as CFString, &src)
+    func emit(_ m: [UInt8]) {
+        var buf = [UInt8](repeating: 0, count: 64)
+        buf.withUnsafeMutableBytes { raw in
+            let pl = raw.baseAddress!.assumingMemoryBound(to: MIDIPacketList.self)
+            var p = MIDIPacketListInit(pl)
+            var mm = m
+            p = MIDIPacketListAdd(pl, 64, p, 0, mm.count, &mm)
+            MIDIReceived(src, pl)
+        }
+    }
+    print("emit test: the MIDI input \"ChromaSynth\" exists; the notes start in 6 s (channels 1-4, 4 notes each, one every 0.4 s)")
+    DispatchQueue.global().async {
+        sleep(6)
+        emit([0xFA])
+        for round in 0..<4 {
+            for ch in 0..<4 {
+                let note = UInt8(48 + ch * 7 + round * 2)
+                emit([0x90 | UInt8(ch), note, 100])
+                usleep(300_000)
+                emit([0x80 | UInt8(ch), note, 0])
+                usleep(100_000)
+            }
+        }
+        emit([0xFC])
+        print("emit test: done")
+        exit(0)
+    }
+    RunLoop.main.run()
 }
 
 if args.contains("--list") {
@@ -64,6 +101,9 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var client = MIDIClientRef()
     private var inPort = MIDIPortRef()
     private var dest = MIDIEndpointRef()
+    private var upSource = MIDIEndpointRef()      // "ChromaSynth" as a MIDI input: what the Chromatic's sequencer plays (SYNC = OUT)
+    private var clockDoubler = ClockDoubler()
+    private var upCount = 0
     private var running: UInt8 = 0
     private var guardState = FloodGuard()
     private var announcedTrip = 0
@@ -100,6 +140,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         MIDIClientCreate("ChromaSynth Link" as CFString, nil, nil, &client)
         MIDIInputPortCreateWithBlock(client, "in" as CFString, &inPort) { [weak self] list, ref in self?.handle(list, from: ref) }
         MIDIDestinationCreateWithBlock(client, "ChromaSynth" as CFString, &dest) { [weak self] list, _ in self?.handle(list, from: nil) }
+        MIDISourceCreate(client, "ChromaSynth" as CFString, &upSource)
         if !dry { central = CBCentralManager(delegate: self, queue: nil) }   // (a dry run needs no Bluetooth permission)
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + 0.25, repeating: 0.25)
@@ -115,7 +156,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         pollUSB()
         if transport == .usb {
             if ticks % 2 == 0 { send("hb") }                  // the heartbeat, twice a second: without it the ESP32 leaves USB mode after 2 s
-            if ticks % 8 == 0 { send("mode") }                // every 2 s: which mode is the Chromatic in? (its menu may have changed it)
+            if ticks % 8 == 0 { send("mode"); send("up on") }                // every 2 s: which mode is the Chromatic in? (its menu may have changed it)
             if Date().timeIntervalSince(lastModeReply) > 8 { // no answer for 8 s: the console is gone or stuck
                 print("USB: the ESP32 does not answer")
                 usbSuppressed = true
@@ -123,6 +164,31 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             }
         }
         if ticks % 4 == 0 { connectKeyboards() }               // once a second
+    }
+
+    // ---- the ROM's MIDI out -> the DAW (the source "ChromaSynth")
+    private func emitUp(_ msg: [UInt8]) {
+        var buf = [UInt8](repeating: 0, count: 64)
+        buf.withUnsafeMutableBytes { raw in
+            let pl = raw.baseAddress!.assumingMemoryBound(to: MIDIPacketList.self)
+            var p = MIDIPacketListInit(pl)
+            var m = msg
+            p = MIDIPacketListAdd(pl, 64, p, 0, m.count, &m)
+            MIDIReceived(upSource, pl)
+        }
+    }
+
+    /// A message from the ROM (BLE notification or USB console line). The ROM sends 12 clocks a beat: each gets a second one.
+    private func fromChromatic(_ msg: [UInt8]) {
+        if dry { print("up \(msg.map { String(format: "%02x", $0) }.joined(separator: " "))"); return }
+        if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
+            print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
+        }
+        emitUp(msg)
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+        if let d = clockDoubler.secondClock(after: msg, at: now) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in self?.emitUp([0xF8]) }
+        }
     }
 
     // ---- MIDI in
@@ -204,12 +270,26 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
         for c in s.characteristics ?? [] where c.uuid == Link.midiCharacteristic {
             characteristic = c
+            p.setNotifyValue(true, for: c)           // the ROM's MIDI out comes back as notifications (the ESP32 sends them once we subscribe)
+            print("Bluetooth: subscribing to the MIDI notifications")
             if transport != .usb {
                 transport = .ble
                 p.writeValue(Data(blePacketBytes([0xB0, 123, 0], timestamp: 0)), for: c, type: .withoutResponse)   // all notes off: nothing may hang from before
             }
             print("Bluetooth: connected")
         }
+    }
+
+    func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor c: CBCharacteristic, error: Error?) {
+        print("Bluetooth: notifications \(c.isNotifying ? "on" : "off")\(error.map { " (\($0))" } ?? "")")
+    }
+
+    func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
+        guard c.uuid == Link.midiCharacteristic, let d = c.value else { return }
+        let msgs = parseBLEMIDI([UInt8](d))
+        upCount += msgs.count
+        if upCount <= 3 || upCount % 200 == 0 { print("Bluetooth: \(upCount) messages from the Chromatic (last packet \([UInt8](d).map { String(format: "%02x", $0) }.joined(separator: " ")))") }
+        for m in msgs { fromChromatic(m) }
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) { bleLost() }
@@ -226,7 +306,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     // ---- USB
     private func pollUSB() {
-        if dry || !autoConnect { return }
+        if dry || !autoConnect || args.contains("--no-usb") { return }   // (--no-usb: leave the serial port to another program, e.g. a console test)
         let ports = serialPorts()
         if usbSuppressed {
             if ports.isEmpty { usbSuppressed = false; chromaticMode = "" }   // unplugged: the next plug-in is a new start
@@ -267,11 +347,18 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         DispatchQueue.global().async { [weak self] in
             var buf = [UInt8](repeating: 0, count: 512)
             var tail = ""
+            var lineBuf = ""
             let re = try! NSRegularExpression(pattern: "applied (USB|BLE|OFF)")
             while let me = self, me.serialFD == fd {
                 let n = read(fd, &buf, buf.count)
                 if n > 0 {
-                    let window = tail + String(decoding: buf[0..<n], as: UTF8.self)
+                    let chunk = String(decoding: buf[0..<n], as: UTF8.self)
+                    lineBuf += chunk
+                    for line in takeLines(&lineBuf) {                                  // `u 90 3c 64`: the ROM's MIDI out
+                        if let msg = uplinkMessage(fromLine: line) { DispatchQueue.main.async { me.fromChromatic(msg) } }
+                    }
+                    if lineBuf.count > 200 { lineBuf = "" }
+                    let window = tail + chunk
                     if window.contains("mcu>") { me.consoleUp = true }
                     for m in re.matches(in: window, range: NSRange(window.startIndex..., in: window)) {
                         let mode = (window as NSString).substring(with: m.range(at: 1))
@@ -300,6 +387,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                     p.writeValue(Data(blePacketBytes([0xB0, 123, 0], timestamp: 0)), for: c, type: .withoutResponse)
                 }
                 me.send("m b0 7b 00")                // all notes off on the new path
+                me.send("up on")                     // and the ROM's MIDI out (the sequencer, SYNC = OUT) as `u ..` lines
                 if let p = me.peripheral { me.central.cancelPeripheralConnection(p) }
                 me.central.stopScan()
                 me.transport = .usb

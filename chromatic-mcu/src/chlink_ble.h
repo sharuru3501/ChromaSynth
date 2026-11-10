@@ -7,3 +7,6 @@ void ChLinkBle_Start(void);   // registers the `ble` and `heap` commands; does N
 // the rest of the firmware is unaffected. Not from the NimBLE host task; use a task with a big stack.
 bool ChLinkBle_Enable(bool on);
 uint32_t ChLinkBle_HostStackFree(void);   // the NimBLE host task's least free stack in bytes (0 when the stack is stopped)
+
+// The uplink handler for the BLE mode (ChLinkLink_SetUpHandler): the ROM's MIDI out goes to the Mac as BLE MIDI notifications.
+void ChLinkBle_UpHandler(const uint8_t *msg, int len, int64_t t_us);

@@ -27,6 +27,24 @@ open build/ChromaSynthLink.app
 - コンソールの `mode usb` などは**一時的**(保存しない)。保存するのは `mode set ble` など。`mode saved` は保存してあるモードに戻す。
 - `hb` を一度でも受けた USB モードは、2 秒途切れると保存モードへ戻る。モードが変わるとき(と BLE が切れたとき)は、鳴っている音を止める。起動直後に helper がモードを頼んでいたら、保存モードは上書きしない。`hb` を送らない古い helper(`tools/chromasynth_usb_bridge.swift`)には影響しない。
 
+## Chromatic のシーケンサーを DAW に録音する(ROM → DAW、M15)
+2026-11-10 に、Live で、USB と BLE のどちらでも、MIDI 録音できることを実機で確認した。
+
+**条件(Chromatic)**: MIDI ページ(PATCH 画面の CH4 の次)で **SYNC = OUT(1)**(初期値は OFF。**SELECT+B で保存**しないと、ROM を書き換えたあとなどに、OFF に戻る)。ROM を**キーボード画面**にして、SELECT+START で再生。MIDI チャンネルは、MIDI ページの CH1〜CH4(既定 1・2・3・4)で、チャンネルごとに別の MIDI チャンネルで出る。
+**条件(Live)**:
+- 環境設定 > Tempo & MIDI: 入力ポート `ChromaSynth` の**トラック**(ノート)と**同期**(クロック・スタート/停止)を入れる。
+- MIDI トラックを 4 つ: **MIDI From = `ChromaSynth`、チャンネルを Ch. 1〜4 に分ける**(同じチャンネルは、1 つのトラックにまとまる)。**MIDI To = No Output**(Chromatic に送り返して、ぐるぐる回らないように)。
+- 4 つを、⌘ クリックで、すべて録音待機にする(Live は、初期設定では 1 つだけ)。
+- **EXT** をオン(外部同期。Link はオフになる)。EXT ボタンは、同期を入れた入力ポート `ChromaSynth` が**存在するとき**(ChromaSynth Link が動いているとき)だけ出る。アプリが落ちていると、EXT は消える。全体録音(●)をオン。
+- Chromatic で再生すると、Live が再生と録音を始める。Chromatic を止めると、Live も止まる。録音は、**アレンジメントビュー**(Tab キー)に、トラックごとに入る。
+- ノートのないチャンネルは、空のままになる(初期のデモのパターンは、CH2 が空)。
+- ROM のクロックは 1 拍 12 回なので、アプリが 1 つおきに足して 24 回にする。詳しくは [M15_DESIGN.md](M15_DESIGN.md)。
+
+**調べるための道具**
+- `ChromaSynthLink --emit-test`(アプリを止めてから): Chromatic の代わりに、入力 `ChromaSynth` を作って、チャンネル 1〜4 に 4 音ずつ送る(クロックは送らない)。DAW の設定の切り分けに使える。
+- `build/midi_listen ChromaSynth 30`(`swiftc -O tools/mac/midi_listen.swift -o build/midi_listen`): 最初のメッセージが届いてから 30 秒間、チャンネルごとのノートの数を数える。
+- `ChromaSynthLink --no-usb`: USB のポートを取らない(コンソールの試験と併用するとき)。
+
 ## Chromatic の側でモードを切り替えたとき
 - Chromatic のメニュー(System > MIDI MODE)で USB から BLE などへ切り替えると、アプリは 2 秒おきに `mode` で問い合わせて**切り替えを検知**し、USB のポートを手放して、BLE に切り替える(メニューの表示は `Chromatic MIDI mode: …`)。ケーブルを抜き差しするか、「Connect」を選ぶまで、USB を勝手に取り戻さない(メニューで選んだモードを尊重する)。
 - BLE で接続中にメニューで USB に切り替えると、BLE が切れたことを手がかりに、アプリが USB を取りにいく。
