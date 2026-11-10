@@ -150,6 +150,9 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         MIDIInputPortCreateWithBlock(client, "in" as CFString, &inPort) { [weak self] list, ref in self?.handle(list, from: ref) }
         MIDIDestinationCreateWithBlock(client, "ChromaSynth" as CFString, &dest) { [weak self] list, _ in self?.handle(list, from: nil) }
         MIDISourceCreate(client, "ChromaSynth" as CFString, &upSource)
+        // a fixed id: a DAW that knows the port finds it again after this app restarts (a new id each time left Live on a dead port)
+        MIDIObjectSetIntegerProperty(upSource, kMIDIPropertyUniqueID, 0x43485331)
+        MIDIObjectSetIntegerProperty(dest, kMIDIPropertyUniqueID, 0x43485332)
         if !dry { central = CBCentralManager(delegate: self, queue: nil) }   // (a dry run needs no Bluetooth permission)
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + 0.25, repeating: 0.25)
@@ -193,6 +196,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
             print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
         }
+        if msg.count == 3, msg[0] & 0xF0 == 0x90 { print("Chromatic: note \(msg[1]) on, MIDI channel \((msg[0] & 0x0F) + 1)") }
         if !(msg.count == 1 && msg[0] == 0xF8) { emitUp(msg) }
         if msg.count == 1, msg[0] == 0xF8 {
             let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
