@@ -25,7 +25,8 @@ jobs:
           git diff --exit-code -- src inc
       - name: ROM tests (PyBoy, headless)
         run: |
-          for t in test midi follow clink save wave note sram; do
+          .venv/bin/python tools/headless_test.py
+          for t in midi follow clink save wave note sram song ts mcu_proto; do
             f=tools/headless_${t}_test.py
             [ -f "$f" ] || continue
             echo "== $t"; .venv/bin/python "$f"
