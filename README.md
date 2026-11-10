@@ -6,7 +6,7 @@ ModRetro **Chromatic**(ゲームボーイ / GBC 互換機)のカートリッジ�
 > 状態: 個人の開発中のプロジェクトです。実機(Chromatic + EMS 64M スマートカード)で動作確認した範囲は、`docs/ROADMAP.md` の状態欄に書いています。
 > 確認していないことを「確認済み」とは書かない方針です(`AGENTS.md` のルール 7)。
 > **対応カートリッジ**: 普通の **GBC 用カートリッジ**向けです。**SRAM 32 KB の通常版(保存 4 曲、`make`)と、SRAM 8 KB の機能制限版(保存 1 曲、`make small`)**があります。マッパーは MBC5 を推奨([docs/CARTRIDGES.md](docs/CARTRIDGES.md))。作者は EMS スマートカードで使っていますが、ROM は特定のカードに依存しません。
-> **ライセンスは、まだ決めていません**(`chromatic-mcu/` のパッチは、ModRetro の MCU ファームウェア(GPL-3.0)の派生物です)。
+> **ライセンス**: ROM・ツール・文書は **MIT**(`LICENSE`)。`chromatic-mcu/` のパッチは、ModRetro の MCU ファームウェア(GPL-3.0)の派生物なので **GPL-3.0** です(`chromatic-mcu/LICENSE.md`)。権利関係の整理は [docs/LICENSES.md](docs/LICENSES.md)(**素案。公開前に作者が確定する**)。
 
 ## できること(実機で確認したもの)
 - **ROM**(`src/`、RGBDS アセンブリ): 4 チャンネルの音源(パルス 2、波形、ノイズ)、ピアノロール、パターンの保存(SRAM)、MIDI(リンクケーブルでの入出力。実機は未確認)。
