@@ -44,7 +44,7 @@ chromatic-mcu/build.sh     # 本体の ESP32 用ファームウェア(ModRetro �
 
 ## 本体への書き込みについて(重要)
 - **ESP32 のファームウェアの書き込みは、本体を使えなくするリスクがあります。**必ず、`docs/MCU_FLASH_SAFETY.md` の手順(全体のバックアップ、復元のリハーサル、アプリの枠だけに書く、読み戻しの確認)に従ってください。
-- **スマートカード(EMS 64M)の SRAM は、全 ROM で共有**です。ChromaSynth の保存(SELECT+A)は、同じカードの他のゲーム(LSDj など)のセーブデータを壊します。`docs/CARTRIDGE.md` を読んでください。
+- **スマートカード(EMS 64M)の SRAM は、全 ROM で共有**です。ChromaSynth の保存(SELECT+B)は、同じカードの他のゲーム(LSDj など)のセーブデータを壊します。`docs/CARTRIDGE.md` を読んでください。
 
 ## ディレクトリ
 | 場所 | 内容 |

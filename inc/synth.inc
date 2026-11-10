@@ -66,7 +66,7 @@ DEF MSG_LOADED EQU 2
 DEF MSG_NODATA EQU 3
 DEF MSG_FAIL   EQU 4
 DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothing written
-DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+A again to overwrite
+DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+B again to overwrite
 DEF MSG_FRAMES EQU 90
 
 ; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM

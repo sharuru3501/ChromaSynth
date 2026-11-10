@@ -193,6 +193,6 @@ ems-flasher は `~/Documents/ChromaticBackup` の外のビルドディレクト�
 
 ## 5. ChromaSynth をページ 2 に書く場合の注意
 - ページ 2 は空なので、**LSDJ(ページ 1)には触れない**。書き込みは `ems-flasher --page 2 --write build/chromasynth.gb`(ROM 32KB)。書いた後に**ページ 1 を再度吸い出して、バックアップと一致することを確認する**。
-- **SRAM は共有**。ChromaSynth の保存(SELECT+A)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
+- **SRAM は共有**。ChromaSynth の保存(SELECT+B)は SRAM の先頭 8KB に書くので、**LSDJ の曲データ(ブロック 0〜)を壊す**。試験中は保存を使わないか、使ったあとにバックアップの SRAM を戻す。逆に、LSDJ の SRAM の内容を ChromaSynth が読むと、保存版(`SAVE_VERSION`)やチェックサムが合わず「読み込み失敗」になる(これは想定された動作)。
 - ページ 2 のモード(DMG / カラー)は、最初に書く ROM のヘッダで決まる。ChromaSynth は CGB 対応(`-c`、フラグ `0x80`)。
 - LSDJ に戻りたいときは、カードをページ 1 で起動すればよい(切り替え方法は §1.1)。
