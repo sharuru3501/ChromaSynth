@@ -193,13 +193,12 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if msg.count == 1, msg[0] == 0xFA || msg[0] == 0xFB || msg[0] == 0xFC {
             print("Chromatic: MIDI \(msg[0] == 0xFA ? "start" : msg[0] == 0xFB ? "continue" : "stop")")
         }
-        emitUp(msg)
+        if !(msg.count == 1 && msg[0] == 0xF8) { emitUp(msg) }
         if msg.count == 1, msg[0] == 0xF8 {
             let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
-            if let d = clockBridge.tick(at: now) {          // (nil: the bridge has sent this one already)
+            if let d = clockBridge.tick(at: now) {          // (nil: the bridge has sent this tick already, as a stand-in: send nothing)
+                emitUp(msg)
                 DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in self?.emitUp([0xF8]) }
-            } else {
-                // it came late: the clock of the bridge stands in for it
             }
             if bridgeTimer == nil {                     // bridges the ticks the ESP32 misses (a gap makes the DAW say "MIDI sync signal lost")
                 let t = DispatchSource.makeTimerSource(queue: .main)
