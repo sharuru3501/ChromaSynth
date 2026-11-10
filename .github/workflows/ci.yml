@@ -14,7 +14,7 @@ jobs:
           rgbasm --version
           python3 -m venv .venv
           .venv/bin/pip install pyboy pillow numpy
-      - name: Build the three ROMs (-Weverything: no warnings allowed)
+      - name: "Build the three ROMs (-Weverything, no warnings allowed)"
         run: |
           make
           make small
