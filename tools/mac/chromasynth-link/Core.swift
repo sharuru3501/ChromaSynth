@@ -234,27 +234,36 @@ struct ClockBridge {
     var lastTick: Double? = nil
     var period = 0.04                         // seconds per ROM tick (smoothed)
     var synthetic = 0
-    /// A real clock arrived. -> the delay of the second clock of this tick.
-    mutating func tick(at now: Double) -> Double {
+    var lastBridge = 0.0
+    var odd = 0
+    /// A real clock arrived. -> the delay of the second clock of this tick, or nil when this tick was already sent by the bridge (it came late):
+    /// nothing is sent then, or the DAW would count it twice and run too fast.
+    mutating func tick(at now: Double) -> Double? {
         if let l = lastTick {
             let d = now - l                       // the time since the last REAL tick (bridged ticks in between count as ticks)
             let n = Double(synthetic + 1)
             let per = d / n
-            if per > 0.004, per < 0.4 { period = period * 0.8 + per * 0.2 }
+            // bunched arrivals (a burst after a delay) give wild samples: only values near the known period count;
+            // after 8 odd ones in a row the tempo has really changed, and the period starts again from the sample
+            if per > period * 0.5, per < period * 2 { period = period * 0.9 + per * 0.1; odd = 0 }
+            else { odd += 1; if odd >= 8, per > 0.004, per < 0.4 { period = per; odd = 0 } }
         }
         lastTick = now
-        synthetic = 0
+        if synthetic > 0 {
+            synthetic -= 1                        // this real tick pays back one that was bridged
+            return nil
+        }
         return period / 2
     }
     /// Called often (every few ms): is a bridging tick due now? (then it counts as one)
     mutating func bridgeDue(at now: Double) -> Bool {
         guard let l = lastTick, synthetic < 10 else { return false }
-        let expected = l + period * Double(synthetic + 1)
-        if now >= expected + period * 0.5 { synthetic += 1; return true }
+        let expected = l + period
+        if now >= expected + period * 0.5 && now - lastBridge >= period * 0.9 { synthetic += 1; lastBridge = now; return true }
         return false
     }
     /// Start / stop / continue: no ticks to bridge.
-    mutating func transport() { lastTick = nil; synthetic = 0 }
+    mutating func transport() { lastTick = nil; synthetic = 0; lastBridge = 0 }
 }
 
 func selftestUplink() -> Int {
@@ -298,23 +307,30 @@ func selftestUplink() -> Int {
     for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
     check("a tempo below 60 is not reported", slow.isEmpty)
     var cbr = ClockBridge()
-    check("the first clock: the second one half the default period later", abs(cbr.tick(at: 1.000) - 0.02) < 1e-9)
-    let d1 = cbr.tick(at: 1.040)
+    check("the first clock: the second one half the default period later", abs((cbr.tick(at: 1.000) ?? -1) - 0.02) < 1e-9)
+    let d1 = cbr.tick(at: 1.040) ?? -1
     check("the next clock: a second one half the period later (the period learned)", d1 > 0.0185 && d1 < 0.0215)
     var emitted = 0
     var now = 1.040
     var cb2 = cbr
     while now < 1.040 + 0.5 { now += 0.002; if cb2.bridgeDue(at: now) { emitted += 1 } }
     check("a gap of 0.5 s is bridged by about 10 ticks, then it stops", emitted == 10)
-    var cb3 = cbr
-    var bridged = 0
-    now = 1.040
-    for k in 1...5 {                                     // ticks every 40 ms, the 3rd one is missing
-        let end = 1.040 + Double(k) * 0.040
-        while now < end - 0.001 { now += 0.002; if cb3.bridgeDue(at: now) { bridged += 1 } }
-        if k != 3 { _ = cb3.tick(at: end); now = end }
+    // ticks every 40 ms for 4 s, with jitter: 20 % of them arrive up to 70 ms late (in bursts): the DAW must get exactly one pair per tick
+    var cb3 = ClockBridge()
+    var pairs = 0
+    var rng: UInt64 = 12345
+    func rand() -> Double { rng = rng &* 6364136223846793005 &+ 1442695040888963407; return Double((rng >> 33) % 1000) / 1000 }
+    var arrivals: [Double] = []
+    for k in 0..<100 { arrivals.append(Double(k) * 0.040 + (rand() < 0.2 ? rand() * 0.070 : 0)) }
+    arrivals.sort()
+    var t = 0.0, idx = 0
+    let tEnd = arrivals.last! + 0.055      // (after the last tick the bridge would go on: that is meant, but not counted here)
+    while t < tEnd {
+        t += 0.002
+        while idx < arrivals.count, arrivals[idx] <= t { if cb3.tick(at: arrivals[idx]) != nil { pairs += 1 }; idx += 1 }
+        if cb3.bridgeDue(at: t) { pairs += 1 }
     }
-    check("one missing tick is bridged by exactly one", bridged == 1)
+    check("late and bunched ticks are not counted twice (100 ticks in, about 100 pairs out)", pairs >= 97 && pairs <= 103)
     cb3.transport()
     check("a stop forgets the ticks: nothing to bridge", !cb3.bridgeDue(at: 100))
     return fails
