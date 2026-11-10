@@ -194,3 +194,47 @@ func runLatency(mode: String, seconds secs: Double) -> Never {
     }
     exit(0)
 }
+
+/// ChromaSynthLink --send-test follow: what a DAW would send to follow along, one step at a time, with a pause between the steps (the link
+/// is slow: every message takes about a third of a second). The running ChromaSynth Link forwards it. SYNC = 3 on the Chromatic.
+func runSendTest() -> Never {
+    setvbuf(stdout, nil, _IOLBF, 0)
+    var client = MIDIClientRef()
+    MIDIClientCreate("ChromaSynth send test" as CFString, nil, nil, &client)
+    var dest = MIDIEndpointRef()
+    for i in 0..<MIDIGetNumberOfDestinations() {
+        var s: Unmanaged<CFString>?
+        MIDIObjectGetStringProperty(MIDIGetDestination(i), kMIDIPropertyDisplayName, &s)
+        if (s?.takeRetainedValue() as String?) == "ChromaSynth" { dest = MIDIGetDestination(i) }
+    }
+    guard dest != 0 else { print("no MIDI output \"ChromaSynth\": start ChromaSynth Link first"); exit(1) }
+    var port = MIDIPortRef()
+    MIDIOutputPortCreate(client, "out" as CFString, &port)
+    func send(_ m: [UInt8], _ what: String, pause: UInt32 = 3) {
+        var buf = [UInt8](repeating: 0, count: 64)
+        buf.withUnsafeMutableBytes { raw in
+            let pl = raw.baseAddress!.assumingMemoryBound(to: MIDIPacketList.self)
+            var p = MIDIPacketListInit(pl)
+            var mm = m
+            p = MIDIPacketListAdd(pl, 64, p, 0, mm.count, &mm)
+            MIDISend(port, dest, pl)
+        }
+        print(what)
+        sleep(pause)
+    }
+    print("send test (SYNC = 3 on the Chromatic, the sequencer playing is best): each step has a 3 s pause; the pattern changes take effect at the next bar line")
+    send([0xFA], "start (the sequencer starts)", pause: 6)
+    send([0xC0, 1], "program change 2 -> pattern 2 (at the next bar)", pause: 6)
+    send([0xC0, 2], "program change 3 -> pattern 3", pause: 6)
+    send([0xC0, 0], "program change 1 -> pattern 1", pause: 6)
+    for v in [0, 32, 64, 96] { send([0xB0, 20, UInt8(v)], "CC20 = \(v) on MIDI channel 1: CH1 duty \(v / 32)") }
+    for v in [127, 64, 16, 127] { send([0xB0, 21, UInt8(v)], "CC21 = \(v) on MIDI channel 1: CH1 volume \(v / 8)") }
+    for (v, w) in [(0, "left"), (64, "both"), (127, "right"), (64, "both")] { send([0xB0, 10, UInt8(v)], "CC10 = \(v) on MIDI channel 1: CH1 pan \(w)") }
+    send([0xB0, 14, 20], "tempo CC14 = 20, CC15 = 0 -> BPM 80", pause: 1)
+    send([0xB0, 15, 0], "(BPM 80 is set)", pause: 6)
+    send([0xB0, 14, 60], "tempo CC14 = 60 -> BPM 120", pause: 1)
+    send([0xB0, 15, 0], "(BPM 120 is set)", pause: 6)
+    send([0xFC], "stop (the sequencer stops)", pause: 1)
+    print("send test done")
+    exit(0)
+}

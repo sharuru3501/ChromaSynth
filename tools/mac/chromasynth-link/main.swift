@@ -23,6 +23,7 @@ if let i = args.firstIndex(of: "--latency") {
     let secs = i + 2 < args.count ? Double(args[i + 2]) ?? 20 : 20
     runLatency(mode: mode, seconds: secs)
 }
+if args.contains("--send-test") { runSendTest() }
 if args.contains("--selftest") { exit(selftest() + selftestUplink() == 0 ? 0 : 1) }
 let dry = args.contains("--dry-run")
 
@@ -214,7 +215,7 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         for pkt in list.unsafeSequence() {
             let n = Int(pkt.pointee.length)
             let bytes = withUnsafeBytes(of: pkt.pointee.data) { Array($0.prefix(n)) }
-            followDAW(bytes)
+            followDAW(bytes, stamp: pkt.pointee.timeStamp)
             for line in consoleLines(for: bytes, running: &running) {
                 if !guardState.allow(at: Double(DispatchTime.now().uptimeNanoseconds) / 1e9) {
                     if guardState.trips != announcedTrip {
@@ -232,8 +233,11 @@ final class Link: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     /// The DAW's clock (Live: Preferences > Tempo & MIDI > the output port ChromaSynth, "Sync" on) gives the tempo; the ROM keeps its own
     /// clock (the link is too slow for 24 clocks a beat). A start forgets the tempo measured so far. The tempo goes as CC14 (the low
     /// part, BPM - 60 mod 128) and CC15 (the high part), on MIDI channel 1.
-    private func followDAW(_ bytes: [UInt8]) {
-        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1e9
+    private func followDAW(_ bytes: [UInt8], stamp: MIDITimeStamp) {
+        var tbi = mach_timebase_info_data_t()
+        mach_timebase_info(&tbi)
+        // the packet's own time (host ticks) when the DAW gave one: the clocks arrive in bursts, so the arrival time is not their time
+        let now = stamp != 0 ? Double(stamp) * Double(tbi.numer) / Double(tbi.denom) / 1e9 : Double(DispatchTime.now().uptimeNanoseconds) / 1e9
         for b in bytes {
             if b == 0xFA { clockBpm.reset() }
             if b == 0xF8, let bpm = clockBpm.feed(at: now) {

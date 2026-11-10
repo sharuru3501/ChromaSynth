@@ -207,7 +207,11 @@ func takeLines(_ buf: inout String) -> [String] {
 struct ClockBpm {
     var stamps: [Double] = []
     var reported = 0
-    mutating func reset() { stamps = []; reported = 0 }
+    var candidate = 0
+    mutating func reset() { stamps = []; reported = 0; candidate = 0 }
+    /// `now` should be the MIDI packet's own timestamp (when the DAW sent the clock), not the time this code ran: the clocks reach a
+    /// process in bursts, and the arrival times of a burst would make the tempo look much faster. The tempo is reported when two beats
+    /// in a row agree (a single odd beat is not believed), and then only if it differs from the last one reported.
     mutating func feed(at now: Double) -> Int? {
         stamps.append(now)
         if stamps.count > 25 { stamps.removeFirst(stamps.count - 25) }
@@ -215,7 +219,9 @@ struct ClockBpm {
         let span = now - first                       // 24 clocks
         guard span > 0 else { return nil }
         let bpm = Int((60.0 / span).rounded())
-        guard bpm >= 60, bpm <= 240, bpm != reported else { return nil }
+        guard bpm >= 60, bpm <= 240 else { return nil }
+        defer { candidate = bpm }
+        guard bpm == candidate, bpm != reported else { return nil }
         reported = bpm
         return bpm
     }
@@ -262,6 +268,15 @@ func selftestUplink() -> Int {
     var tt = 100.0
     for _ in 0..<60 { tt += 60.0 / 90.0 / 24.0; if let b = cb.feed(at: tt) { reportedBpm.append(b) } }
     check("a change to 90 BPM is reported", reportedBpm.last == 90)
+    cb.reset()
+    var burst: [Int] = []
+    var tb = 0.0
+    for k in 0..<120 {                               // 80 BPM, but the clocks arrive in bursts of 6 (timestamps stay right)
+        tb += 60.0 / 80.0 / 24.0
+        if let b = cb.feed(at: tb) { burst.append(b) }
+        _ = k
+    }
+    check("80 BPM with exact timestamps is reported as 80 only", burst == [80])
     cb.reset()
     var slow: [Int] = []
     for k in 0..<60 { if let b = cb.feed(at: Double(k) * 60.0 / 30.0 / 24.0) { slow.append(b) } }
