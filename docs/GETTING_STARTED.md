@@ -36,7 +36,8 @@ DAW <-> ChromaSynth Link (Mac app) <-> Bluetooth or USB-C <-> ESP32 in the Chrom
 
 ### B1. The Chromatic's ESP32 firmware (once)
 The stock firmware cannot talk to the ROM. This project patches ModRetro's open firmware ([oss-chromatic-console-mcu](https://github.com/ModRetro/oss-chromatic-console-mcu), v4.6, GPL-3.0); the patches are in `chromatic-mcu/`.
-- **If a flash goes wrong, the Chromatic may need its stock firmware restored. You do it at your own risk.** Read [MCU_FLASH_SAFETY.md](MCU_FLASH_SAFETY.md) (Japanese) first, back up the stock firmware, and rehearse the restore before you flash.
+> **WARNING: flashing the ESP32 is risky and entirely at your own risk.** If a flash fails, is interrupted, or the patched firmware misbehaves, **the Chromatic may need its stock firmware restored**, and in the worst case it may not start or may not power off properly until that is done. Restoring needs a backup of the stock firmware that **you make before flashing**, and a way to reflash it. The project is under the MIT/GPL-3.0 licenses, **without any warranty**; the author takes no responsibility for damage to your Chromatic, cartridges or data. Do not flash if you are not comfortable with this. Everything in Part A works without it.
+- Read [MCU_FLASH_SAFETY.md](MCU_FLASH_SAFETY.md) (Japanese) first, back up the stock firmware, and rehearse the restore before you flash.
 - Build: `chromatic-mcu/build.sh` (needs ESP-IDF v5.3). Flash: `chromatic-mcu/flash.sh <image> <first 16 hex digits of its sha256>` (writes only the application slot, checks before and after).
 - The author has tested the patched firmware on one Chromatic only.
 
