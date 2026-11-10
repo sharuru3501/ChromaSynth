@@ -242,19 +242,28 @@ struct ClockOsc {
     private var phi = 0.0, nextK = 0, half = 0
     private var errs: [(t: Double, e: Double)] = []
     private var lastReal = 0.0
-    static let first = 16, window = 4.0, slew = 0.0002
+    static let first = 16, window = 4.0, slew = 0.0005       // (a slew of 0.5 ms a tick follows a ROM that runs up to 1.4 % off the nominal tempo)
+    private(set) var restarts = 0, jumps = 0, arrivals = 0, gaps = 0, worstGap = 0.0   // for the log
     /// The tempo from the ROM (a change restarts the phase search).
     mutating func setBpm(_ bpm: Int) {
         guard bpm >= 60, bpm <= 240 else { return }
         let p = 5.0 / Double(bpm)
         if abs(p - period) > 1e-9 { period = p; restart() }
     }
-    mutating func restart() { times = []; errs = []; active = false }
+    mutating func restart() { times = []; errs = []; active = false; restarts += 1 }
     /// Start / stop / continue.
-    mutating func transport() { restart(); queue = [] }
+    mutating func transport() { restart(); queue = []; lastReal = 0 }
+    var hasArrivals: Bool { arrivals > 0 }
+    /// One line for the log, and the counters start again.
+    mutating func report() -> String {
+        defer { arrivals = 0; gaps = 0; worstGap = 0 }
+        return "clock: \(arrivals) ticks in, \(gaps) gaps over 60 ms (worst \(Int(worstGap * 1000)) ms), tempo \(period > 0 ? Int((5 / period).rounded()) : 0) BPM from the ROM, restarts \(restarts), jumps \(jumps)"
+    }
     /// A real clock arrived.
     mutating func real(at now: Double) {
         if now - lastReal > 0.5 { restart() }
+        if lastReal > 0, now - lastReal > 0.06 { gaps += 1; worstGap = max(worstGap, now - lastReal) }   // a tick that came late or not at all
+        arrivals += 1
         lastReal = now
         guard period > 0 else { queue.append(now); queue.append(now + 0.02); return }
         if !active {
@@ -289,7 +298,7 @@ struct ClockOsc {
         while n.count < 4 {
             let t = phi + Double(nextK) * period + (half == 0 ? 0 : period / 2)
             if t > now { break }
-            if now - t > 4 * period { nextK += Int((now - t) / period) - 1; continue }      // far behind (a stall of this app): jump
+            if now - t > 4 * period { jumps += 1; nextK += Int((now - t) / period) - 1; continue }      // far behind (a stall of this app): jump
             n.append(t)
             if half == 0 { half = 1 } else { half = 0; nextK += 1 }
         }
