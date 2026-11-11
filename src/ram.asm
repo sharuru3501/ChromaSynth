@@ -230,8 +230,15 @@ wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)
 wScreenBack:    db          ; the screen START+UP returns to from the slot screen
 wName:          ds NAME_LEN ; the song's name (indices into NameChars), saved with it
 wNameCur:       db          ; name editing cursor 0..NAME_LEN-1
-wDirtyName:     db          ; 1 = redraw the name rows of the slot screen
-wConfirm:       db          ; slot + 1 while "SEL+A again to overwrite" is waiting, else 0
+wConfirm:       db          ; while "press again" is waiting: action * 16 + slot + 1 (SAVE = action 0), else 0
+wSlotMode:      db          ; slot screen: SMODE_LIST / MENU / COPY / NAME
+wMenuIdx:       db          ; the menu item (0 .. SLOT_ITEMS - 1)
+wCopyTo:        db          ; COPY: the slot picked as the target
+wDirtyMenu:     db          ; slot screen: bit n = menu row n (n < 6) needs redraw; bit 6 = the help row; bit 7 = the name rows
+wLoadedSlot:    db          ; the slot the working song came from or went to (NO_SLOT: none)
+wRenameBuf:     ds NAME_LEN ; the name being edited by RENAME
+wCopySrc:       db          ; CopySlot: the SRAM banks
+wCopyDst:       db
 wBCPitch:       db          ; BuildCols scratch
 wBCHead:        db
 wBCFlag:        db

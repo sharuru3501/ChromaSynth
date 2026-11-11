@@ -26,7 +26,7 @@ jobs:
       - name: ROM tests (PyBoy, headless)
         run: |
           .venv/bin/python tools/headless_test.py
-          for t in midi follow clink save wave note sram song ts mcu_proto pool; do
+          for t in midi follow clink save wave note sram song ts mcu_proto pool slotmenu; do
             f=tools/headless_${t}_test.py
             [ -f "$f" ] || continue
             echo "== $t"; .venv/bin/python "$f"

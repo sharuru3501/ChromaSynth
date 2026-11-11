@@ -74,24 +74,16 @@ BuildScreen:
     ld de, sSlotTitle
     call DrawString
     ld hl, _SCRN0 + 13 * 32
-    ld de, sSlotHelp1
-    call DrawString
-    ld hl, _SCRN0 + 14 * 32
-    ld de, sSlotHelp2
-    call DrawString
-    ld hl, _SCRN0 + 15 * 32
-    ld de, sSlotHelp4
-    call DrawString
-    ld hl, _SCRN0 + 16 * 32
     ld de, sSlotHelp3
     call DrawString
+    xor a                   ; the list, no menu yet
+    ld [wSlotMode], a
+    ld [wMenuIdx], a
+    ld [wConfirm], a
     ld a, $FF
     ld [wDirtySlot], a
-    ld a, 1
-    ld [wDirtyName], a
-    ld hl, _SCRN0 + 11 * 32
-    ld de, sNameLabel
-    jp DrawString
+    ld [wDirtyMenu], a
+    ret
 .kbd:
     call .play              ; the channel rows and status line are the play screen's
     ld hl, _SCRN0 + 4
@@ -320,28 +312,28 @@ UpdateSlot:
     ld a, [wDirtySlot]
     and a
     jr nz, .rows
-    ld a, [wDirtyName]      ; the name and its cursor
+    ld a, [wDirtyMenu]      ; the menu rows, the help row, the name row: one a frame
     and a
     ret z
-    xor a
-    ld [wDirtyName], a
-    ld hl, _SCRN0 + 11 * 32 + 5
-    ld de, wName
-    call DrawName
-    ld hl, _SCRN0 + 12 * 32 + 5
-    ld b, NAME_LEN
-    xor a
-.clearCur:
-    ld [hl+], a
-    dec b
-    jr nz, .clearCur
-    ld a, [wNameCur]
-    ld e, a
-    ld d, 0
-    ld hl, _SCRN0 + 12 * 32 + 5
-    add hl, de
-    ld [hl], '+' - 32       ; under the character being edited
-    ret
+    ld c, 0
+.mfind:
+    rra
+    jr c, .mfound
+    inc c
+    jr .mfind
+.mfound:
+    ld hl, DirtyBits
+    call HLplusC
+    ld a, [hl]
+    cpl
+    ld hl, wDirtyMenu
+    and [hl]
+    ld [hl], a
+    ld a, c
+    cp SLOT_ITEMS
+    jp c, DrawMenuRow
+    jp z, DrawHelpRow
+    jp DrawNameRow
 .rows:
     ld c, 0
 .find:
@@ -369,6 +361,20 @@ UpdateSlot:
     ld d, 0
     ld hl, _SCRN0 + 2 * 32
     add hl, de
+    ld a, [wSlotMode]
+    cp SMODE_COPY
+    jr nz, .plain
+    ld a, [wCopyTo]         ; picking the target: '>' on it, '+' on the song that is copied
+    cp b
+    ld a, '>' - 32
+    jr z, .mark
+    ld a, [wSlot]
+    cp b
+    ld a, 0
+    jr nz, .mark
+    ld a, '+' - 32
+    jr .mark
+.plain:
     ld a, [wSlot]
     cp b
     ld a, 0
@@ -417,6 +423,96 @@ UpdateSlot:
     ld de, sSlotUsed
 .draw:
     jp DrawString
+
+; c = menu row 0 .. SLOT_ITEMS - 1 (screen row 7 + c): the marker and the item; nothing while the slot screen shows the list.
+DrawMenuRow:
+    ld a, c
+    swap a
+    add a                   ; c * 32
+    ld e, a
+    ld d, 0
+    ld hl, _SCRN0 + 7 * 32
+    add hl, de
+    push hl
+    ld b, 20
+    xor a
+.clr:
+    ld [hl+], a
+    dec b
+    jr nz, .clr
+    pop hl
+    ld a, [wSlotMode]
+    and a
+    ret z
+    ld a, [wMenuIdx]
+    cp c
+    ld a, 0
+    jr nz, .noMark
+    ld a, '>' - 32
+.noMark:
+    ld [hl+], a
+    inc hl
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    push hl
+    ld hl, ItemTable
+    add hl, de
+    ld a, [hl+]
+    ld d, [hl]
+    ld e, a
+    pop hl
+    jp DrawString
+
+; The help line (screen row 16) of the slot screen's mode.
+DrawHelpRow:
+    ld hl, _SCRN0 + 16 * 32
+    ld b, 20
+    xor a
+.clr:
+    ld [hl+], a
+    dec b
+    jr nz, .clr
+    ld a, [wSlotMode]
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, SlotHelpTable
+    add hl, de
+    ld a, [hl+]
+    ld d, [hl]
+    ld e, a
+    ld hl, _SCRN0 + 16 * 32
+    jp DrawString
+
+; The name being edited (screen row 14), the character under the cursor inverted; blank in the other modes.
+DrawNameRow:
+    ld hl, _SCRN0 + 14 * 32
+    ld b, 20
+    xor a
+.clr:
+    ld [hl+], a
+    dec b
+    jr nz, .clr
+    ld a, [wSlotMode]
+    cp SMODE_NAME
+    ret nz
+    ld hl, _SCRN0 + 14 * 32
+    ld de, sNameLabel
+    call DrawString
+    ld hl, _SCRN0 + 14 * 32 + 5
+    ld de, wRenameBuf
+    call DrawName
+    ld a, [wNameCur]
+    ld e, a
+    ld d, 0
+    ld hl, _SCRN0 + 14 * 32 + 5
+    add hl, de
+    ld a, [hl]
+    add TILE_INV
+    ld [hl], a
+    ret
 
 ; hl = dest tiles, de = NAME_LEN name indices -> NAME_LEN tiles; hl returns past them.
 DrawName:
@@ -897,17 +993,36 @@ sMsgFail:     db "SAVE FAILED", 0
 sMsgInUse:    db "SLOT IN USE", 0
 sMsgConfirm:  db "AGAIN:OVERWRITE", 0
 sMsgFull:     db "MEM FULL", 0
+sMsgNew:      db "NEW SONG", 0
+sMsgCopied:   db "COPIED", 0
+sMsgDeleted:  db "DELETED", 0
+sMsgEmpty:    db "SLOT EMPTY", 0
+sMsgRenamed:  db "RENAMED", 0
+sMsgAgainDel: db "AGAIN:DELETE", 0
+sMsgAgainNew: db "AGAIN:ERASE", 0
+sMsgOne:      db "ONLY ONE SLOT", 0
+sMsgSame:     db "SAME SLOT", 0
 MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail, sMsgInUse, sMsgConfirm, sMsgFull
+              dw sMsgNew, sMsgCopied, sMsgDeleted, sMsgEmpty, sMsgRenamed, sMsgAgainDel, sMsgAgainNew, sMsgOne, sMsgSame
 sSlot:        db "SLOT", 0
 sSlotUsed:    db "USED", 0
 sSlotFree:    db "FREE", 0
 sSlotHint:    db "SEL+LR", 0
 sSlotList:    db "ST+DOWN:SLOT LIST", 0
 sSlotTitle:   db "SAVE SLOTS", 0
-sSlotHelp1:   db "UD:PICK  A:LOAD", 0
-sSlotHelp2:   db "B:SAVE (TWICE:OVER)", 0
-sSlotHelp4:   db "LR:POS  SEL+UD:CHAR", 0
 sSlotHelp3:   db "ST+UP:BACK", 0
+sHelpList:    db "UD:PICK  A:MENU", 0
+sHelpMenu:    db "UD:ITEM A:GO B:BACK", 0
+sHelpCopy:    db "UD:TO  A:COPY B:BACK", 0
+sHelpName:    db "LR:POS UD:CHAR A:OK", 0
+SlotHelpTable: dw sHelpList, sHelpMenu, sHelpCopy, sHelpName
+sItemLoad:    db "LOAD", 0
+sItemSave:    db "SAVE", 0
+sItemNew:     db "NEW", 0
+sItemCopy:    db "COPY TO...", 0
+sItemRename:  db "RENAME", 0
+sItemDelete:  db "DELETE", 0
+ItemTable:    dw sItemLoad, sItemSave, sItemNew, sItemCopy, sItemRename, sItemDelete
 sNameLabel:   db "NAME", 0
 NameChars:    db " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 NameCharsEnd:

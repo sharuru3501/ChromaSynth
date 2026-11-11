@@ -95,6 +95,8 @@ EntryPoint:
     xor a
     ld [wSlot], a
     ld [wConfirm], a
+    ld a, NO_SLOT
+    ld [wLoadedSlot], a
     call InitSlots
     call ScanSlots
     call LoadAll            ; restore slot 1 if it holds a save (else keep defaults)

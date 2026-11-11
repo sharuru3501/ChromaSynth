@@ -68,6 +68,28 @@ DEF MSG_FAIL   EQU 4
 DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothing written
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+B again to overwrite
 DEF MSG_FULL    EQU 7      ; the pattern memory is full: the edit was refused, nothing changed (src/pool.asm)
+DEF MSG_NEWSONG EQU 8      ; slot menu (docs/M24_SLOT_MENU.md): an empty song was written into the slot
+DEF MSG_COPIED  EQU 9
+DEF MSG_DELETED EQU 10
+DEF MSG_EMPTY   EQU 11     ; the slot holds no song
+DEF MSG_RENAMED EQU 12
+DEF MSG_AGAIN_DEL EQU 13   ; "press again" for DELETE
+DEF MSG_AGAIN_NEW EQU 14   ; ... and for NEW
+DEF MSG_ONE     EQU 15     ; COPY: this cartridge has only one slot
+DEF MSG_SAME    EQU 16     ; COPY: the target is the source
+; The slot screen: wSlotMode, the menu items
+DEF SMODE_LIST  EQU 0
+DEF SMODE_MENU  EQU 1
+DEF SMODE_COPY  EQU 2      ; picking the slot to copy to
+DEF SMODE_NAME  EQU 3      ; editing the name
+DEF ITEM_LOAD   EQU 0
+DEF ITEM_SAVE   EQU 1
+DEF ITEM_NEW    EQU 2
+DEF ITEM_COPY   EQU 3
+DEF ITEM_RENAME EQU 4
+DEF ITEM_DELETE EQU 5
+DEF SLOT_ITEMS  EQU 6
+DEF NO_SLOT     EQU $FF
 DEF MSG_FRAMES EQU 90
 
 ; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM

@@ -159,7 +159,7 @@ NameChar:
     ld a, [wNameCur]
     ld e, a
     ld d, 0
-    ld hl, wName
+    ld hl, wRenameBuf
     add hl, de
     ld a, [hl]
     add c
@@ -181,8 +181,9 @@ NameCursor:
     ret nc                  ; -1 from 0 wraps to $FF, +1 from the end hits NAME_LEN
     ld [wNameCur], a
 MarkName:
-    ld a, 1
-    ld [wDirtyName], a
+    ld a, [wDirtyMenu]      ; the name row of the slot screen
+    or $80
+    ld [wDirtyMenu], a
     ret
 
 ; a = new slot. Slot screen: marks the old and the new row for redraw, drops a pending "again".
@@ -202,26 +203,36 @@ SlotGoto:
     ld [hl], a
     ret
 
-; Slot screen input. d = buttons newly pressed.
+; The slot screen changed its mode (or the menu item moved): everything that depends on it is drawn again.
+SlotRedraw:
+    xor a
+    ld [wConfirm], a
+    ld a, $FF
+    ld [wDirtySlot], a
+    ld [wDirtyMenu], a
+    ret
+
+; The slot screen's input. d = buttons newly pressed.
 SlotInput:
-    ld a, [wJoy]
-    bit PADB_SELECT, a
-    jr z, .plain
-    ld a, d                 ; SELECT + UP/DOWN: the character under the name cursor
-    and (1 << PADB_UP) | (1 << PADB_DOWN)
-    ret z
-    ld a, 1
-    ld [wSelUsed], a        ; no channel tap on release
-    ld c, 1
-    bit PADB_UP, d
-    jr nz, NameChar
-    ld c, $FF
-    jr NameChar
-.plain:
+    ld a, [wSlotMode]
+    cp SMODE_MENU
+    jp z, MenuInput
+    cp SMODE_COPY
+    jp z, CopyInput
+    cp SMODE_NAME
+    jp z, NameInput
+    ; ---- the list: UP / DOWN pick the slot, A opens the menu
     bit PADB_A, d
-    jp nz, DoLoad
-    bit PADB_B, d
-    jp nz, DoSave
+    jr z, .noA
+    ld a, [wNumSlots]
+    and a
+    ret z                   ; no SRAM: nothing to do here
+    ld a, SMODE_MENU
+    ld [wSlotMode], a
+    xor a
+    ld [wMenuIdx], a
+    jr SlotRedraw
+.noA:
     ld a, [wSlot]
     bit PADB_UP, d
     jr z, .down
@@ -231,20 +242,461 @@ SlotInput:
     jr SlotGoto
 .down:
     bit PADB_DOWN, d
-    jr z, .lr
+    ret z
     inc a
     ld hl, wNumSlots
     cp [hl]
     ret nc
     jr SlotGoto
-.lr:
-    ld c, $FF               ; LEFT / RIGHT: the name cursor
+
+; The menu: UP / DOWN pick the item, A runs it, B goes back to the list.
+MenuInput:
+    bit PADB_B, d
+    jr z, .noB
+    xor a
+    ld [wSlotMode], a
+    jr SlotRedraw
+.noB:
+    ld a, [wMenuIdx]
+    bit PADB_UP, d
+    jr z, .down
+    and a
+    ret z
+    dec a
+    jr .move
+.down:
+    bit PADB_DOWN, d
+    jr z, .noMove
+    inc a
+    cp SLOT_ITEMS
+    ret nc
+.move:
+    ld [wMenuIdx], a
+    xor a
+    ld [wConfirm], a
+    ld a, %00111111
+    ld hl, wDirtyMenu
+    or [hl]
+    ld [hl], a
+    ret
+.noMove:
+    bit PADB_A, d
+    ret z
+    ld a, [wMenuIdx]
+    and a
+    jp z, DoLoad            ; LOAD
+    dec a
+    jp z, DoSave            ; SAVE
+    dec a
+    jp z, NewSlot
+    dec a
+    jp z, CopyStart
+    dec a
+    jp z, RenameStart
+    jp DeleteSlot
+
+; ---- NEW: the working song becomes an empty one and is written into the slot (a used slot asks first)
+NewSlot:
+    ld a, [wNumSlots]
+    and a
+    ret z
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    jr z, .go               ; an empty slot: no question
+    ld a, [wSlot]
+    ld e, a
+    ld a, 1                 ; action 1
+    ld c, MSG_AGAIN_NEW
+    call AskAgain
+    ret c
+.go:
+    call SramOpen           ; a slot that is not ours (LSDj data): nothing is touched, not even the working song
+    call SlotBase
+    call SlotWritable
+    push af
+    call SramClose
+    pop af
+    ld a, MSG_INUSE
+    jp c, SlotMsg
+    call NewSong
+    call SaveAll            ; -> a = SAVED / FAIL / INUSE
+    cp MSG_SAVED
+    jr nz, SlotMsg
+    ld a, DIRTY_ALL | DIRTY_HEADER
+    ld [wDirty], a
+    ld a, $FF
+    ld [wDirtyEdit], a
+    call RollRefreshAll
+    ld a, MSG_NEWSONG
+    ; fall through
+
+; a = message: shown, and the slot rows are drawn again (the marks may have changed).
+SlotMsg:
+    call SetMsg
+    ld a, $FF
+    ld [wDirtySlot], a
+    ret
+
+; The working song becomes an empty song: the default sounds, no notes, one 2-bar pattern in 4/4, 120 BPM, no name.
+NewSong:
+    ld hl, DefaultPatch
+    ld de, wPatch
+    ld bc, NUM_PATCHES * PATCH_SIZE
+    call MemCopy
+    ld a, 4
+    ld hl, wPatTsn
+    ld b, NUM_PATS
+.num:
+    ld [hl+], a
+    dec b
+    jr nz, .num
+    xor a
+    ld hl, wPatTsd
+    ld b, NUM_PATS
+.den:
+    ld [hl+], a
+    dec b
+    jr nz, .den
+    ld a, 2
+    ld hl, wPatBars
+    ld b, NUM_PATS
+.bars:
+    ld [hl+], a
+    dec b
+    jr nz, .bars
+    call TsUpdate
+    call PoolInit
+    call ChainReset
+    call WaveDefaults
+    ld a, 120
+    ld [wBpm], a
+    ld a, 2
+    ld [wSeqBars], a
+    ld hl, wName
+    ld b, NAME_LEN
+    xor a
+.name:
+    ld [hl+], a
+    dec b
+    jr nz, .name
+    jp SongLoaded
+
+; a = action (1 NEW, 2 DELETE, 3 COPY), c = the message that asks, e = the slot it is about. The question is asked once; the same
+; question again within the message time (about 1.5 s) is the answer. -> carry clear: yes, carry set: asked, do nothing.
+AskAgain:
+    swap a
+    or e
+    inc a                   ; (action * 16 + slot + 1; SAVE's own question is slot + 1)
+    ld b, a
+    ld a, [wConfirm]
+    cp b
+    jr z, .yes
+    ld a, c
+    call SetMsg             ; (clears wConfirm)
+    ld a, b
+    ld [wConfirm], a
+    scf
+    ret
+.yes:
+    xor a
+    ld [wConfirm], a
+    ret                     ; (the xor cleared carry)
+
+; ---- DELETE: the slot is emptied ($00 all over). Only a slot of ours (or an empty one) is touched.
+DeleteSlot:
+    ld a, [wNumSlots]
+    and a
+    ret z
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    ld a, MSG_EMPTY
+    jp z, SetMsg            ; nothing to delete
+    ld a, [wSlot]
+    ld e, a
+    ld a, 2
+    ld c, MSG_AGAIN_DEL
+    call AskAgain
+    ret c
+    call SramOpen
+    call SlotBase
+    call SlotWritable
+    jr c, .notOurs
+    call SlotBase
+    ld bc, SLOT_SIZE
+.fill:
+    xor a
+    ld [hl+], a
+    dec bc
+    ld a, b
+    or c
+    jr nz, .fill
+    call SramClose
+    call ScanSlots
+    ld a, MSG_DELETED
+    jp SlotMsg
+.notOurs:
+    call SramClose
+    ld a, MSG_INUSE
+    jp SlotMsg
+
+; ---- COPY TO...: pick the slot to copy to
+CopyStart:
+    ld a, [wNumSlots]
+    cp 2
+    ld a, MSG_ONE
+    jp c, SetMsg
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    ld a, MSG_EMPTY
+    jp z, SetMsg
+    ld a, [wSlot]           ; the target starts on the next slot
+    inc a
+    ld hl, wNumSlots
+    cp [hl]
+    jr c, .set
+    xor a
+.set:
+    ld [wCopyTo], a
+    ld a, SMODE_COPY
+    ld [wSlotMode], a
+    jp SlotRedraw
+
+CopyInput:
+    bit PADB_B, d
+    jr z, .noB
+    ld a, SMODE_MENU
+    ld [wSlotMode], a
+    jp SlotRedraw
+.noB:
+    ld a, [wCopyTo]
+    bit PADB_UP, d
+    jr z, .down
+    and a
+    ret z
+    dec a
+    jr .move
+.down:
+    bit PADB_DOWN, d
+    jr z, .noMove
+    inc a
+    ld hl, wNumSlots
+    cp [hl]
+    ret nc
+.move:
+    ld [wCopyTo], a
+    xor a
+    ld [wConfirm], a
+    ld a, $FF
+    ld [wDirtySlot], a
+    ret
+.noMove:
+    bit PADB_A, d
+    ret z
+    ; fall through
+
+; The song in slot wSlot is copied to slot wCopyTo (a used target asks first).
+DoCopy:
+    ld a, [wCopyTo]
+    ld b, a
+    ld a, [wSlot]
+    cp b
+    ld a, MSG_SAME
+    jp z, SetMsg
+    ld a, b                 ; is the target used?
+    call SlotMaskOf
+    ld hl, wSlotUsed
+    and [hl]
+    jr z, .go
+    ld a, [wCopyTo]
+    ld e, a
+    ld a, 3
+    ld c, MSG_CONFIRM
+    call AskAgain
+    ret c
+.go:
+    call SramOpen
+    ld a, [wSlot]
+    call SelectSlot
+    call ValidateSave       ; only a song is copied
+    jr c, .bad
+    ld a, [wCopyTo]
+    call SelectSlot
+    call SlotWritable       ; a target of ours or an empty one
+    jr c, .inUse
+    ld a, [wSlot]
+    add SLOT_BANK0
+    ld [wCopySrc], a
+    ld a, [wCopyTo]
+    add SLOT_BANK0
+    ld [wCopyDst], a
+    ld hl, _SRAM            ; both slots are at $A000: one pointer, the bank switched for every byte
+    ld bc, SLOT_SIZE
+.copy:
+    ld a, [wCopySrc]
+    ld [rRAMB], a
+    ld d, [hl]
+    ld a, [wCopyDst]
+    ld [rRAMB], a
+    ld [hl], d
+    inc hl
+    dec bc
+    ld a, b
+    or c
+    jr nz, .copy
+    call SramClose
+    call ScanSlots          ; the marks and the names of all slots
+    ld a, MSG_COPIED
+    jp SlotMsg
+.bad:
+    call SramClose
+    ld a, MSG_NODATA
+    jp SlotMsg
+.inUse:
+    call SramClose
+    ld a, MSG_INUSE
+    jp SlotMsg
+
+; a = a slot -> its bank is selected, hl = $A000 (SRAM open). Clobbers a.
+SelectSlot:
+    add SLOT_BANK0
+    ld [rRAMB], a
+    ld hl, _SRAM
+    ret
+
+; a = a slot -> a = 1 << slot. Clobbers b.
+SlotMaskOf:
+    ld b, a
+    ld a, 1
+    inc b
+    dec b
+    ret z
+.shift:
+    add a
+    dec b
+    jr nz, .shift
+    ret
+
+; ---- RENAME: the name of the slot's song is edited in wRenameBuf and written into the slot
+RenameStart:
+    ld a, [wNumSlots]
+    and a
+    ret z
+    call SlotMask
+    ld hl, wSlotUsed
+    and [hl]
+    ld a, MSG_EMPTY
+    jp z, SetMsg
+    ld a, [wSlot]           ; the name as ScanSlots cached it
+    add a
+    add a
+    add a
+    add LOW(wSlotNames)
+    ld l, a
+    ld h, HIGH(wSlotNames)
+    ld de, wRenameBuf
+    ld bc, NAME_LEN
+    call CopyBytes
+    xor a
+    ld [wNameCur], a
+    ld a, SMODE_NAME
+    ld [wSlotMode], a
+    jp SlotRedraw
+
+NameInput:
+    bit PADB_B, d
+    jr z, .noB
+    ld a, SMODE_MENU        ; B: leave the name as it was
+    ld [wSlotMode], a
+    jp SlotRedraw
+.noB:
+    bit PADB_A, d
+    jp nz, CommitName
+    ld c, $FF
     bit PADB_LEFT, d
-    jr nz, NameCursor
+    jp nz, NameCursor
     ld c, 1
     bit PADB_RIGHT, d
+    jp nz, NameCursor
+    ld c, 1
+    bit PADB_UP, d
+    jp nz, NameChar
+    ld c, $FF
+    bit PADB_DOWN, d
     ret z
-    jr NameCursor
+    jp NameChar
+
+; A: the edited name goes into the slot. In a version 11 song the name is part of the checksum (the sum changes by the difference of the
+; names); a version 9 song keeps its name outside it.
+CommitName:
+    call SramOpen
+    call SlotBase
+    call ValidateSave       ; -> wSaveVer
+    jr c, .gone
+    ld a, [wSaveVer]
+    cp 9
+    jr z, .v9
+    ld hl, _SRAM + SAVE_NAME
+    ld b, NAME_LEN
+    ld c, 0
+.old:
+    ld a, c
+    sub [hl]
+    ld c, a                 ; c = minus the sum of the old name
+    inc hl
+    dec b
+    jr nz, .old
+    ld hl, _SRAM + SAVE_NAME
+    ld de, wRenameBuf
+    ld b, NAME_LEN
+.write:
+    ld a, [de]
+    inc de
+    ld [hl+], a
+    add c
+    ld c, a                 ; ... plus the sum of the new one
+    dec b
+    jr nz, .write
+    ld a, [_SRAM + SAVE_SUM]
+    xor $A5
+    add c
+    xor $A5
+    ld [_SRAM + SAVE_SUM], a
+    jr .done
+.v9:
+    ld hl, _SRAM + 6328
+    ld de, wRenameBuf
+    ld b, NAME_LEN
+.write9:
+    ld a, [de]
+    inc de
+    ld [hl+], a
+    dec b
+    jr nz, .write9
+.done:
+    call SramClose
+    ld a, [wSlot]
+    ld b, a
+    ld a, [wLoadedSlot]
+    cp b
+    jr nz, .notLoaded
+    ld hl, wRenameBuf       ; the working song is this one: it keeps the new name when it is saved again
+    ld de, wName
+    ld bc, NAME_LEN
+    call CopyBytes
+.notLoaded:
+    call ScanSlots
+    ld a, SMODE_MENU
+    ld [wSlotMode], a
+    call SlotRedraw
+    ld a, MSG_RENAMED
+    jp SetMsg
+.gone:
+    call SramClose
+    ld a, MSG_NODATA
+    jp SetMsg
 
 ; hl = slot start (SRAM open). -> carry set if the slot may NOT be written: it is neither a
 ; ChromaSynth save (any version) nor entirely $00 or $FF. Clobbers a, bc, de, hl.
@@ -442,6 +894,8 @@ SaveAll:
     ld hl, wName
     call CacheName
     call SramClose
+    ld a, [wSlot]           ; this slot holds the working song now
+    ld [wLoadedSlot], a
     ld a, MSG_SAVED
     ret
 .fail:
@@ -758,6 +1212,8 @@ LoadPages:
 
 ; What every version does after the song is in RAM.
 LoadDone:
+    ld a, [wSlot]
+    ld [wLoadedSlot], a
     call PoolRecalcAll      ; (gives back the pages that came in empty)
     call SanitizeName
     call SramClose
