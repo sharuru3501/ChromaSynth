@@ -92,8 +92,12 @@ class Pool:
 
 # ---- the save format, as a second opinion on the ROM's coder (src/sram.asm)
 SAVE_NAME = 24
-FIXED_LEN = 8 + 160 + 16 + 2 + 3 * 16 + 1 + 64
-SAVE_HEADER = SAVE_NAME + FIXED_LEN            # 323
+CHAIN_LEN = 32
+CHAIN_BYTES = 4 * CHAIN_LEN                    # version 12: 4 channels of 32 steps (a version 9 / 11 chain: 16 steps, all channels alike)
+FIXED_LEN = 8 + 160 + CHAIN_BYTES + 2 + 3 * 16 + 1 + 64
+SAVE_HEADER = SAVE_NAME + FIXED_LEN            # 435
+V11_FIXED_LEN = 8 + 160 + 16 + 2 + 3 * 16 + 1 + 64
+V11_HEADER = SAVE_NAME + V11_FIXED_LEN         # 323
 RAW_MIN = 168
 
 
@@ -131,8 +135,8 @@ def encode_channel(cells):
 
 
 def parse_save(slot):
-    """A version 11 slot (8192 bytes) -> dict(length, mask, pages={(pattern, channel, half): 192 cells}, name) or None if it is not one / the sum is wrong."""
-    if slot[:5] != b"CSYN\x0b":
+    """A version 12 slot (8192 bytes) -> dict(length, mask, pages={(pattern, channel, half): 192 cells}, name) or None if it is not one / the sum is wrong."""
+    if slot[:5] != b"CSYN\x0c":
         return None
     length = slot[6] | slot[7] << 8
     if (sum(slot[6:SAVE_HEADER + length]) & 0xFF) ^ 0xA5 != slot[5]:
@@ -152,8 +156,29 @@ parse_v10 = parse_save   # (the older tests' name)
 
 
 def _fixed(slot):
-    """The name .. waves block of a version 11 slot."""
-    return slot[SAVE_NAME:SAVE_NAME + FIXED_LEN]
+    """The name .. waves block of a version 12 slot, with the chain cut to the 16 steps of a version 9 / 11 save (CH1's)."""
+    f = slot[SAVE_NAME:SAVE_NAME + FIXED_LEN]
+    return f[:168] + f[168:184] + f[168 + CHAIN_BYTES:]
+
+
+def chain_of(slot):
+    """The chain of a version 12 slot: 4 lists of 32 steps."""
+    c = slot[SAVE_NAME + 168:SAVE_NAME + 168 + CHAIN_BYTES]
+    return [list(c[i * CHAIN_LEN:(i + 1) * CHAIN_LEN]) for i in range(4)]
+
+
+def to_v11(slot):
+    """The same song as a version 11 slot (a 16 step chain: CH1's), for the ROM's migration."""
+    parsed = parse_save(slot)
+    region = slot[SAVE_HEADER:SAVE_HEADER + parsed["length"]]
+    out = bytearray(8192)
+    out[0:5] = b"CSYN\x0b"
+    out[6:8] = len(region).to_bytes(2, "little")
+    out[8:24] = parsed["mask"].to_bytes(16, "little")
+    out[SAVE_NAME:SAVE_NAME + V11_FIXED_LEN] = _fixed(slot)
+    out[V11_HEADER:V11_HEADER + len(region)] = region
+    out[5] = (sum(out[6:V11_HEADER + len(region)]) & 0xFF) ^ 0xA5
+    return bytes(out)
 
 
 def to_v10(slot):

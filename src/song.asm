@@ -1,6 +1,7 @@
 ; Song: up to NUM_PATS patterns (each 4 channels x SEQ_TICKS ticks) and a chain of up to
-; CHAIN_LEN steps that says which pattern plays next. All channels always play the same
-; pattern (one tick counter, one loop length: wSeqBars).
+; CHAIN_LEN steps that says which pattern each channel plays (wChain: channel * CHAIN_LEN + step; wPlayPat holds the
+; ones of the step that plays). There is one tick counter and one loop length for all channels: the step's length and
+; time signature are those of CH1's pattern (docs/M20_PER_CHANNEL_CHAINS.md, step 3 will give a step its own).
 ;   wSongMode 0 = loop the edited pattern (the way it always was), 1 = play the chain
 ;   wEditBase / wPlayBase = base page of the edited / played pattern (src/ram.asm)
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
@@ -15,24 +16,59 @@ INCLUDE "synth.inc"
 DEF ROW_SONG_INFO  EQU _SCRN0 + 2 * 32
 DEF ROW_SONG_CHAIN EQU _SCRN0 + 6 * 32
 DEF CHAIN_COLS     EQU 6
-DEF CHAIN_ROWS     EQU 3        ; ceil(CHAIN_LEN / CHAIN_COLS)
+DEF CHAIN_ROWS     EQU 6        ; ceil(CHAIN_LEN / CHAIN_COLS)
 
 SECTION "Song", ROMX, BANK[1]
 
-; Chain = pattern 1 only, loop mode, pattern 1 edited and played.
+; Chain = pattern 1 only (on every channel), loop mode, pattern 1 edited and played.
 ChainReset:
     ld hl, wChain
-    ld b, CHAIN_LEN
+    ld bc, CHAIN_BYTES
     ld a, CHAIN_END
 .fill:
     ld [hl+], a
-    dec b
+    dec bc
+    ld d, a                 ; (a stays CHAIN_END: only the flags of bc are tested)
+    ld a, b
+    or c
+    ld a, d
     jr nz, .fill
     xor a
     ld [wChain], a
+    ld [wChain + CHAIN_LEN], a
+    ld [wChain + 2 * CHAIN_LEN], a
+    ld [wChain + 3 * CHAIN_LEN], a
     ld [wChainPos], a
     ld [wSongMode], a
     ld [wEditPat], a
+    jr LoadStepPats
+
+; a = chain step -> wPlayPat (the pattern of each channel in that step) and wPlayBank (CH1's pattern + 1: its length and
+; time signature are the step's; a step whose CH1 is not a pattern plays pattern 1). Clobbers a, bc, de, hl.
+LoadStepPats:
+    ld e, a
+    ld d, 0
+    ld hl, wChain
+    add hl, de
+    ld de, wPlayPat
+    ld b, NUM_CH
+.ch:
+    ld a, [hl]
+    ld [de], a
+    inc de
+    push de
+    ld de, CHAIN_LEN
+    add hl, de
+    pop de
+    dec b
+    jr nz, .ch
+    ld a, [wPlayPat]
+    cp NUM_PATS
+    jr c, .ok
+    xor a
+.ok:
+    inc a                   ; pattern number -> its WRAM bank
+    ld [wPlayBank], a
     ret
 
 ; The sequencer starts: the first chain step (song mode) or the edited pattern (loop mode).
@@ -43,10 +79,12 @@ SongRestart:
     and a
     ld a, [wEditBank]
     jr z, .set
-    ld a, [wChain]
-    inc a                   ; pattern number -> its WRAM bank
+    xor a
+    call LoadStepPats       ; wPlayBank = step 0's CH1 pattern + 1
+    jr .queue
 .set:
     ld [wPlayBank], a
+.queue:
     xor a
     ld [wQueuedBank], a     ; (a pattern that was waiting for a bar line is the played one now)
     ld a, [wDirtySong]
@@ -73,7 +111,7 @@ SongNext:
     ld d, 0
     ld hl, wChain
     add hl, de
-    ld a, [hl]
+    ld a, [hl]              ; (CH1 decides where the song ends)
     cp NUM_PATS
     jr c, .ok               ; a valid pattern number
 .first:
@@ -81,17 +119,7 @@ SongNext:
 .ok:
     ld a, c
     ld [wChainPos], a
-    ld e, c
-    ld d, 0
-    ld hl, wChain
-    add hl, de
-    ld a, [hl]
-    cp NUM_PATS
-    jr c, .play
-    xor a                   ; (step 0 is never the end; a damaged chain plays pattern 1)
-.play:
-    inc a                   ; pattern number -> its WRAM bank
-    ld [wPlayBank], a
+    call LoadStepPats
     jr SongMarkPos          ; the new step gets them
 
 ; a = pattern number (0..NUM_PATS-1): edit it. In loop mode it is played from now on too.
@@ -217,7 +245,7 @@ SongBarStart:
 ; first pattern is edited, loop mode. Clobbers a, b, hl.
 SongLoaded:
     ld hl, wChain
-    ld b, CHAIN_LEN
+    ld b, CHAIN_BYTES       ; (128: fits a byte)
 .fix:
     ld a, [hl]
     cp NUM_PATS
@@ -326,7 +354,7 @@ BuildSong:
     ld hl, _SCRN0 + 16 * 32
     ld de, sSongHelp4
     call DrawString
-    ld a, %00011111         ; the info rows, the three chain rows and the MEM row
+    ld a, %11111111         ; the info rows, the six chain rows and the MEM row
     ld [wDirtySong], a
     ret
 
@@ -355,7 +383,7 @@ UpdateSong:
     ld a, c
     and a
     jr z, .info
-    cp 4
+    cp 7
     jr z, .mem
     dec a                   ; chain row 0..5
     ld b, a
@@ -638,6 +666,13 @@ StepValue:
 .toLast:
     ld a, NUM_PATS - 1
 .store:
+    ld [hl], a              ; (the pad edits all four channels of the step alike: the song screen shows CH1)
+    ld de, CHAIN_LEN
+    add hl, de
+    ld [hl], a
+    add hl, de
+    ld [hl], a
+    add hl, de
     ld [hl], a
     ld a, [wSongCur]
     jr MarkChainRow

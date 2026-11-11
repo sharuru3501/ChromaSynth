@@ -331,7 +331,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("pattern 2's 3/4, 3 bars are stored when another pattern is edited", (mem[PATN + 1], mem[PATB + 1]) == (3, 3), (mem[PATN + 1], mem[PATB + 1]))
     check("pattern 1 is 4/4 again (bar 48 ticks, loop 2 bars)", (mem[TSN], v("wSeqBars"), v("wBarTicks")) == (4, 2, 48), (mem[TSN], v("wSeqBars"), v("wBarTicks")))
     # the chain 1, 2: pattern 1 plays 96 ticks, pattern 2 plays 108 ticks (3 bars of 36)
-    mem[sym["wChain"]:sym["wChain"] + 3] = bytes([0, 1, 0xFF])
+    for c_ in range(4):                 # (the chain has a row per channel: all four alike)
+        mem[sym["wChain"] + c_ * 32:sym["wChain"] + c_ * 32 + 3] = bytes([0, 1, 0xFF])
     combo(pb, "select", "up")            # song mode
     combo(pb, "select", "start")
     longest = {}
