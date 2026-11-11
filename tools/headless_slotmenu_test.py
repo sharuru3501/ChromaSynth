@@ -125,6 +125,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("NEW on an empty slot: NEW SONG, no question", v("wMsg") == 8, v("wMsg"))
     check("... the slot is used now and the working song is empty and unnamed", used(mem) == 2 and not pool.lent() and bytes(mem[sym["wName"]:sym["wName"] + 8]) == bytes(8), (used(mem), pool.lent()))
     check("... it is the loaded slot", v("wLoadedSlot") == 1, v("wLoadedSlot"))
+    check("... and the name entry opens at once", v("wSlotMode") == 3, v("wSlotMode"))
+    tap(pb, "up", 8)
+    tap(pb, "right", 8)
+    tap(pb, "up", 8)
+    tap(pb, "a")
+    check("... A writes the name (RENAMED), back on the menu", v("wMsg") == 12 and v("wSlotMode") == 1, (v("wMsg"), v("wSlotMode")))
+    check("... the slot list shows the name and the working song keeps it", mem[sym["wSlotNames"] + 8] != 0 and v("wName") != 0, (mem[sym["wSlotNames"] + 8], v("wName")))
     tap(pb, "b")
     item(pb, LOAD)
     check("... and LOAD works on it (LOADED, not NO SAVE DATA)", v("wMsg") == 2, v("wMsg"))
@@ -134,7 +141,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     raw = ram.read_bytes()
     got = parse_save(raw[slot_off(1):slot_off(1) + SLOT])
-    check("slot 2 holds a valid, empty song", got is not None and got["pages"] == {} and got["name"] == [0] * 8, got and got["length"])
+    check("slot 2 holds a valid, empty song with the typed name", got is not None and got["pages"] == {} and got["name"][2:] == [0] * 6 and got["name"][0] != 0, got and got["name"])
     check("slot 4 (foreign) is untouched", raw[slot_off(3):slot_off(3) + SLOT] == foreign)
 
     # ---- a song with notes and a name in slot 1, then NEW on it asks and empties it
