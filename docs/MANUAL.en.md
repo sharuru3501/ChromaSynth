@@ -25,8 +25,13 @@ The screens are in a line: **Play <-> PATCH <-> Sequencer <-> Keyboard**. START+
 ## Saving
 A **song** = the sound settings, 4 patterns, the order of patterns, BPM, loop length, 4 custom waves, per-pattern time signatures. It is saved to the cartridge's SRAM: **4 slots** (32 KB build) or **1 slot** (8 KB build); one song is 8 KB.
 - The Play screen's `SLOT n` row shows the current slot and `USED` / `FREE`.
-- **Slot list** (START+Down): Up/Down chooses a slot, **A loads, B saves**. Under the list is the song's **name** (8 characters: space, A-Z, 0-9, `-`): Left/Right moves the cursor, **SELECT+Up/Down** changes the letter. The name is saved with the song (press B).
-- Saving over a used slot shows `AGAIN:OVERWRITE`: repeat the same key within about 1.5 seconds to confirm.
+- **Slot screen** (START+Down): the four slots with their names and `USED` / `FREE`. **Up/Down chooses a slot, A opens the menu**; in the menu Up/Down chooses the item, **A runs it, B goes back**. SELECT+B / SELECT+A still save / load the current slot **on every other screen**.
+  - **LOAD** loads the slot's song. **SAVE** saves the working song into the slot (a used slot asks first).
+  - **NEW** writes an **empty song** (default sounds, no notes, **no name**) into the slot and makes it the working song. On an unused slot it turns the slot into a song you can load and save; on a used slot it empties the song (`AGAIN:ERASE`: repeat to confirm).
+  - **COPY TO...** copies the slot's song to another slot: **pick the target from the list with Up/Down** (`>` = target, `+` = source), A copies; a used target asks first. Not available with a single slot (`ONLY ONE SLOT`).
+  - **RENAME** edits the song's name (8 characters: space, A-Z, 0-9, `-`): Left/Right moves the cursor, Up/Down changes the letter, **A writes it**, B cancels.
+  - **DELETE** empties the slot (`AGAIN:DELETE`: repeat to confirm). Only a slot that holds a ChromaSynth song.
+- Saving over a used slot shows `AGAIN:OVERWRITE`: repeat the same key (on the slot screen: the menu's SAVE) within about 1.5 seconds to confirm.
 - A slot that holds data that is not ChromaSynth's (for example another game's save) is never written: `SLOT IN USE`.
 - The last line shows `SAVED n` / `LOADED n` / `NO SAVE DATA n` / `SAVE FAILED n`. At start-up slot 1 is loaded if it has a song. **There is no autosave.** Saving freezes screen and sound for about 0.3 s.
 

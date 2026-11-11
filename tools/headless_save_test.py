@@ -218,7 +218,24 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=False)
 
 
-# --- the slot list screen (START+DOWN / START+UP, UP/DOWN pick, A load, B save)
+def tap(pb, btn, settle=25):
+    pb.button_press(btn)
+    pb.tick(3)
+    pb.button_release(btn)
+    pb.tick(settle)
+
+
+def menu(pb, item):
+    """On the slot screen's list: A opens the menu, DOWN to the item, A runs it."""
+    tap(pb, "a")
+    for _ in range(item):
+        tap(pb, "down", 8)
+    tap(pb, "a")
+
+
+LOAD, SAVE, NEW, COPY, RENAME, DELETE = range(6)
+
+# --- the slot screen (START+DOWN / START+UP, UP/DOWN pick the slot, A opens the menu: LOAD, SAVE, ...)
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
     shutil.copy(rom_src, rom)
@@ -241,80 +258,101 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(20)
     Pool(mem, sym).put(0, 1, 0, 1, 33)
     mem[sym["wBpm"]] = 111
-    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(25)
-    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(25)
+    tap(pb, "down")
+    tap(pb, "down")
     check("DOWN picks slot 3", mem[sym["wSlot"]] == 2, mem[sym["wSlot"]])
-    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(25)
-    check("B saves into slot 3", mem[sym["wMsg"]] == 1 and mem[sym["wSlotUsed"]] == 4, (mem[sym["wMsg"]], mem[sym["wSlotUsed"]]))
+    menu(pb, SAVE)
+    check("the menu's SAVE saves into slot 3", mem[sym["wMsg"]] == 1 and mem[sym["wSlotUsed"]] == 4, (mem[sym["wMsg"]], mem[sym["wSlotUsed"]]))
+    pb.tick(20)
+    tap(pb, "b")                                      # back to the list
+    check("B leaves the menu for the list", mem[sym["wSlotMode"]] == 0, mem[sym["wSlotMode"]])
     pb.tick(20)
     # every row must have been drawn (marker on row of slot 3, USED on it, FREE on slot 1)
     def row(n):
         return bytes(mem[0x9800 + (2 + n) * 32 + i] for i in range(18))
     check("slot 3's row: marker and USED", row(2)[0] == ord(">") - 32 and row(2)[14:18] == bytes(ord(c) - 32 for c in "USED"), row(2))
     check("slot 1's row: no marker, FREE", row(0)[0] == 0 and row(0)[14:18] == bytes(ord(c) - 32 for c in "FREE"), row(0))
-    pb.button_press("up"); pb.tick(3); pb.button_release("up"); pb.tick(20)
+    tap(pb, "up", 20)
     check("the marker moved to slot 2's row", row(1)[0] == ord(">") - 32 and row(2)[0] == 0, (row(1), row(2)))
-    pb.button_press("a"); pb.tick(3); pb.button_release("a"); pb.tick(25)
-    check("A on an empty slot -> NO SAVE DATA", mem[sym["wMsg"]] == 3, mem[sym["wMsg"]])
-    pb.button_press("down"); pb.tick(3); pb.button_release("down"); pb.tick(25)
+    menu(pb, LOAD)
+    check("LOAD on an empty slot -> NO SAVE DATA", mem[sym["wMsg"]] == 3, mem[sym["wMsg"]])
+    tap(pb, "b")
+    tap(pb, "down")
     Pool(mem, sym).put(0, 1, 0, 1, 0)
-    pb.button_press("a"); pb.tick(3); pb.button_release("a"); pb.tick(25)
-    check("A loads slot 3", mem[sym["wMsg"]] == 2 and Pool(mem, sym).get(0, 1, 0, 1) == 33 and mem[sym["wBpm"]] == 111, (mem[sym["wMsg"]], Pool(mem, sym).get(0, 1, 0, 1)))
+    menu(pb, LOAD)
+    check("LOAD loads slot 3", mem[sym["wMsg"]] == 2 and Pool(mem, sym).get(0, 1, 0, 1) == 33 and mem[sym["wBpm"]] == 111, (mem[sym["wMsg"]], Pool(mem, sym).get(0, 1, 0, 1)))
     pb.tick(100)
-    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(25)
-    check("B on a used slot asks first", mem[sym["wMsg"]] == 6, mem[sym["wMsg"]])
-    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(25)
-    check("... the second B overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
+    tap(pb, "down", 8)
+    tap(pb, "a")                                      # the menu is open on LOAD; DOWN to SAVE
+    check("SAVE on a used slot asks first", mem[sym["wMsg"]] == 6, mem[sym["wMsg"]])
+    tap(pb, "a")
+    check("... the second A overwrites", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     pb.stop(save=False)
 
 
-# --- song names: SELECT+UP/DOWN edits the character, LEFT/RIGHT moves the cursor; saved with the slot
+# --- song names: RENAME edits the name of a slot's song (UP/DOWN the character, LEFT/RIGHT the cursor, A writes it into the slot)
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
     shutil.copy(rom_src, rom)
     ram = pathlib.Path(str(rom) + ".ram")
     NAME = sym["wName"]
     CACHE = sym["wSlotNames"]
+    REN = sym["wRenameBuf"]
     pb = boot(rom)
     mem = pb.memory
+    check("a new song has a blank name", bytes(mem[NAME:NAME + 8]) == bytes(8))
+    combo(pb, "select", "b")                          # save it into slot 1 (the other screens keep SELECT+B)
+    check("SELECT+B still saves on the play screen", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
     combo(pb, "start", "down")
     pb.tick(20)
-    check("a new song has a blank name", bytes(mem[NAME:NAME + 8]) == bytes(8))
-    combo(pb, "select", "up")                          # ' ' -> 'A'
-    combo(pb, "select", "up")                          # -> 'B'
-    check("SELECT+UP steps the first character", mem[NAME] == 2, mem[NAME])
-    check("... without moving the slot or changing channel", mem[sym["wSlot"]] == 0 and mem[sym["wSelCh"]] == 0)
-    pb.button_press("right"); pb.tick(3); pb.button_release("right"); pb.tick(5)
+    tap(pb, "a")
+    for _ in range(RENAME):
+        tap(pb, "down", 8)
+    tap(pb, "a")
+    check("RENAME opens the name editor", mem[sym["wSlotMode"]] == 3, mem[sym["wSlotMode"]])
+    tap(pb, "up", 8)                                   # ' ' -> 'A'
+    tap(pb, "up", 8)                                   # -> 'B'
+    check("UP steps the first character", mem[REN] == 2, mem[REN])
+    check("... without moving the slot", mem[sym["wSlot"]] == 0)
+    tap(pb, "right", 5)
     check("RIGHT moves the cursor", mem[sym["wNameCur"]] == 1, mem[sym["wNameCur"]])
-    combo(pb, "select", "down")                        # ' ' -> '-' (wraps below the first)
-    check("SELECT+DOWN wraps below the first character", mem[NAME + 1] == 37, mem[NAME + 1])
+    tap(pb, "down", 8)                                 # ' ' -> '-' (wraps below the first)
+    check("DOWN wraps below the first character", mem[REN + 1] == 37, mem[REN + 1])
     for _ in range(12):
-        pb.button_press("right"); pb.tick(3); pb.button_release("right"); pb.tick(3)
+        tap(pb, "right", 3)
     check("the cursor stops at the last character", mem[sym["wNameCur"]] == 7, mem[sym["wNameCur"]])
     pb.tick(25)
-    name_row = bytes(mem[0x9800 + 11 * 32 + 5 + i] for i in range(8))
-    check("the name row shows 'B-'", name_row[:2] == bytes([ord("B") - 32, ord("-") - 32]), name_row)
-    cur_row = bytes(mem[0x9800 + 12 * 32 + 5 + i] for i in range(8))
-    check("the cursor mark is under the 8th character", cur_row == bytes(7) + bytes([ord("+") - 32]), cur_row)
-    pb.button_press("b"); pb.tick(3); pb.button_release("b"); pb.tick(30)
-    check("B saves the song with its name", mem[sym["wMsg"]] == 1 and mem[CACHE] == 2 and mem[CACHE + 1] == 37, (mem[sym["wMsg"]], mem[CACHE]))
+    name_row = bytes(mem[0x9800 + 14 * 32 + 5 + i] for i in range(8))
+    check("the name row shows 'B-' and the 8th character inverted", name_row[:2] == bytes([ord("B") - 32, ord("-") - 32]) and name_row[7] == 128, name_row)
+    tap(pb, "b")                                       # cancel
+    check("B cancels: the slot keeps its blank name", mem[CACHE] == 0 and mem[sym["wSlotMode"]] == 1, (mem[CACHE], mem[sym["wSlotMode"]]))
+    tap(pb, "a")                                       # the menu is open on RENAME again
+    tap(pb, "up", 8)
+    tap(pb, "up", 8)
+    tap(pb, "right", 5)
+    tap(pb, "down", 8)
+    tap(pb, "a")                                       # A writes it
+    check("A writes the name into the slot (RENAMED)", mem[sym["wMsg"]] == 12 and mem[CACHE] == 2 and mem[CACHE + 1] == 37, (mem[sym["wMsg"]], mem[CACHE]))
+    check("... and the working song (the one of this slot) has the new name too", mem[NAME] == 2 and mem[NAME + 1] == 37, (mem[NAME], mem[NAME + 1]))
+    pb.tick(20)
     row0 = bytes(mem[0x9800 + 2 * 32 + 5 + i] for i in range(2))
     check("the slot row shows the name", row0 == bytes([ord("B") - 32, ord("-") - 32]), row0)
     pb.stop(save=True)
     raw = ram.read_bytes()
-    check("the name is stored after the checksum", raw[slot_off(0) + NAMEOFF:slot_off(0) + NAMEOFF + 2] == bytes([2, 37]), raw[slot_off(0) + NAMEOFF:slot_off(0) + NAMEOFF + 4])
+    check("the name is stored in the slot", raw[slot_off(0) + NAMEOFF:slot_off(0) + NAMEOFF + 2] == bytes([2, 37]), raw[slot_off(0) + NAMEOFF:slot_off(0) + NAMEOFF + 4])
+    check("... and the checksum was fixed (the slot is still a valid save)", parse_save(raw[slot_off(0):slot_off(0) + SLOT]) is not None)
     pb = boot(rom)
     mem = pb.memory
     check("boot: the slot list cache has the name", mem[CACHE] == 2 and mem[CACHE + 1] == 37, (mem[CACHE], mem[CACHE + 1]))
     check("boot: slot 1 loaded with its name", mem[NAME] == 2 and mem[NAME + 1] == 37, (mem[NAME], mem[NAME + 1]))
     pb.stop(save=False)
-    # an out-of-range name byte (corrupt / foreign) becomes blank, not garbage
+    # an out-of-range name byte (corrupt / foreign) becomes blank, not garbage; the checksum then fails, so the slot is ignored
     data = bytearray(raw)
     data[slot_off(0) + NAMEOFF] = 200
     ram.write_bytes(bytes(data))
     pb = boot(rom)
     mem = pb.memory
-    check("an out-of-range name byte is blanked", mem[NAME] == 0 and mem[CACHE] == 0, (mem[NAME], mem[CACHE]))
+    check("a damaged slot is ignored (blank name)", mem[NAME] == 0 and mem[CACHE] == 0, (mem[NAME], mem[CACHE]))
     pb.stop(save=False)
 
 # --- a cart without SRAM: the read-back check must report failure, not "SAVED"
