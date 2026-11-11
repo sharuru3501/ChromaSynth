@@ -10,7 +10,7 @@ ModRetro Chromatic(GB/GBC互換機)のカートリッジで動くシンセサイ
 ## コマンド
 ```bash
 make / make run / make gen / make clean    # ROM のビルド・SameBoy 起動・生成 include の再生成
-python3 tools/headless_test.py            # PyBoy の自動テスト(先に make)。ほかに headless_{save,midi,clink,mcu_proto}_test.py
+python3 tools/headless_test.py            # PyBoy の自動テスト(先に make)。ほかに headless_{save,midi,clink,mcu_proto,pool}_test.py
 make check-mcu                            # MCU のプロトコル中核の C を Python 参照実装と照合(ESP32 不要)
 make check-usb-bridge / make check-bridge # Mac の USB 中継の自己試験 / 外付けブリッジの C 中核テスト
 chromatic-mcu/build.sh                    # 本体 ESP32 のファームウェアをビルド(書き込みはしない)

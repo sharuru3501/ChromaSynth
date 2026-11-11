@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 from pyboy import PyBoy
+from pool_util import Pool, to_v9
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = root / "build/chromasynth.gb"
@@ -254,8 +255,6 @@ with tempfile.TemporaryDirectory() as tmp:
                 break
         # wSeqCur is the tick of the bar line (a multiple of 36) or the one before it, depending on the frame
         check(f"3/4: pattern {queued} takes over on a bar line", at is not None and at % 36 in (0, 35), at)
-        if want == 4:
-            combo(pb, "select", "right")
     combo(pb, "select", "start")
     pb.stop(save=False)
 
@@ -312,11 +311,11 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     v = lambda n: mem[sym[n]]
     PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
-    for b in range(1, 5):
-        for i in range(2048):
-            mem[b, 0xD000 + i] = 0
-    mem[1, 0xD000] = 60
-    mem[2, 0xD000] = 64
+    pool = Pool(mem, sym)
+    for p in range(16):
+        pool.clear_pattern(p)
+    pool.put(0, 0, 0, 0, 60)             # pattern 1: C4
+    pool.put(1, 0, 0, 0, 64)             # pattern 2: E4
     combo(pb, "start", "up")             # the song screen
     pb.tick(20)
     check("every pattern starts as 4/4, 2 bars", [mem[PATN + i] for i in range(4)] == [4] * 4 and [mem[PATB + i] for i in range(4)] == [2] * 4,
@@ -419,10 +418,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("... pattern 1 is the edited one: 3/4, bar 36, 2 bars", (mem[TSN], v("wBarTicks"), v("wSeqBars")) == (3, 36, 2), (mem[TSN], v("wBarTicks"), v("wSeqBars")))
     pb.stop(save=False)
     # a song saved before the per-pattern values existed: their bytes in the slot are $00
-    SLOT = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192 + 6336   # slot 1: bank 0 (public build) or 12 (EMS-card build)
+    BASE = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192   # slot 1: bank 0 (public build) or 12 (EMS-card build)
     data = bytearray(ram.read_bytes())
-    for i in range(12):
-        data[SLOT + i] = 0
+    data[BASE:BASE + 8192] = to_v9(bytes(data[BASE:BASE + 8192]), zero_ts=True)   # version 9, the per-pattern bytes $00
     ram.write_bytes(bytes(data))
     pb = boot(rom)
     mem = pb.memory

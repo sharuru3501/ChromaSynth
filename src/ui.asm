@@ -825,6 +825,16 @@ NibbleTile:
     add '0' - 32
     ret
 
+; a = pattern number 1..16 -> its tile: 1-9, then A-G (10-16). Keeps all but a.
+PatTile:
+    cp 10
+    jr c, .digit
+    add 'A' - 10 - 32
+    ret
+.digit:
+    add '0' - 32
+    ret
+
 ; a = 0..255, hl = dest -> three tiles, leading zero blanked. Clobbers a, b, c.
 DrawDec3:
     ld b, 0
@@ -886,7 +896,8 @@ sMsgNoData:   db "NO SAVE DATA", 0
 sMsgFail:     db "SAVE FAILED", 0
 sMsgInUse:    db "SLOT IN USE", 0
 sMsgConfirm:  db "AGAIN:OVERWRITE", 0
-MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail, sMsgInUse, sMsgConfirm
+sMsgFull:     db "MEM FULL", 0
+MsgTable:     dw sMsgSaved, sMsgLoaded, sMsgNoData, sMsgFail, sMsgInUse, sMsgConfirm, sMsgFull
 sSlot:        db "SLOT", 0
 sSlotUsed:    db "USED", 0
 sSlotFree:    db "FREE", 0

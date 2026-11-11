@@ -49,7 +49,7 @@ open build/ChromaSynthLink.app
 ChromaSynth の MIDI ページで **SYNC = 3(FOLLOW)**。Live の環境設定 > Tempo & MIDI の**出力**ポート `ChromaSynth` の**同期**を入れる。
 - Live の再生・停止で、シーケンサーが始まる・止まる(約 0.3〜0.4 s 遅れる)。
 - Live のテンポ(BPM)が、Chromatic に届く(変わったときだけ。整数に丸める)。
-- プログラムチェンジ 0〜3 でパターンを切り替える。CC20(デューティ・波形)、CC21(音量)、CC10(パン)で、音色を動かす。ノート(Live → Chromatic)は、これまでどおり MIDI To = `ChromaSynth`。
+- プログラムチェンジ 0〜15 でパターン 1〜16 を切り替える。CC20(デューティ・波形)、CC21(音量)、CC10(パン)で、音色を動かす。ノート(Live → Chromatic)は、これまでどおり MIDI To = `ChromaSynth`。
 - 仕様の詳細は [M15_DESIGN.md](M15_DESIGN.md) の §8。
 
 ## 遅れの測定(音で測る)

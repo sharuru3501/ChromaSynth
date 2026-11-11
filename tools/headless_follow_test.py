@@ -79,8 +79,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     midi(0xC0, 2)
     check("FOLLOW: program change 2 edits pattern 3", v("wEditPat") == 2, v("wEditPat"))
-    midi(0xC0, 9)
-    check("FOLLOW: an unknown program is ignored", v("wEditPat") == 2, v("wEditPat"))
+    midi(0xC0, 16)
+    check("FOLLOW: an unknown program (16: there are 16 patterns, 0-15) is ignored", v("wEditPat") == 2, v("wEditPat"))
     midi(0xC0, 0)
     check("FOLLOW: program change 0 edits pattern 1", v("wEditPat") == 0, v("wEditPat"))
 

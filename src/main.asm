@@ -45,30 +45,25 @@ EntryPoint:
         ld [hl+], a
     ENDR
     call TsUpdate           ; 4/4 until a song says otherwise
-    ld a, 1                 ; every pattern bank starts empty ...
-.clearBank:
-    push af
-    ld [$FF70], a           ; SVBK
-    ld hl, wPatterns
-    ld bc, NUM_CH * SEQ_STRIDE
-    call MemClear
-    pop af
-    inc a
-    cp NUM_PATS + 1
-    jr nz, .clearBank
-    ld a, 1                 ; ... except pattern 1: the demo
-    ld [$FF70], a
+    call PoolInit           ; no pattern holds a segment, ZERO_SEG is zeros ...
+    ld a, 0                 ; ... except pattern 1: the demo (its first segment)
+    ld b, 0
+    call EnsureSeg
+    ld a, 0
+    ld b, 0
+    call SegLoc             ; a = the page of channel 0, SVBK set
+    ld d, a
+    ld e, 0
     ld hl, DefaultPattern
-    ld de, wPatterns
     ld b, NUM_CH
 .demoCh:
     push bc
     ld bc, 256
-    call MemCopy            ; (a channel's first 256 ticks; its second page stays empty)
-    inc d                   ; de -> the next channel's first page
+    call MemCopy            ; (a channel's first 256 ticks; de goes on to the next channel's page)
     pop bc
     dec b
     jr nz, .demoCh
+    call PoolRecalcAll
     ld a, 1
     ld [wEditBank], a
     ld [wPlayBank], a

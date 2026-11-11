@@ -67,11 +67,12 @@ DEF MSG_NODATA EQU 3
 DEF MSG_FAIL   EQU 4
 DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothing written
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+B again to overwrite
+DEF MSG_FULL    EQU 7      ; the pattern memory is full: the edit was refused, nothing changed (src/pool.asm)
 DEF MSG_FRAMES EQU 90
 
 ; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM
 ; is enough); the maintainer's shared EMS card keeps LSDj in banks 0-11, so `make card` builds with SLOT_BANK0 = 12.
-DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x up to 8 bars); pattern p lives in WRAM bank p + 1
+DEF NUM_PATS   EQU 16      ; patterns per song; each owns up to NUM_SEGS segments (4 bars x 4 channels) borrowed from the pool (src/pool.asm)
 DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
 DEF CHAIN_END  EQU $FF
 DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
@@ -130,3 +131,15 @@ DEF BPM_MAX   EQU 240
 DEF CELL_OFF  EQU $FF
 
 ENDC
+
+; The segment pool (docs/M19_PATTERN_POOL.md). A segment = 4 channels x one 256-byte page (192 ticks used) = a quarter of a WRAM bank;
+; WRAM banks 1-7 hold segment 0..27. Segment ids 0..POOL_SEGS-1 are lent to patterns, ZERO_SEG is all zeros: a pattern segment that is
+; not lent reads as empty from it. A song is saved in the slot as the lent segments only, run-length coded (EncodedSegSize);
+; POOL_BYTES is what the coded segments may take together, so that whatever can be built can be saved.
+DEF POOL_SEGS   EQU 27
+DEF ZERO_SEG    EQU 27
+DEF NO_SEG      EQU $FF
+DEF POOL_BYTES  EQU 7800
+DEF POOL_MARGIN EQU 128    ; one edit grows the coded size by less than this (two new segments at most)
+DEF SEG_PAGES   EQU 4
+DEF RAW_MIN     EQU 168    ; a coded channel with this many cells or more is stored raw (193 bytes), else as a bitmap (25 + cells)

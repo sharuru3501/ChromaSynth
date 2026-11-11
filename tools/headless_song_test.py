@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 from pyboy import PyBoy
+from pool_util import Pool
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = root / "build/chromasynth.gb"
@@ -58,10 +59,8 @@ def tap(pb, btn, settle=6):
     pb.tick(settle)
 
 
-PAT = sym["wPatterns"]          # $D000
 CHAIN = sym["wChain"]
-HI = 1                          # pattern p lives in WRAM bank p + 1
-check("the patterns start at $D000 (a bank each)", PAT == 0xD000, hex(PAT))
+HI = 1                          # the pattern numbers of wEditBank / wPlayBank are 1-based
 
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
@@ -73,8 +72,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # --- defaults
     check("boot: chain = pattern 1 then the end", mem[CHAIN] == 0 and all(mem[CHAIN + i] == 0xFF for i in range(1, 16)))
     check("boot: loop mode, pattern 1 edited and played", v("wSongMode") == 0 and v("wEditBank") == HI and v("wPlayBank") == HI)
-    check("boot: patterns 2-4 are empty", all(mem[b, PAT + i] == 0 for b in (2, 3, 4) for i in range(2048)))
-    check("boot: the demo is pattern 1", mem[1, PAT] == 60)
+    check("boot: patterns 2-16 hold no segment, pattern 1 holds its first", all(Pool(mem, sym).seg(p_, g) == 255 for p_ in range(1, 16) for g in range(2)) and Pool(mem, sym).seg(0, 0) == 0 and Pool(mem, sym).seg(0, 1) == 255)
+    check("boot: the demo is pattern 1", Pool(mem, sym).get(0, 0, 0, 0) == 60)
 
     # --- the song screen
     combo(pb, "start", "up")
@@ -104,26 +103,26 @@ with tempfile.TemporaryDirectory() as tmp:
     # --- steps: A / B on the chain
     check("the cursor starts on step 1", v("wSongCur") == 0)
     tap(pb, "b")
-    check("B on step 1: wraps to the last pattern (a song needs one step)", mem[CHAIN] == 3, mem[CHAIN])
+    check("B on step 1: wraps to the last pattern (a song needs one step)", mem[CHAIN] == 15, mem[CHAIN])
     tap(pb, "a")
     check("A on the last pattern of step 1: back to pattern 1", mem[CHAIN] == 0, mem[CHAIN])
     tap(pb, "right")
     check("RIGHT moves the cursor", v("wSongCur") == 1)
     tap(pb, "a")
     check("A on the end: pattern 1", mem[CHAIN + 1] == 0, mem[CHAIN + 1])
-    for want in (1, 2, 3, 0xFF, 0):
+    for want in list(range(1, 16)) + [0xFF, 0]:
         tap(pb, "a")
         check(f"A steps the pattern to {want}", mem[CHAIN + 1] == want, mem[CHAIN + 1])
     mem[CHAIN + 1] = 0
     tap(pb, "b")
     check("B on pattern 1 (step 2) gives the end", mem[CHAIN + 1] == 0xFF, mem[CHAIN + 1])
     tap(pb, "b")
-    check("B on the end gives the last pattern", mem[CHAIN + 1] == 3, mem[CHAIN + 1])
+    check("B on the end gives the last pattern", mem[CHAIN + 1] == 15, mem[CHAIN + 1])
     pb.tick(20)
-    check("the chain row shows step 2 as pattern 4 (and the cursor)", row_text(6)[3:6] == tiles(">4 "), row_text(6))
+    check("the chain row shows step 2 as pattern 16, written G (and the cursor)", row_text(6)[3:6] == tiles(">G "), row_text(6))
     tap(pb, "left")
     pb.tick(20)
-    check("the cursor mark moved back to step 1", row_text(6)[:3] == tiles(">1 ") and row_text(6)[3:6] == tiles(" 4 "), row_text(6))
+    check("the cursor mark moved back to step 1", row_text(6)[:3] == tiles(">1 ") and row_text(6)[3:6] == tiles(" G "), row_text(6))
     tap(pb, "right")
     for _ in range(8):
         tap(pb, "right")
@@ -147,11 +146,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("SELECT+RIGHT edits pattern 2", v("wEditPat") == 1 and v("wEditBank") == 2, (v("wEditPat"), v("wEditBank")))
     check("... and in loop mode that is the pattern that plays", v("wPlayBank") == 2, v("wPlayBank"))
     check("... without changing channel", v("wSelCh") == 0)
-    combo(pb, "select", "right")
-    combo(pb, "select", "right")
-    combo(pb, "select", "right")
-    check("the edit pattern stops at pattern 4", v("wEditPat") == 3 and v("wEditBank") == 4, (v("wEditPat"), v("wEditBank")))
-    for _ in range(5):
+    for _ in range(20):
+        combo(pb, "select", "right")
+    check("the edit pattern stops at pattern 16", v("wEditPat") == 15 and v("wEditBank") == 16, (v("wEditPat"), v("wEditBank")))
+    for _ in range(20):
         combo(pb, "select", "left")
     check("... and at pattern 1", v("wEditPat") == 0 and v("wEditBank") == HI)
     combo(pb, "select", "up")
@@ -177,8 +175,8 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "a")
     pb.button_release("a")
     pb.tick(10)
-    check("A on the roll placed the note in pattern 2, channel 1", mem[2, PAT] == 70, mem[2, PAT])
-    check("... and pattern 1 is untouched", mem[1, PAT] == 60, mem[1, PAT])
+    check("A on the roll placed the note in pattern 2, channel 1", Pool(mem, sym).get(1, 0, 0, 0) == 70, Pool(mem, sym).get(1, 0, 0, 0))
+    check("... and pattern 1 is untouched", Pool(mem, sym).get(0, 0, 0, 0) == 60, Pool(mem, sym).get(0, 0, 0, 0))
     pb.stop(save=False)
 
 # --- playback of a chain
@@ -188,12 +186,11 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     v = lambda n: mem[sym[n]]
-    for b in range(1, 5):
-        for i in range(2048):
-            mem[b, PAT + i] = 0
-    mem[1, PAT] = 60                   # pattern 1: C4 on channel 1 at tick 0
-    mem[2, PAT] = 64                   # pattern 2: E4
-    mem[3, PAT] = 67                   # pattern 3: G4
+    for p_ in range(16):
+        Pool(mem, sym).clear_pattern(p_)
+    Pool(mem, sym).put(0, 0, 0, 0, 60)  # pattern 1: C4 on channel 1 at tick 0
+    Pool(mem, sym).put(1, 0, 0, 0, 64)  # pattern 2: E4
+    Pool(mem, sym).put(2, 0, 0, 0, 67)  # pattern 3: G4
     mem[sym["wSeqBars"]] = 1            # one bar per pattern
     mem[sym["wBpm"]] = 240             # a bar = 60 frames
     mem[CHAIN:CHAIN + 4] = bytes([0, 1, 0, 2])
@@ -242,10 +239,9 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     v = lambda n: mem[sym[n]]
     tiles = lambda s_: bytes(ord(c) - 32 for c in s_)
-    for b in range(1, 5):
-        for i in range(2048):
-            mem[b, PAT + i] = 0
-    mem[1, PAT] = 60                   # pattern 1: a note at tick 0 that nothing ends
+    for p_ in range(16):
+        Pool(mem, sym).clear_pattern(p_)
+    Pool(mem, sym).put(0, 0, 0, 0, 60)  # pattern 1: a note at tick 0 that nothing ends
     mem[sym["wSeqBars"]] = 1
     combo(pb, "start", "up")
     combo(pb, "select", "start")
@@ -325,11 +321,10 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     v = lambda n: mem[sym[n]]
-    for b in range(1, 5):
-        for i in range(2048):
-            mem[b, PAT + i] = 0
-    mem[1, PAT] = 36                   # pattern 1: a bass note on channel 1 that nothing ends
-    mem[2, PAT + 512] = 72             # pattern 2: a note on channel 2 only
+    for p_ in range(16):
+        Pool(mem, sym).clear_pattern(p_)
+    Pool(mem, sym).put(0, 0, 0, 0, 36)  # pattern 1: a bass note on channel 1 that nothing ends
+    Pool(mem, sym).put(1, 1, 0, 0, 72)  # pattern 2: a note on channel 2 only
     mem[sym["wSeqBars"]] = 1
     mem[sym["wBpm"]] = 240             # a bar = 60 frames
     mem[CHAIN:CHAIN + 3] = bytes([0, 1, 0xFF])
@@ -359,24 +354,23 @@ with tempfile.TemporaryDirectory() as tmp:
     for p_ in range(4):
         for c in range(4):
             for t in (0, 5, 100, 191):
-                mem[p_ + 1, PAT + c * 512 + t] = 40 + p_ * 5 + c + (t % 7)
-                mem[p_ + 1, PAT + c * 512 + 256 + t] = 90 + p_ * 5 + c + (t % 7)    # segment 2 too
+                Pool(mem, sym).put(p_, c, 0, t, 40 + p_ * 5 + c + (t % 7))
+                Pool(mem, sym).put(p_, c, 1, t, 90 + p_ * 5 + c + (t % 7))    # segment 2 too
     mem[CHAIN:CHAIN + 6] = bytes([3, 0, 2, 2, 1, 0xFF])
-    mem[CHAIN + 6] = 9            # a damaged step: it must not survive a load
+    mem[CHAIN + 6] = 20           # a damaged step (the patterns are 0-15): it must not survive a load
     mem[sym["wBpm"]] = 141
     mem[sym["wSeqBars"]] = 6
-    snapshot = {(p_, c, g): bytes(mem[p_ + 1, PAT + c * 512 + g * 256: PAT + c * 512 + g * 256 + 192]) for p_ in range(4) for c in range(4) for g in range(2)}
+    snapshot = {(p_, c, g): [Pool(mem, sym).get(p_, c, g, t) for t in range(192)] for p_ in range(4) for c in range(4) for g in range(2)}
     combo(pb, "select", "b", 30)
     check("SELECT+B saves the song", v("wMsg") == 1, v("wMsg"))
-    for b in range(1, 5):
-        for i in range(2048):
-            mem[b, PAT + i] = 0
+    for p_ in range(16):
+        Pool(mem, sym).clear_pattern(p_)
     mem[CHAIN:CHAIN + 16] = bytes([0] + [0xFF] * 15)
     mem[sym["wBpm"]] = 90
     combo(pb, "select", "a", 30)
     check("SELECT+A loads it", v("wMsg") == 2, v("wMsg"))
     check("all four patterns are restored exactly (both segments of every channel)",
-          all(bytes(mem[p_ + 1, PAT + c * 512 + g * 256: PAT + c * 512 + g * 256 + 192]) == snapshot[(p_, c, g)]
+          all([Pool(mem, sym).get(p_, c, g, t) for t in range(192)] == snapshot[(p_, c, g)]
               for p_ in range(4) for c in range(4) for g in range(2)))
     check("the chain is restored", bytes(mem[CHAIN:CHAIN + 5]) == bytes([3, 0, 2, 2, 1]) and mem[CHAIN + 5] == 0xFF)
     check("a damaged chain step becomes the end", mem[CHAIN + 6] == 0xFF, mem[CHAIN + 6])
@@ -387,7 +381,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     check("reboot: the song is loaded from slot 1", bytes(mem[CHAIN:CHAIN + 5]) == bytes([3, 0, 2, 2, 1]) and mem[sym["wBpm"]] == 141,
           (bytes(mem[CHAIN:CHAIN + 5]), mem[sym["wBpm"]]))
-    check("reboot: pattern 4's cells are there", mem[4, PAT + 512 + 100] == 40 + 15 + 1 + (100 % 7) and mem[4, PAT + 512 + 256 + 100] == 90 + 15 + 1 + (100 % 7), mem[4, PAT + 512 + 100])
+    check("reboot: pattern 4's cells are there", Pool(mem, sym).get(3, 1, 0, 100) == 40 + 15 + 1 + (100 % 7) and Pool(mem, sym).get(3, 1, 1, 100) == 90 + 15 + 1 + (100 % 7), Pool(mem, sym).get(3, 1, 0, 100))
     pb.stop(save=False)
 
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")
