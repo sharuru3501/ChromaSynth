@@ -153,18 +153,15 @@ RollRefreshAll:
 ; The selected channel changed: put the cursor on its first note (if it has
 ; one) and centre the pitch window on it, so the channel is visible at once.
 RollChannelChanged:
-    ld a, [wSelCh]
-    add a
-    add HIGH(wPatterns)     ; the channel's first page (segment 0)
-    ld b, a
     xor a
     ld [wRCSeg], a
 .seg:
+    ld a, [wRCSeg]
+    call EdSegPage          ; a = the channel's page in this segment (SVBK set)
+    ld b, a
     ld c, 0                 ; c = tick
 .scan:
-    ld a, [wRCSeg]
-    add b
-    ld h, a
+    ld h, b
     ld l, c
     ld a, [hl]
     and a
@@ -690,10 +687,6 @@ BCInitPhases:
 BuildCols:
     call TsUpdate
     call ComputeLoopEnd
-    ld a, [wSelCh]
-    add a
-    add HIGH(wPatterns)
-    ld b, a                 ; b = high byte of this channel's pattern
     ld a, [wPageTick]
     ld c, a                 ; c = tick where the current column starts
     ld d, 0                 ; d = pitch sounding at c
@@ -713,7 +706,7 @@ BuildCols:
 .step:
     dec e
     ld a, [wBCSeg]
-    add b
+    call EdSegPage          ; the channel's page in that segment (keeps bc, de)
     ld h, a
     ld l, e
     ld a, [hl]
@@ -724,7 +717,7 @@ BuildCols:
     ld d, a
 .init:                      ; b = the channel's page in the page's segment from here on
     ld a, [wPageSeg]
-    add b
+    call EdSegPage
     ld b, a
     call BCInitPhases       ; the beat phase, the tick in the bar and the bar of the first column
     ld a, [wPageSeg]
@@ -744,7 +737,8 @@ BuildCols:
     jp nc, .padFill
     inc a
     ld [wColSeg], a
-    inc b
+    call EdSegPage          ; (keeps bc, de)
+    ld b, a
     ld c, 0
 .inSeg:
     ld a, [wBCPhase]        ; beat / bar line column?
@@ -875,9 +869,9 @@ BuildCols:
     ld hl, wRulerBuf + 18
     ld a, 'P' - 32 + TILE_INV   ; inverted tab, like the channel label
     ld [hl+], a
-    ld a, [wEditPat]        ; the edited pattern, like the P1-P4 of the song screen
+    ld a, [wEditPat]        ; the edited pattern, like the P1-PG of the song screen
     inc a
-    call NibbleTile
+    call PatTile
     add TILE_INV
     ld [hl], a
     ret

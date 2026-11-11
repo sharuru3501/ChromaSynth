@@ -11,6 +11,7 @@ import re
 import sys
 
 from pyboy import PyBoy
+from pool_util import Pool
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom = sys.argv[1] if len(sys.argv) > 1 else str(root / "build/chromasynth.gb")
@@ -488,13 +489,13 @@ def tap_while(held, btn):
     pb.tick(3)
 
 
-P = sym["wPattern"]
+pool = Pool(mem, sym)      # the pattern cells: pool segments, see tools/pool_util.py
 G = sym["wGrid"]
 T_EMP_W, T_NOTE_HEAD, T_NOTE_BODY, T_CUR_EMP, T_CUR_NOTE = 64, 68, 69, 70, 71
 
 
 def cell(ch, tick):
-    return mem[1, P + ch * 512 + tick]   # pattern 1 lives in WRAM bank 1, 512 bytes per channel
+    return pool.get_abs(0, ch, tick)     # pattern 1
 
 
 def grid(row, col):
@@ -677,8 +678,7 @@ check("cannot grow past the next note", cell(1, 6) == 60 and cell(1, 9) == 0xFF,
 release("a", frames=4)
 press("b")
 check("deleting the first note keeps the neighbour", cell(1, 0) == 0 and cell(1, 6) == 60)
-for i in range(256):
-    mem[1, P + 512 + i] = 0     # clean up CH2
+pool.clear_channel(0, 1)     # clean up CH2
 press("select")             # CH3 (bass): the cursor jumps to its first note
 check("channel switch: cursor on the first bass note", (v("wRollNote"), v("wRollTick"), v("wRollTop")) == (48, 0, 56),
       (v("wRollNote"), v("wRollTick"), v("wRollTop")))
@@ -867,8 +867,7 @@ mem[sym["wSeqBars"]] = 2
 for _ in range(6):
     chord_grid()
 check("grid divisions wrap around (7 steps back to 1/8T)", (v("wDiv"), v("wDivTicks")) == (3, 4) or v("wDiv") == 2, (v("wDiv"), v("wDivTicks")))
-for i in range(256):
-    mem[1, P + 512 + i] = 0
+pool.clear_channel(0, 1)
 nav("right")
 pb.tick(4)
 check("START+RIGHT from the sequencer -> keyboard screen", v("wScreen") == 3, v("wScreen"))

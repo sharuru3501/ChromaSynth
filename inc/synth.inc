@@ -67,11 +67,12 @@ DEF MSG_NODATA EQU 3
 DEF MSG_FAIL   EQU 4
 DEF MSG_INUSE   EQU 5      ; the slot holds data that is not ours (LSDj): nothing written
 DEF MSG_CONFIRM EQU 6      ; the slot is used: press SELECT+B again to overwrite
+DEF MSG_FULL    EQU 7      ; the pattern memory is full: the edit was refused, nothing changed (src/pool.asm)
 DEF MSG_FRAMES EQU 90
 
 ; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM
 ; is enough); the maintainer's shared EMS card keeps LSDj in banks 0-11, so `make card` builds with SLOT_BANK0 = 12.
-DEF NUM_PATS   EQU 4       ; patterns per song (each 4 channels x up to 8 bars); pattern p lives in WRAM bank p + 1
+DEF NUM_PATS   EQU 16      ; patterns per song; each owns up to NUM_SEGS segments (4 bars x 4 channels) borrowed from the pool (src/pool.asm)
 DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
 DEF CHAIN_END  EQU $FF
 DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
@@ -130,3 +131,16 @@ DEF BPM_MAX   EQU 240
 DEF CELL_OFF  EQU $FF
 
 ENDC
+
+; The page pool (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md). A page = one channel's 192 ticks of 4 bars, one byte a tick, in a 256-byte
+; WRAM page; WRAM banks 1-7 hold page 0..111 (16 a bank). Page ids 0..POOL_PAGES-1 are lent to a pattern's (channel, half), ZERO_PAGE is all zeros:
+; a channel half that is not lent reads as empty from it. A song is saved as the lent pages only, coded without loss (EncodedPageSize);
+; POOL_BYTES is what the coded pages may take together, so that whatever can be built can be saved.
+DEF POOL_PAGES  EQU 111
+DEF ZERO_PAGE   EQU 111
+DEF NO_PAGE     EQU $FF
+DEF POOL_MAP    EQU 14     ; bytes of the map of lent pages (1 bit a page)
+DEF POOL_BYTES  EQU 7800
+DEF POOL_MARGIN EQU 64     ; one edit grows the coded size by less than this (two new pages at most)
+DEF RAW_MIN     EQU 168    ; a coded channel with this many cells or more is stored raw (193 bytes), else as a bitmap (25 + cells)
+DEF PAT_PAGES   EQU 8      ; table entries of a pattern: channel * 2 + half

@@ -95,23 +95,26 @@ Changes take effect at the **next note** (PAN, VIBD/VIBS and the master volume V
 | B+A | change the grid division (1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/48 ...; T = triplet) |
 | SELECT held + Up/Down | BPM +1 / -1 |
 | SELECT held + Left/Right | loop length -1 / +1 bar |
-| START held + A / B | edit the next / previous pattern (P1-P4; while playing it switches at the start of the next bar) |
+| START held + A / B | edit the next / previous pattern (P1-P9, then PA-PG = 10-16; while playing it switches at the start of the next bar) |
 | SELECT (tap) | next channel |
 | SELECT+START | play / stop |
 
 A page holds a whole number of bars. A note placed after the end of the loop extends the loop (up to 8 bars). Notes may cross the 4-bar boundary when played. You can edit sounds on the other screens while it plays. Triplets: B+A until 1/8T, then A, Right, Right, A, Right, Right, A.
 
 ## Song screen (patterns in a chain)
-- **Patterns P1-P4** are boxes of notes (4 channels, up to 8 bars). The Sequencer edits **the pattern chosen as `EDIT`** here.
+- **16 patterns (P1-P9, PA-PG)** are boxes of notes (4 channels, up to 8 bars). The Sequencer edits **the pattern chosen as `EDIT`** here.
 - The **chain** (`ORDER STEP:PATTERN`, 16 steps) is the order in which patterns play. Each cell plays one pattern once; `-` ends the chain, which then repeats. `1 1 2 1 -` plays P1, P1, P2, P1. During SONG playback the playing step is shown as `[1]`.
 
 | keys | action |
 |---|---|
 | D-pad | move in the chain (Left/Right one step, Up/Down one row of 6) |
 | A / B | pattern of this step +1 / -1 (1, 2, 3, 4, `-`) |
-| SELECT+Left/Right | choose the pattern to edit (P1-P4) |
+| SELECT+Left/Right | choose the pattern to edit (P1-PG) |
 | SELECT+Up/Down | MODE: LOOP (repeat the edited pattern) / SONG (play the chain) |
 | START+Up / START+Down | open / return |
+
+### Pattern memory
+A box only takes the memory it uses: **one channel's 4 bars at a time** (a page) from a shared pool. A channel without notes, or bars that are not used, take nothing, so they are free for the other boxes. The song screen's `MEM nn%` shows how much of the 8 KB save slot is used (the size after compression). **Near 100 % placing or lengthening a note is refused with `MEM FULL`** (nothing changes), so whatever you can build can always be saved. A save keeps only the pages that are in use, compressed without loss; deleting the last note of a page gives it back.
 
 While playing in LOOP mode, choosing another `EDIT` pattern switches to it at the start of the next bar (`PLAY P1` / `NEXT P2` shows it), like launching clips.
 

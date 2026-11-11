@@ -94,7 +94,7 @@ An app you build yourself does not carry the quarantine mark, so macOS opens it 
 4. On the Chromatic, show the Keyboard screen and press **SELECT+START** to play. Live starts recording; stopping the Chromatic stops Live. The takes land in the Arrangement view.
 
 ### B6. Let the DAW drive the sequencer
-SYNC = **3** (FOLLOW). Live > Settings > Tempo & MIDI > **Output** list: turn **Sync** on for `ChromaSynth`. Live's play/stop starts/stops the sequencer, Live's tempo sets the BPM, program change 0-3 selects pattern 1-4, CC20 / CC21 / CC10 move duty-or-wave / volume / pan. (Program change and CC are not yet tested on hardware.)
+SYNC = **3** (FOLLOW). Live > Settings > Tempo & MIDI > **Output** list: turn **Sync** on for `ChromaSynth`. Live's play/stop starts/stops the sequencer, Live's tempo sets the BPM, program change 0-15 selects pattern 1-16, CC20 / CC21 / CC10 move duty-or-wave / volume / pan. (Program change and CC are not yet tested on hardware.)
 
 ### When something does not work
 | symptom | try |

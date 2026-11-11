@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 from pyboy import PyBoy
+from pool_util import Pool
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = root / "build/chromasynth.gb"
@@ -67,16 +68,15 @@ def tap(pb, btn, settle=4):
     pb.tick(settle)
 
 
-PAT = 0xD000
-CH_STRIDE = 512
+POOL = []    # the Pool of the running test (made when the ROM is up)
 
 
 def cell(mem, ch, seg, tick, bank=1):
-    return mem[bank, PAT + ch * CH_STRIDE + seg * 256 + tick]
+    return POOL[0].get(0, ch, seg, tick)
 
 
 def setcell(mem, ch, seg, tick, value, bank=1):
-    mem[bank, PAT + ch * CH_STRIDE + seg * 256 + tick] = value
+    POOL[0].put(0, ch, seg, tick, value)
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -84,6 +84,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     tiles = lambda s_: bytes(ord(c) - 32 for c in s_)
 
@@ -173,6 +174,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     combo(pb, "start", "right")
     combo(pb, "start", "right")
@@ -208,6 +210,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     combo(pb, "start", "right")
     combo(pb, "start", "right")
@@ -309,6 +312,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     combo(pb, "start", "right")
     combo(pb, "start", "right")
@@ -354,6 +358,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     combo(pb, "start", "right")
     combo(pb, "start", "right")
@@ -386,6 +391,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     steps = [0]
     passes = [0]
@@ -436,6 +442,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     combo(pb, "start", "right")
     combo(pb, "start", "right")
@@ -508,6 +515,7 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy(rom_src, rom)
     pb = boot(rom)
     mem = pb.memory
+    POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
     for ch in range(4):
         for seg in range(2):

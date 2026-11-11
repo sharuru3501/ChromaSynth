@@ -184,15 +184,16 @@ SeqStep:
     ld [wSeqCurSeg], a
     ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)
     call MidiOutSync
-    ld a, [wPlayBank]       ; read the played pattern (SVBK goes back to the edited one below)
-    ld [$FF70], a
     ld c, 0
 .ch:
-    ld a, c
-    add a
-    ld hl, wSeqCurSeg
-    add [hl]
-    add HIGH(wPatterns)     ; the page: channel * 2 + segment
+    push bc                 ; the page of this channel in the played pattern's half (PageLoc sets SVBK to its bank)
+    ld b, c
+    ld a, [wSeqCurSeg]
+    ld c, a
+    ld a, [wPlayBank]
+    dec a
+    call PageLoc
+    pop bc
     ld h, a
     ld a, [wSeqCur]
     ld l, a
@@ -218,8 +219,6 @@ SeqStep:
     ld a, c
     cp NUM_CH
     jr c, .ch
-    ld a, [wEditBank]       ; the piano roll reads the edited pattern
-    ld [$FF70], a
     ld hl, wLoopSeg         ; where the loop ends (PlayInfo): (last segment, ticks in it)
     ld a, [wSeqTick]
     inc a
@@ -509,41 +508,35 @@ MarkSeqStatus:
     ret
 
 ; ---------------------------------------------------------------- cell helpers
-; b = tick (in the cursor's segment) -> hl = address of that cell in the selected channel. Clobbers a.
-CellHL:
-    ld a, [wSelCh]
-    add a
-    ld hl, wRollSeg
-    add [hl]
-    add HIGH(wPatterns)     ; the page: channel * 2 + the cursor's segment
-    ld h, a
-    ld l, b
-    ret
-
 ; de = absolute tick (0 .. TOTAL_TICKS-1, counted from the start of the pattern) -> hl = its cell in the
-; selected channel's pattern. Keeps de. Clobbers a.
+; selected channel's pattern, SVBK set to its bank (a half that is not lent reads as zeros). Keeps de. Clobbers a.
+; To WRITE the cell use AbsHLW (pool.asm).
 AbsHL:
-    ld a, [wSelCh]
-    add a
-    add HIGH(wPatterns)     ; the page of segment 0
-    ld h, a
     ld a, d
     and a
     jr nz, .second
     ld a, e
     cp SEQ_TICKS
     jr c, .first
-    sub SEQ_TICKS           ; 192..255: segment 1, tick 0..63
-    inc h
+    ld a, 1                 ; 192..255: segment 1, tick 0..63
+    call EdSegPage
+    ld h, a
+    ld a, e
+    sub SEQ_TICKS
     ld l, a
     ret
 .first:
+    xor a
+    call EdSegPage
+    ld h, a
     ld l, e
     ret
 .second:                    ; 256..383: segment 1, tick 64..191
+    ld a, 1
+    call EdSegPage
+    ld h, a
     ld a, e
     add 256 - SEQ_TICKS
-    inc h
     ld l, a
     ret
 
@@ -951,9 +944,14 @@ SeqSelectHeld:
 SeqPlace:
     call FindNote
     jr nc, .audition        ; already there: just audition it
+    call PoolReserve        ; room for a note (and the segments it may need)?
+    jr nc, .reserved
+    ld a, MSG_FULL
+    jp SetMsg
+.reserved:
     call CursorAbs
     push de
-    call AbsHL
+    call AbsHLW
     ld a, [wRollNote]
     ld [hl], a              ; note-on
     call LoopCoverNote      ; a note past the loop end makes the loop longer
@@ -975,8 +973,10 @@ SeqPlace:
     ld a, [hl]
     and a
     jr nz, .placed          ; something already there: the note ends at it
+    call AbsHLW             ; (the OFF may be the first cell of the next segment)
     ld [hl], CELL_OFF
 .placed:
+    call RecalcEdited
     call RollRefresh
 .audition:
     ld a, [wSelCh]
@@ -1119,6 +1119,15 @@ SeqLength:
     ld a, [hl]
     cp CELL_OFF
     ret nz                  ; touches the next note: cannot grow
+    push de
+    push hl
+    call PoolReserve        ; the new OFF may need a segment
+    pop hl
+    pop de
+    jr nc, .reserved
+    ld a, MSG_FULL
+    jp SetMsg
+.reserved:
     xor a
     ld [hl], a              ; remove the old OFF
     push de                 ; old end
@@ -1142,11 +1151,11 @@ SeqLength:
 .runsOn:                    ; reaches the next event / the end: the note runs into it
     ld d, b
     ld e, c
-    jr NoteEnded
+    jp NoteEnded
 .place:
-    call AbsHL
+    call AbsHLW
     ld [hl], CELL_OFF
-    jr NoteEnded
+    jp NoteEnded
 .shorten:
     ld hl, wNtStart
     ld a, e
@@ -1182,7 +1191,7 @@ SeqLength:
     jr nc, .newOff
     dec d                   ; ...and a new one a cell earlier
 .newOff:
-    call AbsHL
+    call AbsHLW             ; (a note that ran to the end of the pattern through an empty segment: the OFF needs it)
     ld [hl], CELL_OFF
     ; fall through
 
@@ -1194,6 +1203,7 @@ NoteEnded:
     ld h, d
     ld l, e
     call LoopCoverHL        ; the loop grows to include it (may redraw everything)
+    call RecalcEdited
     call RollRefresh
     pop de
     ld a, [wRollNote]
@@ -1266,14 +1276,21 @@ SeqDelete:
     jr c, .look
     ld a, e
     cp LOW(TOTAL_TICKS)
-    jp nc, RollRefresh
+    jp nc, DeleteDone
 .look:
     ld a, [hl]
     cp CELL_OFF
-    jp nz, RollRefresh
+    jp nz, DeleteDone
     xor a
     ld [hl], a              ; its OFF marker too
+DeleteDone:
+    call RecalcEdited       ; a segment that is empty now goes back to the pool
     jp RollRefresh
+
+; The coded size of the edited pattern's segments, again; empty ones are given back (pool.asm). Clobbers everything.
+RecalcEdited:
+    ld a, [wEditPat]
+    jp PoolRecalc
 
 ; ---------------------------------------------------------------- data
 INCLUDE "tempo.inc"         ; TempoTable

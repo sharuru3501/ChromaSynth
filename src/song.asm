@@ -326,7 +326,7 @@ BuildSong:
     ld hl, _SCRN0 + 16 * 32
     ld de, sSongHelp4
     call DrawString
-    ld a, %00001111         ; the info rows and the three chain rows
+    ld a, %00011111         ; the info rows, the three chain rows and the MEM row
     ld [wDirtySong], a
     ret
 
@@ -355,6 +355,8 @@ UpdateSong:
     ld a, c
     and a
     jr z, .info
+    cp 4
+    jr z, .mem
     dec a                   ; chain row 0..5
     ld b, a
     swap a
@@ -395,7 +397,8 @@ UpdateSong:
     pop hl
     cp NUM_PATS
     jr nc, .endMark
-    add '1' - 32
+    inc a
+    call PatTile
     jr .digit
 .endMark:
     ld a, '-' - 32
@@ -415,6 +418,16 @@ UpdateSong:
     dec b
     jr nz, .cell
     ret
+.mem:                       ; MEM nnn%: how much of the pattern memory is used (a row of its own: one row a frame fits VBlank)
+    ld hl, _SCRN0 + 32 + 4
+    ld de, sSongMem
+    call DrawString
+    ld a, [wPoolPct]
+    ld hl, _SCRN0 + 32 + 8
+    call DrawDec3
+    ld a, '%' - 32
+    ld [hl], a
+    ret
 .info:
     ld hl, ROW_SONG_INFO + 6
     ld de, sLoop
@@ -428,7 +441,8 @@ UpdateSong:
     ld a, 'P' - 32
     ld [hl+], a
     ld a, [wEditPat]
-    add '1' - 32
+    inc a
+    call PatTile
     ld [hl], a
     ld hl, ROW_SONG_INFO + 64       ; PLAY P1  [NEXT P2]
     ld b, 20
@@ -444,7 +458,7 @@ UpdateSong:
     ld a, 'P' - 32
     ld [hl+], a
     ld a, [wPlayBank]
-    add '0' - 32            ; the bank is the pattern number + 1
+    call PatTile            ; (the pattern number + 1)
     ld [hl+], a
     ld a, [wQueuedBank]
     and a
@@ -456,7 +470,7 @@ UpdateSong:
     ld a, 'P' - 32
     ld [hl+], a
     ld a, [wQueuedBank]
-    add '0' - 32
+    call PatTile
     ld [hl], a
     ret
 
@@ -629,6 +643,7 @@ StepValue:
     jr MarkChainRow
 
 sSongTitle:  db "SONG CHAIN", 0
+sSongMem:    db "MEM", 0
 sSongMode:   db "MODE", 0
 sSongEdit:   db "EDIT", 0
 sSongPlay:   db "PLAY", 0

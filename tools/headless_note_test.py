@@ -8,6 +8,7 @@ edited pattern on the sequencer screen.
 """
 import pathlib, re, shutil, tempfile
 from pyboy import PyBoy
+from pool_util import Pool
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = root / "build/chromasynth.gb"
@@ -51,12 +52,11 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     v = lambda n: mem[sym[n]]
-    P = sym["wPatterns"]
+    pool = Pool(mem, sym)
     ch = 1                                   # CH2: empty in the default song
-    cell = lambda seg, t: mem[1, P + ch * 512 + seg * 256 + t]
-    put = lambda seg, t, x: mem.__setitem__((1, P + ch * 512 + seg * 256 + t), x)
-    for i in range(256):
-        put(0, i, 0); put(1, i, 0)
+    cell = lambda seg, t: pool.get(0, ch, seg, t)
+    put = lambda seg, t, x: pool.put(0, ch, seg, t, x)
+    pool.clear_channel(0, ch)
     combo(pb, "start", "right"); combo(pb, "start", "right"); pb.tick(30)
     tap(pb, "select")                        # CH2
     for _ in range(8):                       # grid 1/16 (3 ticks per cell)

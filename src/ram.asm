@@ -14,20 +14,43 @@ wTx:            ds 256
 SECTION "Patch", WRAM0, ALIGN[8]
 wPatch:         ds NUM_PATCHES * PATCH_SIZE
 
-; Patterns: pattern p lives in its own WRAM bank (p + 1, selected with SVBK = $FF70) at $D000:
-; channel c, segment g (4 bars each), tick t at wPatterns + c * 512 + g * 256 + t. The page is
-; HIGH(wPatterns) + c * 2 + g and the tick is the low byte, so no 16-bit arithmetic is needed.
-; SVBK is always the edited pattern's bank (wEditBank) except inside SeqStep, which reads the
-; played pattern's bank and puts the edited one back. (Needs a CGB: a DMG has no banks.)
-SECTION "Patterns 1", WRAMX[$D000], BANK[1]
-wPattern:
-wPatterns:      ds NUM_CH * SEQ_STRIDE
-SECTION "Patterns 2", WRAMX[$D000], BANK[2]
-                ds NUM_CH * SEQ_STRIDE
-SECTION "Patterns 3", WRAMX[$D000], BANK[3]
-                ds NUM_CH * SEQ_STRIDE
-SECTION "Patterns 4", WRAMX[$D000], BANK[4]
-                ds NUM_CH * SEQ_STRIDE
+; The segment pool: WRAM banks 1-7, 4 KB each, at $D000. Segment id n is in bank 1 + n / 4, its channel c at page $D0 + (n mod 4) * 4 + c
+; (a page: the 192 ticks of a channel's 4 bars, one byte per tick). Which segment a pattern's half is in: wPatSeg (src/pool.asm).
+; SVBK ($FF70) is set by every routine that touches the cells (SegLoc), so it is not fixed to anything. (Needs a CGB.)
+SECTION "Pool 1", WRAMX[$D000], BANK[1]
+wPool:          ds 4096
+SECTION "Pool 2", WRAMX[$D000], BANK[2]
+                ds 4096
+SECTION "Pool 3", WRAMX[$D000], BANK[3]
+                ds 4096
+SECTION "Pool 4", WRAMX[$D000], BANK[4]
+                ds 4096
+SECTION "Pool 5", WRAMX[$D000], BANK[5]
+                ds 4096
+SECTION "Pool 6", WRAMX[$D000], BANK[6]
+                ds 4096
+SECTION "Pool 7", WRAMX[$D000], BANK[7]
+                ds 4096
+
+SECTION "Bitmap", WRAM0, ALIGN[5]
+wBitmap:        ds SEQ_TICKS / 8    ; the decoder's copy of a channel's 24 bitmap bytes (32-byte aligned: no carry when indexed)
+
+; per pattern, channel and half (index pattern * 8 + channel * 2 + half): the page id, or NO_PAGE. 128 bytes at a 128-byte boundary: base + index never carries.
+SECTION "Pool table", WRAM0, ALIGN[7]
+wPatPage:       ds NUM_PATS * PAT_PAGES
+wPageSize:      ds POOL_PAGES       ; per page id: its coded size in bytes (EncodedPageSize)
+wPoolBytes:     dw                  ; the sum of wPageSize over the pages that are lent
+wPoolPct:       db                  ; wPoolBytes as a percentage of POOL_BYTES (0..100), for the song screen
+wPageMap:       ds POOL_MAP         ; which page ids are lent (bit n of byte n / 8); the ZERO_PAGE bit is always set
+wPoolTmp:       ds 4                ; scratch of the pool routines
+wDummyCell:     db                  ; where a write goes that found no free page (never the zero page)
+wSaveMask:      ds 16               ; which pages are in a save (bit pattern * 8 + channel * 2 + half; a version 10 save: pattern * 2 + segment)
+wSaveDst:       dw                  ; where the next coded channel goes / comes from
+wSaveIdx:       db                  ; the index being saved / loaded
+wSaveVer:       db                  ; the version of the slot that ValidateSave looked at
+wEncAcc:        db                  ; scratch of the coder
+wLoadPage:      db                  ; scratch of the loaders
+wDecIdx:        db                  ; scratch of the decoder: the bitmap byte
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
 ; rendered outside VBlank and copied to VRAM a few rows per frame.
@@ -136,7 +159,7 @@ wEdLoopSeg:     db          ; where the loop of the EDITED pattern ends (the rul
 wEdLoopTail:    db          ; ... and ticks in it
 wBarIdx:        db          ; index of the bar that is playing (0-based; $FF just before the first)
 wBarPos:        db          ; ticks since the bar began (0 = a bar begins with the next tick played)
-wQueuedBank:    db          ; WRAM bank of the pattern that takes over at the next bar line (0 = none)
+wQueuedBank:    db          ; the pattern (1-based) that takes over at the next bar line (0 = none)
 wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)
 wBeatTicks:     db          ; ticks in the beat unit: 12 (/4), 6 (/8), 3 (/16)
 wMaxBars:       db          ; the longest loop in bars: 384 ticks / wBarTicks, at most MAX_BARS
@@ -151,8 +174,8 @@ wRollSeg:       db          ; piano-roll cursor: segment (wRollTick / wRollCell 
 wPageSeg:       db          ; segment of the visible page
 wBCSeg:         db          ; BuildCols scratch
 wRCSeg:         db          ; RollChannelChanged scratch
-wEditBank:      db          ; WRAM bank of the pattern shown / edited on the piano roll (1..NUM_PATS)
-wPlayBank:      db          ; WRAM bank of the pattern the sequencer plays
+wEditBank:      db          ; the pattern shown / edited on the piano roll, 1-based (1..NUM_PATS) = wEditPat + 1
+wPlayBank:      db          ; the pattern the sequencer plays, 1-based
 wEditPat:       db          ; the edited pattern's number
 wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
 wChainPos:      db          ; chain step being played
