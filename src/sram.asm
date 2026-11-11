@@ -329,7 +329,17 @@ NewSlot:
     ld [wDirtyEdit], a
     call RollRefreshAll
     ld a, MSG_NEWSONG
-    ; fall through
+    call SlotMsg
+    ; the new song asks for its name at once (B leaves it blank; RENAME can still change it later)
+    ld hl, wName
+    ld de, wRenameBuf
+    ld bc, NAME_LEN
+    call CopyBytes
+    xor a
+    ld [wNameCur], a
+    ld a, SMODE_NAME
+    ld [wSlotMode], a
+    jp SlotRedraw
 
 ; a = message: shown, and the slot rows are drawn again (the marks may have changed).
 SlotMsg:
