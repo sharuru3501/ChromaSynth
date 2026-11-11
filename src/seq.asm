@@ -184,16 +184,16 @@ SeqStep:
     ld [wSeqCurSeg], a
     ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)
     call MidiOutSync
-    ld a, [wSeqCurSeg]      ; read the played pattern's segment (SegLoc sets SVBK to its bank)
-    ld b, a
-    ld a, [wPlayBank]
-    dec a
-    call SegLoc
-    ld [wSegBase], a
     ld c, 0
 .ch:
-    ld a, [wSegBase]
-    add c                   ; the page: the segment's first page + channel
+    push bc                 ; the page of this channel in the played pattern's half (PageLoc sets SVBK to its bank)
+    ld b, c
+    ld a, [wSeqCurSeg]
+    ld c, a
+    ld a, [wPlayBank]
+    dec a
+    call PageLoc
+    pop bc
     ld h, a
     ld a, [wSeqCur]
     ld l, a

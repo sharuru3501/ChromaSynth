@@ -114,7 +114,7 @@ A page holds a whole number of bars. A note placed after the end of the loop ext
 | START+Up / START+Down | open / return |
 
 ### Pattern memory
-A box only takes the memory it uses: **4 bars at a time** (a segment) from a shared pool. A pattern of up to 4 bars takes one segment, 5-8 bars take two, an empty one takes none, so bars one box does not use are free for the others. The song screen's `MEM nn%` shows how much of the 8 KB save slot is used (the size after compression). **Near 100 % placing or lengthening a note is refused with `MEM FULL`** (nothing changes), so whatever you can build can always be saved. A save keeps only the segments that are in use, compressed without loss; deleting the last note of a segment gives it back.
+A box only takes the memory it uses: **one channel's 4 bars at a time** (a page) from a shared pool. A channel without notes, or bars that are not used, take nothing, so they are free for the other boxes. The song screen's `MEM nn%` shows how much of the 8 KB save slot is used (the size after compression). **Near 100 % placing or lengthening a note is refused with `MEM FULL`** (nothing changes), so whatever you can build can always be saved. A save keeps only the pages that are in use, compressed without loss; deleting the last note of a page gives it back.
 
 While playing in LOOP mode, choosing another `EDIT` pattern switches to it at the start of the next bar (`PLAY P1` / `NEXT P2` shows it), like launching clips.
 

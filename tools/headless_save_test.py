@@ -14,7 +14,7 @@ import sys
 import tempfile
 
 from pyboy import PyBoy
-from pool_util import Pool, parse_v10
+from pool_util import Pool, parse_save
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = pathlib.Path(os.environ.get("ROM", root / "build/chromasynth.gb"))   # ROM=build-card/chromasynth.gb tests the EMS-card build
@@ -59,7 +59,7 @@ def combo(pb, held, btn):
 BANK0 = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192
 BANK12 = BANK0
 SLOT = 8192
-NAMEOFF = 12                       # the name inside a slot (v10)
+NAMEOFF = 24                       # the name inside a slot (v11)
 
 
 def slot_off(n):
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
-    check("slot 1 has magic CSYN v10", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x0a", raw[slot_off(0):slot_off(0) + 5])
+    check("slot 1 has magic CSYN v11", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x0b", raw[slot_off(0):slot_off(0) + 5])
     check("nothing outside the four slots was written", BANK12 == 0 or (set(raw[:BANK12]) <= {0, 0xFF} and len(set(raw[:BANK12])) == 1), set(raw[:BANK12]))
     check("slots 2-4 are untouched", len(set(raw[slot_off(1):])) == 1, set(raw[slot_off(1):]))
 
@@ -168,7 +168,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("used slot: first SELECT+B only asks", mem[sym["wMsg"]] == 6 and mem[sym["wConfirm"]] == 2, (mem[sym["wMsg"]], mem[sym["wConfirm"]]))
     pb.stop(save=True)
     r2 = ram.read_bytes()
-    check("... and nothing was overwritten yet", parse_v10(r2[slot_off(1):slot_off(1) + 8192])["segments"][(0, 0)][1][1] == 11, None)
+    check("... and nothing was overwritten yet", parse_save(r2[slot_off(1):slot_off(1) + 8192])["pages"][(0, 1, 0)][1] == 11, None)
     pb = boot(rom)
     mem = pb.memory
     combo(pb, "select", "right")

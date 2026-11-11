@@ -132,14 +132,15 @@ DEF CELL_OFF  EQU $FF
 
 ENDC
 
-; The segment pool (docs/M19_PATTERN_POOL.md). A segment = 4 channels x one 256-byte page (192 ticks used) = a quarter of a WRAM bank;
-; WRAM banks 1-7 hold segment 0..27. Segment ids 0..POOL_SEGS-1 are lent to patterns, ZERO_SEG is all zeros: a pattern segment that is
-; not lent reads as empty from it. A song is saved in the slot as the lent segments only, run-length coded (EncodedSegSize);
-; POOL_BYTES is what the coded segments may take together, so that whatever can be built can be saved.
-DEF POOL_SEGS   EQU 27
-DEF ZERO_SEG    EQU 27
-DEF NO_SEG      EQU $FF
+; The page pool (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md). A page = one channel's 192 ticks of 4 bars, one byte a tick, in a 256-byte
+; WRAM page; WRAM banks 1-7 hold page 0..111 (16 a bank). Page ids 0..POOL_PAGES-1 are lent to a pattern's (channel, half), ZERO_PAGE is all zeros:
+; a channel half that is not lent reads as empty from it. A song is saved as the lent pages only, coded without loss (EncodedPageSize);
+; POOL_BYTES is what the coded pages may take together, so that whatever can be built can be saved.
+DEF POOL_PAGES  EQU 111
+DEF ZERO_PAGE   EQU 111
+DEF NO_PAGE     EQU $FF
+DEF POOL_MAP    EQU 14     ; bytes of the map of lent pages (1 bit a page)
 DEF POOL_BYTES  EQU 7800
-DEF POOL_MARGIN EQU 128    ; one edit grows the coded size by less than this (two new segments at most)
-DEF SEG_PAGES   EQU 4
+DEF POOL_MARGIN EQU 64     ; one edit grows the coded size by less than this (two new pages at most)
 DEF RAW_MIN     EQU 168    ; a coded channel with this many cells or more is stored raw (193 bytes), else as a bitmap (25 + cells)
+DEF PAT_PAGES   EQU 8      ; table entries of a pattern: channel * 2 + half

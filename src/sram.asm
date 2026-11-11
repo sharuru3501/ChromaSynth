@@ -3,33 +3,34 @@
 ; The SRAM is shared with every ROM on the card (LSDj uses it from the bottom), so ChromaSynth
 ; only touches the LAST FOUR 8 KB banks as NUM_SLOTS slots of one bank each:
 ;   slot n: bank SLOT_BANK0 + n, address $A000
-; Version 10 (docs/M19_PATTERN_POOL.md):
+; Version 11 (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md):
 ;   +0    "CSYN", +4 version (SAVE_VERSION)
-;   +5    checksum = (the sum of the bytes from +6 to the end of the coded segments) xor $A5
-;   +6    the length of the coded segments (2 bytes)
-;   +8    the mask (4 bytes): bit pattern * 2 + segment says that this half of that pattern is saved, in that order
-;   +12   the name (NAME_LEN bytes, indices into NameChars)
-;   +20   wPatch (NUM_PATCHES * PATCH_SIZE = 160 bytes), wChain (CHAIN_LEN), wBpm, wSeqBars
+;   +5    checksum = (the sum of the bytes from +6 to the end of the coded pages) xor $A5
+;   +6    the length of the coded pages (2 bytes)
+;   +8    the mask (16 bytes): bit pattern * 8 + channel * 2 + half says that this channel half of that pattern is saved, in that order
+;   +24   the name (NAME_LEN bytes, indices into NameChars)
+;   +32   wPatch (NUM_PATCHES * PATCH_SIZE = 160 bytes), wChain (CHAIN_LEN), wBpm, wSeqBars
 ;         per pattern: numerator x16, denominator index x16, loop bars x16
 ;         the custom CH3 waves: a mark byte ($A5), then W1-W4 of 16 bytes
-;   +311  the segments that are lent, each as 4 coded channels (EncodeChannel)
-; Version 9 (4 patterns of 2 raw segments; the checksum is at +6327, the name at +6328, then the per pattern values and the waves) is still
-; read (LoadV9) and becomes version 10 when it is saved again.
+;   +323  the pages that are lent, each as one coded channel (EncodeChannel)
+; Version 9 (4 patterns of 2 raw segments; the checksum at +6327, the name at +6328, then the per pattern values and the waves) is still read
+; (LoadV9) and becomes version 11 when saved again. (A version 10 existed only on a development branch.)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 10
+DEF SAVE_VERSION  EQU 11
 DEF V9_DATA_LEN   EQU NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + 4 * NUM_CH * NUM_SEGS * SEQ_TICKS   ; the data of a version 9 save (its checksum follows)
 DEF SAVE_SUM      EQU 5
 DEF SAVE_LEN      EQU 6
 DEF SAVE_MASK     EQU 8
-DEF SAVE_NAME     EQU 12
-DEF SAVE_HEADER   EQU 12 + NAME_LEN + NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + 3 * NUM_PATS + 1 + 16 * NUM_CUSTOM   ; where the coded segments start
+DEF SAVE_NAME     EQU 24
+DEF FIXED_LEN     EQU NAME_LEN + NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + 3 * NUM_PATS + 1 + 16 * NUM_CUSTOM   ; name ... waves
+DEF SAVE_HEADER   EQU SAVE_NAME + FIXED_LEN             ; where the coded pages start
 
-SECTION "SRAM", ROM0
+SECTION "SRAM", ROMX, BANK[1]   ; (bank 0 is nearly full; bank 1 is always mapped: nothing switches it)
 
 SaveMagic:  db "CSYN", SAVE_VERSION
 
@@ -322,7 +323,7 @@ SaveAll:
     call SlotWritable       ; (clobbers de)
     jp c, .inUse
     call SlotBase
-    ld a, [wPoolBytes]      ; the coded patterns must fit behind the header (the pool's budget keeps them below)
+    ld a, [wPoolBytes]      ; the coded pages must fit behind the header (the pool's budget keeps them below)
     ld l, a
     ld a, [wPoolBytes + 1]
     ld h, a
@@ -363,81 +364,51 @@ SaveAll:
     ld hl, wWaveMark        ; the custom CH3 waves
     ld bc, 1 + 16 * NUM_CUSTOM
     call CopySum
-    ; de = _SRAM + SAVE_HEADER: the segments that are lent, in the order of wPatSeg, each as 4 coded channels
+    ; de = _SRAM + SAVE_HEADER: the pages that are lent, in the order of wPatPage, each as one coded channel
     ld hl, wSaveMask
+    ld b, 16
     xor a
+.clearMask:
     ld [hl+], a
-    ld [hl+], a
-    ld [hl+], a
-    ld [hl], a
+    dec b
+    jr nz, .clearMask
     ld a, e
     ld [wSaveDst], a
     ld a, d
     ld [wSaveDst + 1], a
     xor a
     ld [wSaveIdx], a
-.seg:
+.page:
     ld a, [wSaveIdx]
     ld c, a
     ld b, 0
-    ld hl, wPatSeg
+    ld hl, wPatPage
     add hl, bc
     ld a, [hl]
-    cp NO_SEG
-    jr z, .nextSeg
-    ld a, [wSaveIdx]        ; the mask: bit idx of byte idx / 8
-    srl a
-    srl a
-    srl a
-    ld c, a
-    ld b, 0
-    ld hl, wSaveMask
-    add hl, bc
+    cp NO_PAGE
+    jr z, .nextPage
+    push af
     ld a, [wSaveIdx]
-    and 7
-    ld b, a
-    ld a, 1
-    inc b
-.shift:
-    dec b
-    jr z, .shifted
-    add a
-    jr .shift
-.shifted:
-    or [hl]
-    ld [hl], a
-    ld a, [wSaveIdx]
-    srl a                   ; pattern
-    ld d, a
-    ld a, [wSaveIdx]
-    and 1
-    ld b, a
-    ld a, d
-    call SegLoc             ; a = the page of channel 0, SVBK set
-    ld d, a
+    call SetMaskBit
+    pop af
+    call PageAddr           ; h = the page, SVBK set
+    ld d, h
+    ld e, 0
     ld a, [wSaveDst]
     ld l, a
     ld a, [wSaveDst + 1]
-    ld h, a                 ; hl = where the coded channels go
-    ld b, NUM_CH
-.ch:
-    push bc
-    ld e, 0
+    ld h, a                 ; hl = where the coded channel goes
     call EncodeChannel      ; (d = the page, e = 0; hl advances)
-    inc d                   ; the next channel's page
-    pop bc
-    dec b
-    jr nz, .ch
     ld a, l
     ld [wSaveDst], a
     ld a, h
     ld [wSaveDst + 1], a
-.nextSeg:
+.nextPage:
     ld hl, wSaveIdx
     inc [hl]
     ld a, [hl]
-    cp NUM_PATS * NUM_SEGS
-    jp c, .seg
+    cp NUM_PATS * PAT_PAGES
+    jp c, .page
     ; the length of the coded region, the mask, the checksum
     ld a, [wSaveDst]
     sub LOW(_SRAM + SAVE_HEADER)
@@ -456,7 +427,7 @@ SaveAll:
     ld [hl], a
     ld hl, wSaveMask
     ld de, _SRAM + SAVE_MASK
-    ld bc, 4
+    ld bc, 16
     call CopySum
     ld a, [wSaveSum]
     xor $A5
@@ -483,7 +454,60 @@ SaveAll:
     ld a, MSG_INUSE
     ret
 
-; hl = destination (SRAM), d = the source page (e = 0): one channel of a segment, 192 cells, coded: a mode byte, then
+; a = a bit index (0..127): set that bit in wSaveMask (byte index / 8). Clobbers a, bc, hl.
+SetMaskBit:
+    ld c, a
+    srl a
+    srl a
+    srl a
+    ld hl, wSaveMask
+    add l
+    ld l, a
+    jr nc, .nc
+    inc h
+.nc:
+    ld a, c
+    and 7
+    ld b, a
+    ld a, 1
+    inc b
+.shift:
+    dec b
+    jr z, .shifted
+    add a
+    jr .shift
+.shifted:
+    or [hl]
+    ld [hl], a
+    ret
+
+; a = a bit index: -> nz if that bit of wSaveMask is set. Clobbers a, bc, hl.
+TestMaskBit:
+    ld c, a
+    srl a
+    srl a
+    srl a
+    ld hl, wSaveMask
+    add l
+    ld l, a
+    jr nc, .nc
+    inc h
+.nc:
+    ld a, c
+    and 7
+    ld b, a
+    ld a, [hl]
+    inc b
+.shift:
+    dec b
+    jr z, .done
+    srl a
+    jr .shift
+.done:
+    and 1
+    ret
+
+; hl = destination (SRAM), d = the source page (e = 0): one channel half (a page), 192 cells, coded: a mode byte, then
 ; 0 = empty (nothing more) / 1 = a bitmap of the 192 ticks (24 bytes, tick 0 = bit 0 of the first byte) and then the used cells in order /
 ; 2 = all 192 cells. The mode is 2 when RAW_MIN cells or more are used, else 1 (pool.asm counts the same sizes). The bytes are added to
 ; wSaveSum. -> hl after the coded bytes. Clobbers a, bc, de.
@@ -648,9 +672,20 @@ LoadAll:
     jp z, LoadV9
     ld hl, _SRAM + SAVE_MASK
     ld de, wSaveMask
-    ld bc, 4
+    ld bc, 16
     call CopyBytes
-    ld de, wName            ; (the name follows the mask)
+    call LoadFixed          ; hl = the coded pages
+    call LoadPages
+    jp LoadDone
+.bad:
+    call SramClose
+    scf
+    ret
+
+; hl = the name of a version 11 slot -> the name, the patches, the chain, bpm, loop length, the per pattern values and the waves are
+; in RAM; hl = after them (the coded part). Clobbers a, bc, de.
+LoadFixed:
+    ld de, wName
     ld bc, NAME_LEN
     call CopyBytes
     ld de, wPatch
@@ -670,17 +705,10 @@ LoadAll:
     call CopyBytes
     ld de, wWaveMark
     ld bc, 1 + 16 * NUM_CUSTOM
-    call CopyBytes
-    ; hl = the coded segments
-    call LoadSegments
-    jp LoadDone
-.bad:
-    call SramClose
-    scf
-    ret
+    jp CopyBytes
 
-; hl = the coded segments, wSaveMask says which halves of which patterns they are (in order): lend each one a segment and decode it.
-LoadSegments:
+; hl = the coded pages, wSaveMask says which channel halves of which patterns they are (in order): lend each one a page and decode it.
+LoadPages:
     ld a, l
     ld [wSaveDst], a
     ld a, h
@@ -688,55 +716,34 @@ LoadSegments:
     call PoolInit
     xor a
     ld [wSaveIdx], a
-.seg:
-    ld a, [wSaveIdx]        ; bit idx of the mask?
-    srl a
-    srl a
-    srl a
-    ld c, a
-    ld b, 0
-    ld hl, wSaveMask
-    add hl, bc
+.idx:
     ld a, [wSaveIdx]
-    and 7
-    ld b, a
-    ld a, [hl]
-    inc b
-.test:
-    dec b
-    jr z, .tested
-    srl a
-    jr .test
-.tested:
-    and 1
+    call TestMaskBit
     jr z, .next
     ld a, [wSaveIdx]
-    srl a                   ; pattern
-    ld d, a
-    ld a, [wSaveIdx]
     and 1
-    ld b, a
-    ld a, d
+    ld c, a                 ; the half
+    ld a, [wSaveIdx]
+    srl a
+    and 3
+    ld b, a                 ; the channel
+    ld a, [wSaveIdx]
+    srl a
+    srl a
+    srl a                   ; the pattern
     push af
     push bc
-    call EnsureSeg          ; (a fresh pool: the first free segment)
+    call EnsurePage
     pop bc
     pop af
-    call SegLoc             ; a = the page of channel 0, SVBK set
+    call PageLoc            ; a = the page, SVBK set
     ld d, a
+    ld e, 0
     ld a, [wSaveDst]
     ld l, a
     ld a, [wSaveDst + 1]
     ld h, a
-    ld b, NUM_CH
-.ch:
-    push bc
-    ld e, 0
     call DecodeChannel
-    inc d
-    pop bc
-    dec b
-    jr nz, .ch
     ld a, l
     ld [wSaveDst], a
     ld a, h
@@ -745,13 +752,13 @@ LoadSegments:
     ld hl, wSaveIdx
     inc [hl]
     ld a, [hl]
-    cp NUM_PATS * NUM_SEGS
-    jr c, .seg
+    cp NUM_PATS * PAT_PAGES
+    jr c, .idx
     ret
 
 ; What every version does after the song is in RAM.
 LoadDone:
-    call PoolRecalcAll
+    call PoolRecalcAll      ; (gives back the pages that came in empty)
     call SanitizeName
     call SramClose
     ld a, [wWaveMark]       ; a song saved before the custom waves existed: the default waves
@@ -761,8 +768,8 @@ LoadDone:
     and a                   ; clear carry
     ret
 
-; A song saved by version 9: 4 patterns of 2 segments, every channel in 192 raw bytes. Each half that holds anything is lent a segment.
-; hl = the slot start, SRAM open and valid.
+; A song saved by version 9: 4 patterns of 2 segments, every channel in 192 raw bytes. Each channel half that holds anything is lent a page.
+; The slot is open and valid.
 LoadV9:
     ld hl, _SRAM + 5
     ld de, wPatch
@@ -788,8 +795,11 @@ LoadV9:
     xor a
     ld [wSaveIdx], a        ; pattern * 2 + segment, 0..7
 .seg:
-    ld c, 0                 ; is anything in this half's 4 channels?
-.used:
+    xor a
+    ld [wPoolTmp + 2], a    ; the channel
+.ch:
+    ld a, [wPoolTmp + 2]
+    ld c, a
     call V9ChunkHL
     ld b, SEQ_TICKS
     xor a
@@ -799,50 +809,40 @@ LoadV9:
     dec b
     jr nz, .or
     and a
-    jr nz, .lend
-    inc c
-    ld a, c
-    cp NUM_CH
-    jr c, .used
-    jr .next                ; empty: the half is not lent a segment
-.lend:
-    ld a, [wSaveIdx]
-    srl a                   ; pattern
-    ld d, a
+    jr z, .nextCh           ; an empty channel half: no page
     ld a, [wSaveIdx]
     and 1
-    ld b, a
-    ld a, d
+    ld c, a                 ; the half
+    ld a, [wPoolTmp + 2]
+    ld b, a                 ; the channel
+    ld a, [wSaveIdx]
+    srl a                   ; the pattern
     push af
     push bc
-    call EnsureSeg
+    call EnsurePage
     pop bc
     pop af
-    call SegLoc             ; a = the page of channel 0, SVBK set
+    call PageLoc            ; a = the page, SVBK set
     ld [wLoadPage], a
-    ld c, 0
-.copy:
-    push bc
+    ld a, [wPoolTmp + 2]
+    ld c, a
     call V9ChunkHL
     ld a, [wLoadPage]
-    pop bc
-    add c
     ld d, a
     ld e, 0
-    push bc
     ld bc, SEQ_TICKS
-    call CopyBytes          ; the 192 cells of a channel (the page's last 64 bytes stay as the clear left them)
-    pop bc
-    inc c
-    ld a, c
+    call CopyBytes          ; the 192 cells (the page's last 64 bytes stay as the clear left them)
+.nextCh:
+    ld hl, wPoolTmp + 2
+    inc [hl]
+    ld a, [hl]
     cp NUM_CH
-    jr c, .copy
-.next:
+    jr c, .ch
     ld hl, wSaveIdx
     inc [hl]
     ld a, [hl]
     cp 8
-    jp c, .seg
+    jr c, .seg
     ld hl, _SRAM + 6328     ; the name, then 4 x numerator, 4 x denominator index, 4 x loop bars, then the waves
     ld de, wName
     ld bc, NAME_LEN
@@ -910,8 +910,9 @@ ScanSlots:
     ld hl, _SRAM + SAVE_NAME
     ld a, [wSaveVer]
     cp 9
-    jr nz, .name
+    jr nz, .notV9
     ld hl, _SRAM + 6328     ; version 9: the name follows the checksum
+.notV9:
 .name:
     call CacheName
     call SlotMask
@@ -941,10 +942,56 @@ ValidateSave:
     dec b
     jr nz, .magic
     ld a, [hl]              ; the version
-    cp SAVE_VERSION
-    jr z, .v10
     cp 9
+    jr z, .v9
+    ld de, SAVE_HEADER
+    cp SAVE_VERSION
     jr nz, .bad
+.region:                    ; version 11: +5 checksum, +6 the length of the coded part, then the rest of the header (de bytes in all)
+    ld [wSaveVer], a
+    ld hl, _SRAM + SAVE_LEN
+    ld a, [hl+]
+    ld c, a
+    ld b, [hl]              ; bc = the length of the coded part
+    ld hl, SLOT_SIZE
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a                 ; hl = the most the coded part can be
+    ld a, h
+    cp b
+    jr c, .bad
+    jr nz, .lenOk
+    ld a, l
+    cp c
+    jr c, .bad
+.lenOk:
+    ld h, d
+    ld l, e
+    add hl, bc              ; the header and the coded part
+    ld de, -SAVE_LEN
+    add hl, de              ; the bytes from the length on
+    ld b, h
+    ld c, l
+    ld hl, _SRAM + SAVE_LEN
+    ld de, 0                ; d = running sum
+.sum:
+    ld a, [hl+]
+    add d
+    ld d, a
+    dec bc
+    ld a, b
+    or c
+    jr nz, .sum
+    ld a, [_SRAM + SAVE_SUM]
+    xor $A5
+    cp d
+    jr nz, .bad
+    and a
+    ret
+.v9:
     ld [wSaveVer], a
     inc hl
     push hl
@@ -965,44 +1012,9 @@ ValidateSave:
     jr nz, .bad
     and a
     ret
-.v10:
-    ld [wSaveVer], a
-    ld hl, _SRAM + SAVE_LEN
-    ld a, [hl+]
-    ld c, a
-    ld b, [hl]              ; bc = the length of the coded segments
-    ld a, b
-    cp HIGH(SLOT_SIZE - SAVE_HEADER + 1)
-    jr c, .lenOk
-    jr nz, .bad
-    ld a, c
-    cp LOW(SLOT_SIZE - SAVE_HEADER + 1)
-    jr nc, .bad
-.lenOk:
-    ld hl, SAVE_HEADER - SAVE_LEN
-    add hl, bc              ; hl = the bytes from the length on: header rest + coded segments
-    ld b, h
-    ld c, l
-    ld hl, _SRAM + SAVE_LEN
-    ld de, 0                ; d = running sum
-.sum:
-    ld a, [hl+]
-    add d
-    ld d, a
-    dec bc
-    ld a, b
-    or c
-    jr nz, .sum
-    ld a, [_SRAM + SAVE_SUM]
-    xor $A5
-    cp d
-    jr nz, .bad
-    and a
-    ret
 .bad:
     scf
     ret
-
 
 ; ---------------------------------------------------------------- UI glue
 ; SELECT+B. A used slot asks for a second SELECT+B before it is overwritten.

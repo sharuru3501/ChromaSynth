@@ -1,72 +1,135 @@
-; The segment pool for the patterns (docs/M19_PATTERN_POOL.md).
+; The page pool for the patterns (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md).
 ;
-; A pattern has NUM_SEGS halves (segments) of 4 bars. Each half that holds something is lent a segment from the pool
-; (wPatSeg); a half that holds nothing is not lent one and reads as empty from ZERO_SEG. A segment is 4 pages (one per channel)
-; of 192 cells, one byte per tick (0 = empty, CELL_OFF, or a note), in WRAM bank 1 + id / 4.
+; A pattern has NUM_CH channels of NUM_SEGS halves (4 bars each). Each channel half that holds something is lent a page from the pool
+; (wPatPage); one that holds nothing is not lent a page and reads as empty from ZERO_PAGE. A page is the 192 cells of 4 bars of a channel,
+; one byte a tick (0 = empty, CELL_OFF, or a note), in the 256 bytes of a WRAM page: WRAM bank 1 + id / 16, page $D0 + id mod 16.
 ;
-; Whoever reads cells calls SegLoc (it sets SVBK); whoever writes them calls EnsureSeg first (AbsHLW does), after PoolReserve
-; said there is room. After the edit PoolRecalc counts the coded size again and gives back segments that became empty.
+; Whoever reads cells calls PageLoc (it sets SVBK); whoever writes them calls EnsurePage first (AbsHLW does), after PoolReserve said
+; there is room. After the edit PoolRecalc counts the coded size again and gives back pages that became empty.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-
-
 SECTION "Pool", ROMX, BANK[1]
 
-; a = segment id -> SVBK = its bank, h = the page of its channel 0, l = 0. Clobbers a.
-SegAddr:
+; a = page id -> SVBK = its bank, h = its page, l = 0. Clobbers a.
+PageAddr:
     ld l, a
-    srl a
-    srl a
-    inc a                   ; bank 1 + id / 4
+    swap a
+    and $0F
+    inc a                   ; bank 1 + id / 16
     ld [$FF70], a
     ld a, l
-    and 3
-    add a
-    add a                   ; 4 pages a segment
+    and $0F
     add $D0
     ld h, a
     ld l, 0
     ret
 
-; a = pattern (0-based), b = segment (0 / 1) -> a = the page of channel 0 of that segment, SVBK = its bank.
-; A half that is not lent is ZERO_SEG. Keeps bc, de. Clobbers hl.
-SegLoc:
+; a = pattern (0-based), b = channel, c = half (0 / 1) -> hl = its entry in wPatPage. Clobbers a.
+PageEntry:
     add a
-    add b
-    add LOW(wPatSeg)        ; wPatSeg is 32 bytes at a 32-byte boundary: no carry
+    add a
+    add a                   ; pattern * 8
     ld l, a
-    ld h, HIGH(wPatSeg)
+    ld a, b
+    add a
+    add c
+    add l
+    add LOW(wPatPage)       ; wPatPage is 128 bytes at a 128-byte boundary: no carry
+    ld l, a
+    ld h, HIGH(wPatPage)
+    ret
+
+; a = pattern, b = channel, c = half -> a = the page (high byte) of that channel half, SVBK = its bank. Not lent: ZERO_PAGE.
+; Keeps bc, de. Clobbers hl.
+PageLoc:
+    call PageEntry
     ld a, [hl]
-    cp NO_SEG
+    cp NO_PAGE
     jr nz, .have
-    ld a, ZERO_SEG
+    ld a, ZERO_PAGE
 .have:
-    call SegAddr
+    call PageAddr
     ld a, h
     ret
 
-; a = segment (0 / 1) -> a = the page of the SELECTED channel in that segment of the EDITED pattern, SVBK set.
-; Keeps bc, de. Clobbers hl.
+; a = half (0 / 1) -> a = the page of the SELECTED channel in that half of the EDITED pattern, SVBK set. Keeps bc, de. Clobbers hl.
 EdSegPage:
     push bc
+    ld c, a
+    ld a, [wSelCh]
     ld b, a
     ld a, [wEditPat]
-    call SegLoc
-    ld b, a
-    ld a, [wSelCh]
-    add b
+    call PageLoc
     pop bc
     ret
 
-; a = pattern, b = segment: make sure the half is lent a segment (zeroed). -> carry set: none was free.
-; Clobbers a, bc, de, hl.
-EnsureSeg:
-    add a
-    add b
-    add LOW(wPatSeg)
+; -> a = a free page id (marked as lent in wPageMap), carry set if there is none. Clobbers bc, d, hl.
+FindFreePage:
+    ld hl, wPageMap
+    ld c, 0                 ; c = the id of bit 0 of this byte
+    ld b, POOL_MAP
+.byte:
+    ld a, [hl]
+    cp $FF
+    jr nz, .found
+    inc hl
+    ld a, c
+    add 8
+    ld c, a
+    dec b
+    jr nz, .byte
+    scf
+    ret
+.found:
+    ld d, a
+    ld b, 1
+.bit:
+    ld a, d
+    and b
+    jr z, .take
+    sla b
+    inc c
+    jr .bit
+.take:
+    ld a, [hl]
+    or b
+    ld [hl], a              ; lent
+    ld a, c
+    and a
+    ret
+
+; a = page id: give it back (clears its bit in wPageMap). Clobbers a, bc, hl.
+FreePageId:
+    ld c, a
+    srl a
+    srl a
+    srl a
+    ld hl, wPageMap
+    add l
     ld l, a
-    ld h, HIGH(wPatSeg)
+    jr nc, .nc
+    inc h
+.nc:
+    ld a, c
+    and 7
+    ld b, a
+    ld a, $FE               ; the mask without the bit, rotated into place
+    inc b
+.rot:
+    dec b
+    jr z, .rotted
+    rlca
+    jr .rot
+.rotted:
+    and [hl]
+    ld [hl], a
+    ret
+
+; a = pattern, b = channel, c = half: make sure that channel half is lent a page (zeroed). -> carry set: none was free.
+; Clobbers a, bc, de, hl.
+EnsurePage:
+    call PageEntry
     ld a, [hl]
     inc a
     jr z, .lend
@@ -74,44 +137,24 @@ EnsureSeg:
     ret
 .lend:
     push hl                 ; the table entry to fill
-    ld c, 0                 ; c = the id to try
-.try:
-    ld hl, wPatSeg
-    ld b, NUM_PATS * NUM_SEGS
-.used:
-    ld a, [hl+]
-    cp c
-    jr z, .taken
-    dec b
-    jr nz, .used
-    jr .free
-.taken:
-    inc c
-    ld a, c
-    cp POOL_SEGS
-    jr c, .try
+    call FindFreePage
+    jr c, .none
     pop hl
-    scf                     ; all lent
-    ret
-.free:
-    pop hl
-    ld [hl], c
-    ld a, c
-    call SegAddr            ; hl = the segment
-    ld bc, SEG_PAGES * 256
+    ld [hl], a
+    call PageAddr           ; hl = the page
+    ld bc, 256
     call MemClear
     and a
     ret
+.none:
+    pop hl
+    scf
+    ret
 
-; a = segment id -> de = its coded size. Per channel: 1 byte when empty, else 193 bytes (RAW: all 192 cells) when it holds RAW_MIN cells or
-; more, else 25 + the cells (a bitmap of the 192 ticks, then the cells). The coder in sram.asm must agree. Clobbers a, bc, hl; SVBK changes.
-EncodedSegSize:
-    call SegAddr
-    ld de, 0
-    ld a, NUM_CH
-    ld [wPoolTmp], a
-.ch:
-    ld l, 0
+; a = page id -> a = its coded size: 1 byte when empty, 193 (RAW) when it holds RAW_MIN cells or more, else 25 + the cells (a bitmap of
+; the 192 ticks, then the cells). The coder in sram.asm must agree. Clobbers bc, hl; SVBK changes.
+EncodedPageSize:
+    call PageAddr
     ld b, 0                 ; b = cells that are used
     ld c, SEQ_TICKS
 .cell:
@@ -125,92 +168,72 @@ EncodedSegSize:
     ld a, b
     and a
     jr nz, .some
-    inc de                  ; an empty channel: 1 byte
-    jr .next
+    inc a                   ; an empty channel: 1 byte
+    ret
 .some:
     cp RAW_MIN
     jr c, .bitmap
-    ld a, e
-    add 193
-    ld e, a
-    jr nc, .next
-    inc d
-    jr .next
+    ld a, 193
+    ret
 .bitmap:
     add 25
-    add e
-    ld e, a
-    jr nc, .next
-    inc d
-.next:
-    inc h                   ; the next channel's page (l = SEQ_TICKS here, the page is the same until this step)
-    ld a, [wPoolTmp]
-    dec a
-    ld [wPoolTmp], a
-    jr nz, .ch
     ret
 
-; a = pattern: count the coded size of its segments again, give back the ones that are empty, and add the sizes up. Clobbers all.
+; a = pattern: count the coded size of its pages again and give back the ones that are empty; then add all sizes up. Clobbers all.
 PoolRecalc:
-    ld [wPoolTmp + 1], a
-    xor a
-    ld [wPoolTmp + 2], a    ; the segment
-.seg:
-    ld a, [wPoolTmp + 1]
     add a
-    ld hl, wPoolTmp + 2
-    add [hl]
-    add LOW(wPatSeg)
+    add a
+    add a                   ; the first entry: pattern * 8
+    add LOW(wPatPage)
     ld l, a
-    ld h, HIGH(wPatSeg)
+    ld h, HIGH(wPatPage)
+    ld a, PAT_PAGES
+    ld [wPoolTmp + 1], a
+.entry:
     ld a, [hl]
-    cp NO_SEG
+    cp NO_PAGE
     jr z, .next
     push hl
-    ld [wPoolTmp + 3], a    ; the id
-    call EncodedSegSize     ; de = size
-    ld a, [wPoolTmp + 3]
-    add a
+    ld [wPoolTmp + 2], a    ; the id
+    call EncodedPageSize
+    ld [wPoolTmp + 3], a    ; its size
+    ld a, [wPoolTmp + 2]
     ld c, a
     ld b, 0
-    ld hl, wSegSize
+    ld hl, wPageSize
     add hl, bc
-    ld a, d
-    or a
-    jr nz, .keep
-    ld a, e
-    cp 4                    ; 4 empty channels: nothing in it any more
-    jr nz, .keep
-    xor a
-    ld [hl+], a
-    ld [hl], a              ; size 0
+    ld a, [wPoolTmp + 3]
+    cp 1
+    jr z, .giveBack
+    ld [hl], a              ; the size stays
     pop hl
-    ld [hl], NO_SEG         ; give the segment back
     jr .next
-.keep:
-    ld a, e
-    ld [hl+], a
-    ld [hl], d
+.giveBack:
+    xor a
+    ld [hl], a              ; size 0
+    ld a, [wPoolTmp + 2]
+    call FreePageId
     pop hl
+    ld [hl], NO_PAGE
 .next:
-    ld hl, wPoolTmp + 2
-    inc [hl]
-    ld a, [hl]
-    cp NUM_SEGS
-    jr c, .seg
+    inc hl
+    ld a, [wPoolTmp + 1]
+    dec a
+    ld [wPoolTmp + 1], a
+    jr nz, .entry
     ; fall through
-; wPoolBytes = the sum of wSegSize
+; wPoolBytes = the sum of wPageSize, wPoolPct = its share of POOL_BYTES
 PoolSum:
-    ld hl, wSegSize
+    ld hl, wPageSize
     ld de, 0
-    ld b, POOL_SEGS
+    ld b, POOL_PAGES
 .add:
     ld a, [hl+]
     add e
     ld e, a
-    ld a, [hl+]
-    adc d
-    ld d, a
+    jr nc, .nc
+    inc d
+.nc:
     dec b
     jr nz, .add
     ld a, e
@@ -241,21 +264,47 @@ PoolSum:
     ld [wPoolPct], a
     ret
 
-; Boot / before a load: no pattern holds a segment, the sizes are 0, ZERO_SEG is zeros. Clobbers all.
+; Boot / before a load: no pattern holds a page, the sizes are 0, ZERO_PAGE is zeros and marked as lent. Clobbers all.
 PoolInit:
-    ld hl, wPatSeg
-    ld b, NUM_PATS * NUM_SEGS
-    ld a, NO_SEG
+    ld hl, wPatPage
+    ld b, NUM_PATS * PAT_PAGES
+    ld a, NO_PAGE
 .table:
     ld [hl+], a
     dec b
     jr nz, .table
-    ld hl, wSegSize
-    ld bc, POOL_SEGS * 2 + 2
-    call MemClear           ; (the sizes and wPoolBytes follow each other)
-    ld a, ZERO_SEG
-    call SegAddr
-    ld bc, SEG_PAGES * 256
+    ld hl, wPageSize
+    ld bc, POOL_PAGES + 3
+    call MemClear           ; (the sizes, wPoolBytes and wPoolPct follow each other)
+    ld hl, wPageMap
+    ld bc, POOL_MAP
+    call MemClear
+    ld a, ZERO_PAGE
+    ld c, a
+    srl a
+    srl a
+    srl a
+    ld hl, wPageMap
+    add l
+    ld l, a
+    jr nc, .nc2
+    inc h
+.nc2:
+    ld a, c
+    and 7
+    ld b, a
+    ld a, 1
+    inc b
+.shift:
+    dec b
+    jr z, .shifted
+    add a
+    jr .shift
+.shifted:
+    ld [hl], a              ; the zero page is lent for good
+    ld a, ZERO_PAGE
+    call PageAddr
+    ld bc, 256
     jp MemClear
 
 ; Count every pattern again (after a load or the boot).
@@ -270,22 +319,22 @@ PoolRecalcAll:
     jr c, .p
     ret
 
-; Is there room for one more edit that may grow things (a note, a longer note)? An edit lends at most two segments and grows the coded
+; Is there room for one more edit that may grow things (a note, a longer note)? An edit lends at most two pages and grows the coded
 ; size by less than POOL_MARGIN. -> carry set: no (the caller shows MSG_FULL and does nothing). Clobbers a, bc, de, hl.
 PoolReserve:
-    ld hl, wPatSeg
-    ld b, NUM_PATS * NUM_SEGS
-    ld c, 0                 ; c = segments lent
+    ld hl, wPatPage
+    ld b, NUM_PATS * PAT_PAGES
+    ld c, 0                 ; c = pages lent
 .count:
     ld a, [hl+]
-    cp NO_SEG
+    cp NO_PAGE
     jr z, .free
     inc c
 .free:
     dec b
     jr nz, .count
     ld a, c
-    cp POOL_SEGS - 1        ; room for two more?
+    cp POOL_PAGES - 1       ; room for two more?
     jr nc, .full
     ld a, [wPoolBytes]
     ld l, a
@@ -307,11 +356,11 @@ PoolReserve:
     scf
     ret
 
-; de = a tick counted from the start of the pattern -> hl = its cell in the SELECTED channel of the EDITED pattern, SVBK set; the half
-; is lent a segment first. If none is free hl is wDummyCell (a write there changes nothing). Keeps de. Clobbers a, bc.
+; de = a tick counted from the start of the pattern -> hl = its cell in the SELECTED channel of the EDITED pattern, SVBK set; the channel
+; half is lent a page first. If none is free hl is wDummyCell (a write there changes nothing). Keeps de. Clobbers a, bc.
 AbsHLW:
     push de
-    ld b, 0
+    ld c, 0
     ld a, d
     and a
     jr nz, .second
@@ -319,10 +368,12 @@ AbsHLW:
     cp SEQ_TICKS
     jr c, .go
 .second:
-    ld b, 1
+    ld c, 1
 .go:
+    ld a, [wSelCh]
+    ld b, a
     ld a, [wEditPat]
-    call EnsureSeg
+    call EnsurePage
     pop de
     jp nc, AbsHL
     ld hl, wDummyCell

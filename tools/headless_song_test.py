@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # --- defaults
     check("boot: chain = pattern 1 then the end", mem[CHAIN] == 0 and all(mem[CHAIN + i] == 0xFF for i in range(1, 16)))
     check("boot: loop mode, pattern 1 edited and played", v("wSongMode") == 0 and v("wEditBank") == HI and v("wPlayBank") == HI)
-    check("boot: patterns 2-16 hold no segment, pattern 1 holds its first", all(Pool(mem, sym).seg(p_, g) == 255 for p_ in range(1, 16) for g in range(2)) and Pool(mem, sym).seg(0, 0) == 0 and Pool(mem, sym).seg(0, 1) == 255)
+    check("boot: patterns 2-16 hold no page, pattern 1 holds its first half", not any(Pool(mem, sym).half_lent(p_, g) for p_ in range(1, 16) for g in range(2)) and Pool(mem, sym).half_lent(0, 0) and not Pool(mem, sym).half_lent(0, 1))
     check("boot: the demo is pattern 1", Pool(mem, sym).get(0, 0, 0, 0) == 60)
 
     # --- the song screen

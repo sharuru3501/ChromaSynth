@@ -45,21 +45,27 @@ EntryPoint:
         ld [hl+], a
     ENDR
     call TsUpdate           ; 4/4 until a song says otherwise
-    call PoolInit           ; no pattern holds a segment, ZERO_SEG is zeros ...
-    ld a, 0                 ; ... except pattern 1: the demo (its first segment)
-    ld b, 0
-    call EnsureSeg
-    ld a, 0
-    ld b, 0
-    call SegLoc             ; a = the page of channel 0, SVBK set
-    ld d, a
-    ld e, 0
-    ld hl, DefaultPattern
+    call PoolInit           ; no pattern holds a page, ZERO_PAGE is zeros ...
+    ld hl, DefaultPattern   ; ... except pattern 1: the demo (the first half of every channel)
     ld b, NUM_CH
 .demoCh:
     push bc
+    push hl
+    ld a, NUM_CH
+    sub b
+    ld b, a                 ; b = the channel
+    ld c, 0
+    ld a, 0
+    push bc
+    call EnsurePage
+    pop bc
+    ld a, 0
+    call PageLoc            ; a = the page, SVBK set
+    ld d, a
+    ld e, 0
+    pop hl
     ld bc, 256
-    call MemCopy            ; (a channel's first 256 ticks; de goes on to the next channel's page)
+    call MemCopy            ; (hl goes on to the next channel's 256 ticks)
     pop bc
     dec b
     jr nz, .demoCh

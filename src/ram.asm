@@ -35,21 +35,21 @@ SECTION "Pool 7", WRAMX[$D000], BANK[7]
 SECTION "Bitmap", WRAM0, ALIGN[5]
 wBitmap:        ds SEQ_TICKS / 8    ; the decoder's copy of a channel's 24 bitmap bytes (32-byte aligned: no carry when indexed)
 
-; per pattern and segment (index pattern * 2 + segment): the segment id, or NO_SEG. 32 bytes, aligned so that base + index never carries.
-SECTION "Pool table", WRAM0, ALIGN[5]
-wPatSeg:        ds NUM_PATS * NUM_SEGS
-wSegSize:       ds POOL_SEGS * 2    ; per segment id: its coded size in bytes (EncodedSegSize), little endian
-wPoolBytes:     dw                  ; the sum of wSegSize over the segments that are lent
+; per pattern, channel and half (index pattern * 8 + channel * 2 + half): the page id, or NO_PAGE. 128 bytes at a 128-byte boundary: base + index never carries.
+SECTION "Pool table", WRAM0, ALIGN[7]
+wPatPage:       ds NUM_PATS * PAT_PAGES
+wPageSize:      ds POOL_PAGES       ; per page id: its coded size in bytes (EncodedPageSize)
+wPoolBytes:     dw                  ; the sum of wPageSize over the pages that are lent
 wPoolPct:       db                  ; wPoolBytes as a percentage of POOL_BYTES (0..100), for the song screen
-wSegBase:       db                  ; scratch: the page of channel 0 of the segment that SeqStep reads
+wPageMap:       ds POOL_MAP         ; which page ids are lent (bit n of byte n / 8); the ZERO_PAGE bit is always set
 wPoolTmp:       ds 4                ; scratch of the pool routines
-wDummyCell:     db                  ; where a write goes that found no free segment (never the zero segment)
-wSaveMask:      ds 4                ; which halves of which patterns are in a save (bit pattern * 2 + segment)
-wSaveDst:       dw                  ; where the next coded segment goes / comes from
-wSaveIdx:       db                  ; pattern * 2 + segment being saved / loaded
+wDummyCell:     db                  ; where a write goes that found no free page (never the zero page)
+wSaveMask:      ds 16               ; which pages are in a save (bit pattern * 8 + channel * 2 + half; a version 10 save: pattern * 2 + segment)
+wSaveDst:       dw                  ; where the next coded channel goes / comes from
+wSaveIdx:       db                  ; the index being saved / loaded
 wSaveVer:       db                  ; the version of the slot that ValidateSave looked at
 wEncAcc:        db                  ; scratch of the coder
-wLoadPage:      db                  ; LoadV9: the page of channel 0 of the segment being filled
+wLoadPage:      db                  ; scratch of the loaders
 wDecIdx:        db                  ; scratch of the decoder: the bitmap byte
 
 ; Piano roll shadow tilemap (rows 1-16 of the screen, 20 columns each). It is
