@@ -7,8 +7,8 @@
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
 ;
 ; Song screen (START+UP opens it, START+DOWN goes back):
-;   row 6: the places 1-8 of the page's steps, then the page number 1-4; row 11: '^' under the step that plays (song mode),
-;   '<' / '>' at its right end when that step is on an earlier / later page; rows 7-10: CH1..CH4, each "[cursor][pattern]"
+;   row 6: the places 1-8 of the page's steps; row 11: '^' under the step that plays (song mode, when it is on the shown page);
+;   row 12: PAGE n/4; the PLAY row says "STEP nn" for the step that plays (P = pattern, STEP = place in the chain, PAGE = screen page); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
@@ -19,6 +19,7 @@ DEF ROW_SONG_INFO  EQU _SCRN0 + 2 * 32
 DEF ROW_SONG_HDR   EQU _SCRN0 + 6 * 32
 DEF ROW_SONG_GRID  EQU _SCRN0 + 7 * 32
 DEF ROW_SONG_MARK  EQU _SCRN0 + 11 * 32
+DEF ROW_SONG_PAGE  EQU _SCRN0 + 12 * 32
 DEF PAGE_STEPS     EQU 8        ; steps on a screen page (a page = one row of the grid per channel)
 
 SECTION "Song", ROMX, BANK[1]
@@ -98,7 +99,7 @@ SongRestart:
 ; Redraw the marker row of the song screen (the '^' under the step that is playing).
 SongMarkPos:
     ld a, [wDirtySong]
-    or %01000000
+    or %01000001            ; the marker row and the PLAY row (it names the step)
     ld [wDirtySong], a
     ret
 
@@ -452,7 +453,7 @@ UpdateSong:
     dec b
     jr nz, .cell
     ret
-.header:                    ; "  " then per step " n" (n = place in the page, 1-8), then the page number
+.header:                    ; "  " then per step " n" (n = place in the page, 1-8); the page text goes to row 12
     ld a, [wSongCur]
     and -PAGE_STEPS
     ld c, a                 ; c = the page's first step
@@ -472,8 +473,9 @@ UpdateSong:
     inc c
     dec b
     jr nz, .hcell
-    xor a
-    ld [hl+], a
+    ld hl, ROW_SONG_PAGE + 2
+    ld de, sSongPage
+    call DrawString
     ld a, [wSongCur]
     rrca
     rrca
@@ -481,9 +483,10 @@ UpdateSong:
     and 3
     inc a
     add '0' - 32
+    ld hl, ROW_SONG_PAGE + 7
     ld [hl], a
     ret
-.marker:                    ; blank, then per step " ^" under the one that plays, then '<' / '>' when it is on another page
+.marker:                    ; blank, then per step " ^" under the one that plays (nothing when it is on another page)
     ld a, [wSongCur]
     and -PAGE_STEPS
     ld c, a                 ; c = the page's first step
@@ -504,28 +507,6 @@ UpdateSong:
     inc c
     dec b
     jr nz, .mcell
-    ld a, [wSongMode]
-    and a
-    jr z, .mnone
-    ld a, [wSeqPlay]
-    and a
-    jr z, .mnone
-    ld a, [wChainPos]
-    and -PAGE_STEPS
-    ld b, a
-    ld a, [wSongCur]
-    and -PAGE_STEPS
-    cp b                    ; carry: the playing page is after the shown one
-    jr z, .mnone
-    ld a, '<' - 32
-    jr nc, .mside
-    ld a, '>' - 32
-.mside:
-    ld [hl], a
-    ret
-.mnone:
-    xor a
-    ld [hl], a
     ret
 .mem:                       ; MEM nnn%: how much of the pattern memory is used (a row of its own: one row a frame fits VBlank)
     ld hl, _SCRN0 + 32 + 4
@@ -569,6 +550,20 @@ UpdateSong:
     ld a, [wPlayBank]
     call PatTile            ; (the pattern number + 1)
     ld [hl+], a
+    ld a, [wSongMode]
+    and a
+    jr z, .queued
+    ld a, [wSeqPlay]
+    and a
+    jr z, .queued
+    ld hl, ROW_SONG_INFO + 64 + 9   ; song mode, playing: "STEP nn" (the chain decides what is next)
+    ld de, sSongStep
+    call DrawString
+    ld hl, ROW_SONG_INFO + 64 + 13
+    ld a, [wChainPos]
+    inc a
+    jp DrawDec3
+.queued:
     ld a, [wQueuedBank]
     and a
     ret z
@@ -779,6 +774,8 @@ sSongMode:   db "MODE", 0
 sSongEdit:   db "EDIT", 0
 sSongPlay:   db "PLAY", 0
 sSongNext:   db "NEXT", 0
+sSongStep:   db "STEP", 0
+sSongPage:   db "PAGE  /4", 0
 sSongChain:  db "ORDER STEP:PATTERN", 0
 sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0
