@@ -173,14 +173,23 @@ HandleJoy:
     and b
     ld d, a                 ; d = newly pressed
 
-    ; d-pad auto-repeat: a held direction becomes a fresh "press" every
+    ; auto-repeat: a held direction (on the song screen also A / B) becomes a fresh "press" every
     ; REPEAT_RATE frames after REPEAT_DELAY frames. Any change of the d-pad
     ; state (new direction, release) restarts the delay.
+    ld a, [wScreen]
+    cp SCREEN_SONG
+    ld c, %11110000
+    jr nz, .maskSet
     ld a, [wJoy]
-    and %11110000
-    ld b, a                 ; b = d-pad directions held now
+    and %00001100           ; (SELECT / START held: A and B are for combos, never repeated)
+    jr nz, .maskSet
+    ld c, %11110011         ; the song screen: a held A / B repeats too (the pattern numbers go round)
+.maskSet:
+    ld a, [wJoy]
+    and c
+    ld b, a                 ; b = the repeating buttons held now
     ld a, [wJoyPrev]
-    and %11110000
+    and c
     cp b
     jr nz, .repeatRestart
     ld a, b

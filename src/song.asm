@@ -7,7 +7,7 @@
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
 ;
 ; Song screen (START+UP opens it, START+DOWN goes back):
-;   row 6: the step numbers of the page (8 steps; '*' above the one that plays); rows 7-10: CH1..CH4, each "[cursor][pattern]"
+;   row 6: the places 1-8 of the page's steps, then the page number 1-4 ('*' above the step that plays); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
@@ -450,7 +450,7 @@ UpdateSong:
     dec b
     jr nz, .cell
     ret
-.header:                    ; "  " then per step "[*]n" (n = step number mod 10), then the page number
+.header:                    ; "  " then per step "[*]n" (n = place in the page, 1-8), then the page number
     ld a, [wSongCur]
     and -PAGE_STEPS
     ld c, a                 ; c = the page's first step
@@ -467,13 +467,8 @@ UpdateSong:
 .hsep:
     ld [hl+], a
     ld a, c
-    inc a                   ; step number 1..32
-.mod10:
-    cp 10
-    jr c, .modDone
-    sub 10
-    jr .mod10
-.modDone:
+    and PAGE_STEPS - 1
+    inc a                   ; the step's place in its page, 1..8 (the page number is at the right end)
     add '0' - 32
     ld [hl+], a
     inc c

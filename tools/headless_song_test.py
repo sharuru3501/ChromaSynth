@@ -168,7 +168,7 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "right")
     pb.tick(30)
     hdr = row_text(6, 20)
-    check("RIGHT onto step 9: page 2, the header numbers 9, 0, 1, 2 ...", v("wSongCur") == 8 and hdr[19] == ord("2") - 32 and bytes(hdr[3 + 2 * i] for i in range(4)) == tiles("9012"), hdr)
+    check("RIGHT onto step 9: page 2, the header starts over at 1 and shows page 2", v("wSongCur") == 8 and hdr[19] == ord("2") - 32 and bytes(hdr[3 + 2 * i] for i in range(8)) == tiles("12345678"), hdr)
     check("... and the cursor shows in the first cell of the CH1 row", cell(0, 0)[0] == ord(">") - 32, row_text(7, 20))
     for _ in range(40):
         tap(pb, "right")
@@ -179,6 +179,32 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[CHAIN + CHAIN_LEN] = 0
     tap(pb, "right")
     mem[CHAIN + 1] = 0xFF
+
+    # --- a held A / B repeats (the d-pad does already); with SELECT held it does not
+    tap(pb, "left")
+    check("the cursor is on CH1 step 1, pattern 1", v("wSongCur") == 0 and v("wSongCh") == 0 and mem[CHAIN] == 0)
+    pb.button_press("a")
+    pb.tick(40)
+    held = mem[CHAIN]
+    check("holding A steps the pattern on (more than the one press)", 4 <= held <= 9, held)
+    pb.tick(30)
+    check("... and goes on while it stays held", mem[CHAIN] != held, (held, mem[CHAIN]))
+    pb.button_release("a")
+    pb.tick(10)
+    stopped = mem[CHAIN]
+    pb.tick(30)
+    check("... and stops when A is released", mem[CHAIN] == stopped, (stopped, mem[CHAIN]))
+    mem[CHAIN] = 0
+    pb.button_press("select")
+    pb.tick(3)
+    pb.button_press("b")
+    pb.tick(40)
+    pb.button_release("b")
+    pb.tick(2)
+    pb.button_release("select")
+    pb.tick(6)
+    check("SELECT+B held on the song screen does not change the pattern (and the save runs once, not repeatedly)", mem[CHAIN] == 0, mem[CHAIN])
+    tap(pb, "right")
 
     # --- edit pattern and mode
     combo(pb, "select", "right")
