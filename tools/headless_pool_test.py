@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 from pyboy import PyBoy
-from pool_util import Pool, SAVE_HEADER, encode_channel, parse_save, to_v9
+from pool_util import Pool, SAVE_HEADER, encode_channel, parse_save, to_v9, to_v11, chain_of
 
 root = pathlib.Path(__file__).resolve().parent.parent
 rom_src = root / "build/chromasynth.gb"
@@ -25,7 +25,7 @@ for line in (root / "build/chromasynth.sym").read_text().splitlines():
         sym[m.group(3)] = int(m.group(2), 16)
 
 fails = 0
-POOL_BYTES = 7800
+POOL_BYTES = 7680
 BASE = (12 if rom_src.read_bytes()[0x149] == 4 else 0) * 8192     # slot 1
 
 
@@ -243,7 +243,7 @@ with tempfile.TemporaryDirectory() as tmp:
     raw = ram.read_bytes()
     slot = raw[BASE:BASE + 8192]
     got = parse_save(slot)
-    check("the slot is a version 11 save with a good checksum", got is not None)
+    check("the slot is a version 12 save with a good checksum", got is not None)
     check("the coded region is exactly what the Python coder makes", slot[SAVE_HEADER:SAVE_HEADER + len(expect)] == bytes(expect) and got["length"] == len(expect),
           (got and got["length"], len(expect)))
     check("the Python decoder reads every cell back", got is not None and got["pages"] == before)
@@ -268,12 +268,36 @@ with tempfile.TemporaryDirectory() as tmp:
     want = {k: c for k, c in nonempty.items() if k[0] < 4}
     after = {(p, ch, g): page_cells(pool, p, ch, g) for p in range(16) for ch in range(4) for g in range(2) if pool.page(p, ch, g) != 255}
     check("version 9: patterns 1-4 are read, only the channel halves that hold something are lent (%d)" % len(want), after == want, (len(after), len(want)))
-    check("version 9: the chain and bpm came along", bytes(mem[sym["wChain"]:sym["wChain"] + 16]) == v9[165:181] and mem[sym["wBpm"]] == v9[181])
+    row9 = list(v9[165:181])
+    chain9 = [list(mem[sym["wChain"] + c * 32:sym["wChain"] + (c + 1) * 32]) for c in range(4)]
+    check("version 9: the chain (16 steps, all four channels alike, the rest the end) and bpm came along", chain9 == [row9 + [255] * 16] * 4 and mem[sym["wBpm"]] == v9[181], chain9)
     combo(pb, "select", "b", 20)         # a used slot asks first ...
     combo(pb, "select", "b", 30)         # ... and the second press overwrites
     pb.stop(save=True)
     slot2 = ram.read_bytes()[BASE:BASE + 8192]
-    check("a version 9 song is saved as version 11 again", slot2[:5] == b"CSYN\x0b" and parse_save(slot2) is not None)
+    check("a version 9 song is saved as version 12 again", slot2[:5] == b"CSYN\x0c" and parse_save(slot2) is not None)
+    check("... with the chain on all four channels", chain_of(slot2) == [row9 + [255] * 16] * 4, chain_of(slot2))
+
+    # ---- a version 11 save (a 16 step chain, the header 112 bytes shorter): the pages and the chain are read, the next save is version 12
+    v11 = to_v11(slot)
+    data = bytearray(raw)
+    data[BASE:BASE + 8192] = v11
+    ram.write_bytes(bytes(data))
+    pb = boot(rom)
+    mem = pb.memory
+    pool = Pool(mem, sym)
+    after = {(p, ch, g): page_cells(pool, p, ch, g) for p in range(16) for ch in range(4) for g in range(2) if pool.page(p, ch, g) != 255}
+    check("version 11: every page is read back", after == nonempty, (len(after), len(nonempty)))
+    row11 = chain_of(slot)[0][:16]
+    chain11 = [list(mem[sym["wChain"] + c * 32:sym["wChain"] + (c + 1) * 32]) for c in range(4)]
+    check("version 11: the chain is on all four channels", chain11 == [row11 + [255] * 16] * 4, chain11)
+    combo(pb, "select", "b", 20)
+    combo(pb, "select", "b", 30)
+    pb.stop(save=True)
+    slot3 = ram.read_bytes()[BASE:BASE + 8192]
+    got3 = parse_save(slot3)
+    check("a version 11 song is saved as version 12 again, the same pages", got3 is not None and got3["pages"] == before, got3 is None)
+    check("... and the chain is the same on all four channels", chain_of(slot3) == [row11 + [255] * 16] * 4, chain_of(slot3))
 
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

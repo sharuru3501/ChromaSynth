@@ -180,7 +180,8 @@ wEditPat:       db          ; the edited pattern's number
 wSongMode:      db          ; 0 = loop the edited pattern, 1 = play the chain
 wChainPos:      db          ; chain step being played
 wSongWrap:      db          ; 1 = the chain just moved on: release the notes before the next pattern's first tick
-wChain:         ds CHAIN_LEN ; pattern numbers, CHAIN_END after the last step
+wChain:         ds CHAIN_BYTES ; per channel CHAIN_LEN pattern numbers (wChain + channel * CHAIN_LEN + step), CHAIN_END after the last step of CH1
+wPlayPat:       ds NUM_CH   ; song mode: the pattern (0-based) each channel plays in the chain step that is playing (>= NUM_PATS: silent)
 wSongCur:       db          ; song screen: the cursor's chain step
 wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, bit n = chain row n-1)
 wSelUsed:       db          ; SELECT was used as a modifier while held

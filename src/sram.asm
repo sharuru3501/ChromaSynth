@@ -3,31 +3,33 @@
 ; The SRAM is shared with every ROM on the card (LSDj uses it from the bottom), so ChromaSynth
 ; only touches the LAST FOUR 8 KB banks as NUM_SLOTS slots of one bank each:
 ;   slot n: bank SLOT_BANK0 + n, address $A000
-; Version 11 (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md):
+; Version 12 (docs/M19_PATTERN_POOL.md, docs/M20_PER_CHANNEL_CHAINS.md; version 11 is the same with a 16 step chain of one pattern number a step):
 ;   +0    "CSYN", +4 version (SAVE_VERSION)
 ;   +5    checksum = (the sum of the bytes from +6 to the end of the coded pages) xor $A5
 ;   +6    the length of the coded pages (2 bytes)
 ;   +8    the mask (16 bytes): bit pattern * 8 + channel * 2 + half says that this channel half of that pattern is saved, in that order
 ;   +24   the name (NAME_LEN bytes, indices into NameChars)
-;   +32   wPatch (NUM_PATCHES * PATCH_SIZE = 160 bytes), wChain (CHAIN_LEN), wBpm, wSeqBars
+;   +32   wPatch (NUM_PATCHES * PATCH_SIZE = 160 bytes), wChain (CHAIN_BYTES: 4 channels of CHAIN_LEN steps), wBpm, wSeqBars
 ;         per pattern: numerator x16, denominator index x16, loop bars x16
 ;         the custom CH3 waves: a mark byte ($A5), then W1-W4 of 16 bytes
 ;   +323  the pages that are lent, each as one coded channel (EncodeChannel)
-; Version 9 (4 patterns of 2 raw segments; the checksum at +6327, the name at +6328, then the per pattern values and the waves) is still read
-; (LoadV9) and becomes version 11 when saved again. (A version 10 existed only on a development branch.)
+; Versions 9 and 11 are still read (LoadV9, LoadFixed) and become version 12 when saved again.
+; Version 9 (4 patterns of 2 raw segments; the checksum at +6327, the name at +6328, then the per pattern values and the waves) is
+; read as said. (A version 10 existed only on a development branch.)
 ; A slot is written only if it already holds a ChromaSynth save or is completely $00 / $FF;
 ; anything else (LSDj data that grew into these banks) is never overwritten (MSG_INUSE).
 ; Bump SAVE_VERSION whenever the layout changes, so old saves are ignored.
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
-DEF SAVE_VERSION  EQU 11
-DEF V9_DATA_LEN   EQU NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + 4 * NUM_CH * NUM_SEGS * SEQ_TICKS   ; the data of a version 9 save (its checksum follows)
+DEF SAVE_VERSION  EQU 12
+DEF V9_DATA_LEN   EQU NUM_PATCHES * PATCH_SIZE + V11_CHAIN_LEN + 2 + 4 * NUM_CH * NUM_SEGS * SEQ_TICKS   ; the data of a version 9 save (its checksum follows)
 DEF SAVE_SUM      EQU 5
 DEF SAVE_LEN      EQU 6
 DEF SAVE_MASK     EQU 8
 DEF SAVE_NAME     EQU 24
-DEF FIXED_LEN     EQU NAME_LEN + NUM_PATCHES * PATCH_SIZE + CHAIN_LEN + 2 + 3 * NUM_PATS + 1 + 16 * NUM_CUSTOM   ; name ... waves
+DEF FIXED_LEN     EQU NAME_LEN + NUM_PATCHES * PATCH_SIZE + CHAIN_BYTES + 2 + 3 * NUM_PATS + 1 + 16 * NUM_CUSTOM   ; name ... waves
+DEF V11_HEADER    EQU SAVE_NAME + NAME_LEN + NUM_PATCHES * PATCH_SIZE + V11_CHAIN_LEN + 2 + 3 * NUM_PATS + 1 + 16 * NUM_CUSTOM   ; where the pages of a version 11 save start
 DEF SAVE_HEADER   EQU SAVE_NAME + FIXED_LEN             ; where the coded pages start
 
 SECTION "SRAM", ROMX, BANK[1]   ; (bank 0 is nearly full; bank 1 is always mapped: nothing switches it)
@@ -812,7 +814,7 @@ SaveAll:
     ld bc, NUM_PATCHES * PATCH_SIZE
     call CopySum
     ld hl, wChain
-    ld bc, CHAIN_LEN
+    ld bc, CHAIN_BYTES
     call CopySum
     ld hl, wBpm
     ld bc, 1
@@ -1129,7 +1131,7 @@ LoadAll:
 .have:
     call SramOpen
     call SlotBase
-    call ValidateSave       ; carry: bad; else wSaveVer = 9 or SAVE_VERSION
+    call ValidateSave       ; carry: bad; else wSaveVer = 9, 11 or SAVE_VERSION
     jr c, .bad
     ld a, [wSaveVer]
     cp 9
@@ -1155,9 +1157,16 @@ LoadFixed:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call CopyBytes
+    ld a, [wSaveVer]
+    cp 12
+    jr z, .chain12
+    call ExpandChain        ; a version 11 chain: 16 steps, all channels alike
+    jr .afterChain
+.chain12:
     ld de, wChain
-    ld bc, CHAIN_LEN
+    ld bc, CHAIN_BYTES
     call CopyBytes
+.afterChain:
     ld de, wBpm
     ld bc, 1
     call CopyBytes
@@ -1170,6 +1179,51 @@ LoadFixed:
     ld de, wWaveMark
     ld bc, 1 + 16 * NUM_CUSTOM
     jp CopyBytes
+
+; hl = a chain of V11_CHAIN_LEN pattern numbers (versions 9 and 11: all channels alike) -> wChain: the steps on every channel, the rest
+; CHAIN_END; hl = after them. Clobbers a, bc, de.
+ExpandChain:
+    push hl
+    ld hl, wChain
+    ld bc, CHAIN_BYTES
+.fill:
+    ld a, CHAIN_END
+    ld [hl+], a
+    dec bc
+    ld a, b
+    or c
+    jr nz, .fill
+    pop hl
+    ld de, wChain
+    ld b, V11_CHAIN_LEN
+.row0:
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .row0
+    push hl
+    ld de, wChain + CHAIN_LEN
+    ld c, NUM_CH - 1
+.rep:
+    ld hl, wChain
+    ld b, V11_CHAIN_LEN
+.cp:
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .cp
+    ld a, e
+    add CHAIN_LEN - V11_CHAIN_LEN
+    ld e, a
+    jr nc, .nc
+    inc d
+.nc:
+    dec c
+    jr nz, .rep
+    pop hl
+    ret
 
 ; hl = the coded pages, wSaveMask says which channel halves of which patterns they are (in order): lend each one a page and decode it.
 LoadPages:
@@ -1241,9 +1295,7 @@ LoadV9:
     ld de, wPatch
     ld bc, NUM_PATCHES * PATCH_SIZE
     call CopyBytes
-    ld de, wChain
-    ld bc, CHAIN_LEN
-    call CopyBytes
+    call ExpandChain
     ld de, wBpm
     ld bc, 1
     call CopyBytes
@@ -1395,7 +1447,7 @@ ScanSlots:
     ld [wSlot], a
     jp SramClose
 
-; hl = slot start, SRAM open. -> carry set if magic/version/checksum is wrong. On success wSaveVer = the version (9 or SAVE_VERSION).
+; hl = slot start, SRAM open. -> carry set if magic/version/checksum is wrong. On success wSaveVer = the version (9, 11 or SAVE_VERSION).
 ValidateSave:
     ld de, SaveMagic
     ld b, 4
@@ -1410,6 +1462,9 @@ ValidateSave:
     ld a, [hl]              ; the version
     cp 9
     jr z, .v9
+    ld de, V11_HEADER
+    cp 11
+    jr z, .region
     ld de, SAVE_HEADER
     cp SAVE_VERSION
     jr nz, .bad

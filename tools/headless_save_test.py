@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.stop(save=True)
     check("emulator wrote a .ram file", ram.exists() and ram.stat().st_size >= 8192, ram.stat().st_size if ram.exists() else 0)
     raw = ram.read_bytes()
-    check("slot 1 has magic CSYN v11", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x0b", raw[slot_off(0):slot_off(0) + 5])
+    check("slot 1 has magic CSYN v12", raw[slot_off(0):slot_off(0) + 5] == b"CSYN\x0c", raw[slot_off(0):slot_off(0) + 5])
     check("nothing outside the four slots was written", BANK12 == 0 or (set(raw[:BANK12]) <= {0, 0xFF} and len(set(raw[:BANK12])) == 1), set(raw[:BANK12]))
     check("slots 2-4 are untouched", len(set(raw[slot_off(1):])) == 1, set(raw[slot_off(1):]))
 

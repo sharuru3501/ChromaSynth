@@ -331,8 +331,13 @@ RollPageFromCell:
     ret
 
 ; While playing with wFollow set: keep the playhead's tick inside the page.
-; The user scrolling (moving the cursor) clears wFollow.
+; The user scrolling (moving the cursor) clears wFollow. Only on the sequencer screen: on the others nothing shows the roll, and
+; rendering its rows for every page the playhead crosses cost the main loop more than a frame (the sequencer ticks jittered). The
+; roll catches up with the playhead on its next tick after the screen is opened.
 RollFollow:
+    ld a, [wScreen]
+    cp SCREEN_SEQ
+    ret nz
     ld a, [wSeqCur]
     ld e, a
     ld d, 0

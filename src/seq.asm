@@ -186,12 +186,27 @@ SeqStep:
     call MidiOutSync
     ld c, 0
 .ch:
-    push bc                 ; the page of this channel in the played pattern's half (PageLoc sets SVBK to its bank)
-    ld b, c
-    ld a, [wSeqCurSeg]
-    ld c, a
+    ld a, [wSongMode]       ; loop mode: every channel plays the played pattern; song mode: the pattern of its chain step
+    and a
+    jr z, .loopPat
+    ld hl, wPlayPat
+    ld e, c
+    ld d, 0
+    add hl, de
+    ld a, [hl]
+    cp NUM_PATS
+    jr nc, .next            ; a channel with no pattern in this step: silent
+    jr .pat
+.loopPat:
     ld a, [wPlayBank]
     dec a
+.pat:
+    push bc                 ; the page of this channel in the pattern's half (PageLoc sets SVBK to its bank)
+    ld b, c
+    ld e, a
+    ld a, [wSeqCurSeg]
+    ld c, a
+    ld a, e
     call PageLoc
     pop bc
     ld h, a

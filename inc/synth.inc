@@ -95,7 +95,10 @@ DEF MSG_FRAMES EQU 90
 ; Save slots (src/sram.asm): 4 slots of 8 KB, one SRAM bank each. The public build uses banks 0-3 (a 32 KB SRAM
 ; is enough); the maintainer's shared EMS card keeps LSDj in banks 0-11, so `make card` builds with SLOT_BANK0 = 12.
 DEF NUM_PATS   EQU 16      ; patterns per song; each owns up to NUM_SEGS segments (4 bars x 4 channels) borrowed from the pool (src/pool.asm)
-DEF CHAIN_LEN  EQU 16      ; steps in the song chain; a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
+DEF CHAIN_LEN  EQU 32      ; steps in the song chain; per channel (wChain: channel * CHAIN_LEN + step) a step is a pattern number 0..NUM_PATS-1 or CHAIN_END
+                           ; (CH1 = CHAIN_END ends the song; another channel with CHAIN_END is silent in that step)
+DEF CHAIN_BYTES EQU NUM_CH * CHAIN_LEN
+DEF V11_CHAIN_LEN EQU 16   ; the chain of a version 9 / 11 save: one pattern number a step, all channels alike
 DEF CHAIN_END  EQU $FF
 DEF NAME_LEN   EQU 8       ; characters in a song name (stored after the checksum of a slot)
 DEF NAME_CHARS EQU 38      ; name bytes are indices into NameChars: space, A-Z, 0-9, "-"
@@ -162,7 +165,7 @@ DEF POOL_PAGES  EQU 111
 DEF ZERO_PAGE   EQU 111
 DEF NO_PAGE     EQU $FF
 DEF POOL_MAP    EQU 14     ; bytes of the map of lent pages (1 bit a page)
-DEF POOL_BYTES  EQU 7800
+DEF POOL_BYTES  EQU 7680   ; (the slot is 8192 - SAVE_HEADER = 7757 bytes for the pages; the rest is the margin)
 DEF POOL_MARGIN EQU 64     ; one edit grows the coded size by less than this (two new pages at most)
 DEF RAW_MIN     EQU 168    ; a coded channel with this many cells or more is stored raw (193 bytes), else as a bitmap (25 + cells)
 DEF PAT_PAGES   EQU 8      ; table entries of a pattern: channel * 2 + half
