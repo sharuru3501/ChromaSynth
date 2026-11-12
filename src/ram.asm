@@ -183,7 +183,9 @@ wSongWrap:      db          ; 1 = the chain just moved on: release the notes bef
 wChain:         ds CHAIN_BYTES ; per channel CHAIN_LEN pattern numbers (wChain + channel * CHAIN_LEN + step), CHAIN_END after the last step of CH1
 wPlayPat:       ds NUM_CH   ; song mode: the pattern (0-based) each channel plays in the chain step that is playing (>= NUM_PATS: silent)
 wSongCur:       db          ; song screen: the cursor's chain step
-wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, bit n = chain row n-1)
+wSongCh:        db          ; song screen: the cursor's channel
+wSongCurDraw:   db          ; song screen: the chain offset (channel * CHAIN_LEN + step) of the cursor while its row is drawn, $FF elsewhere
+wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, 1 = step header, 2-5 = CH1-CH4, 7 = MEM)
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)

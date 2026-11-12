@@ -7,16 +7,17 @@
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
 ;
 ; Song screen (START+UP opens it, START+DOWN goes back):
-;   rows 6-11: the chain, 6 steps a row, "[marker][pattern 1-4 or -]"
-;   pad = cursor, A / B = the step's pattern +1 / -1 (the last one is "-" = end of the song)
+;   row 6: the step numbers of the page (8 steps; '*' above the one that plays); rows 7-10: CH1..CH4, each "[cursor][pattern]"
+;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
+;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
 DEF ROW_SONG_INFO  EQU _SCRN0 + 2 * 32
-DEF ROW_SONG_CHAIN EQU _SCRN0 + 6 * 32
-DEF CHAIN_COLS     EQU 6
-DEF CHAIN_ROWS     EQU 6        ; ceil(CHAIN_LEN / CHAIN_COLS)
+DEF ROW_SONG_HDR   EQU _SCRN0 + 6 * 32
+DEF ROW_SONG_GRID  EQU _SCRN0 + 7 * 32
+DEF PAGE_STEPS     EQU 8        ; steps on a screen page (a page = one row of the grid per channel)
 
 SECTION "Song", ROMX, BANK[1]
 
@@ -92,10 +93,12 @@ SongRestart:
     ld [wDirtySong], a
     jr SongMarkPos
 
-; Redraw the chain row of the step that is playing (its [ ] marks).
+; Redraw the header row of the song screen (it marks the step that is playing).
 SongMarkPos:
-    ld a, [wChainPos]
-    jp MarkChainRow
+    ld a, [wDirtySong]
+    or 2
+    ld [wDirtySong], a
+    ret
 
 ; The pattern ended in song mode: the next chain step (back to the first after the last).
 SongNext:
@@ -354,7 +357,7 @@ BuildSong:
     ld hl, _SCRN0 + 16 * 32
     ld de, sSongHelp4
     call DrawString
-    ld a, %11111111         ; the info rows, the six chain rows and the MEM row
+    ld a, %11111111         ; the info rows, the header, the four channel rows and the MEM row
     ld [wDirtySong], a
     ret
 
@@ -380,49 +383,60 @@ UpdateSong:
     ld hl, wDirtySong
     and [hl]
     ld [hl], a
+.dispatch:
     ld a, c
     and a
-    jr z, .info
+    jp z, .info
     cp 7
-    jr z, .mem
-    dec a                   ; chain row 0..5
+    jp z, .mem
+    cp 1
+    jr z, .header
+    cp 6
+    ret z                   ; (bit 6 is unused)
+    sub 2                   ; channel row 0..3
     ld b, a
     swap a
-    add a                   ; row * 32
+    add a                   ; channel * 32 = its row offset and its first chain offset
+    ld c, a
     ld e, a
     ld d, 0
-    ld hl, ROW_SONG_CHAIN
+    ld hl, ROW_SONG_GRID
     add hl, de
-    ld a, b                 ; first step of the row = row * CHAIN_COLS
-    add a
-    ld c, a
-    add a
-    add c                   ; * 6
-    ld c, a                 ; c = step
-    ld b, CHAIN_COLS
-.cell:
-    ld a, c
-    cp CHAIN_LEN
-    jp nc, .blank
+    ld a, [wSongCh]
+    cp b
+    ld a, $FF               ; (no cursor in this row)
+    jr nz, .cursorSet
     ld a, [wSongCur]
-    cp c
-    ld a, 0
-    jr nz, .noCur
-    ld a, '>' - 32
-    jr .left
-.noCur:
-    call StepPlaying
-    jr nc, .left
-    ld a, '[' - 32
-.left:
+    add c
+.cursorSet:
+    ld [wSongCurDraw], a    ; the chain offset (channel * 32 + step) the cursor is on
+    ld a, [wSongCur]
+    and -PAGE_STEPS         ; the page's first step
+    add c
+    ld c, a                 ; c = chain offset of the first cell
+    ld a, 'C' - 32
+    ld [hl+], a
+    ld a, b
+    add '1' - 32
     ld [hl+], a
     push hl
     ld hl, wChain
-    ld e, c
-    ld d, 0
-    add hl, de
-    ld a, [hl]
+    ld b, 0
+    add hl, bc
+    ld d, h
+    ld e, l                 ; de = the cell's pattern number
     pop hl
+    ld b, PAGE_STEPS
+.cell:
+    ld a, [wSongCurDraw]
+    cp c
+    ld a, 0
+    jr nz, .sep
+    ld a, '>' - 32
+.sep:
+    ld [hl+], a
+    ld a, [de]
+    inc de
     cp NUM_PATS
     jr nc, .endMark
     inc a
@@ -430,21 +444,51 @@ UpdateSong:
     jr .digit
 .endMark:
     ld a, '-' - 32
-    jr .digit
-.blank:
-    xor a
-    ld [hl+], a
 .digit:
-    ld [hl+], a
-    call StepPlaying
-    ld a, 0
-    jr nc, .right
-    ld a, ']' - 32
-.right:
     ld [hl+], a
     inc c
     dec b
     jr nz, .cell
+    ret
+.header:                    ; "  " then per step "[*]n" (n = step number mod 10), then the page number
+    ld a, [wSongCur]
+    and -PAGE_STEPS
+    ld c, a                 ; c = the page's first step
+    ld hl, ROW_SONG_HDR
+    xor a
+    ld [hl+], a
+    ld [hl+], a
+    ld b, PAGE_STEPS
+.hcell:
+    call StepPlaying
+    ld a, 0
+    jr nc, .hsep
+    ld a, '*' - 32
+.hsep:
+    ld [hl+], a
+    ld a, c
+    inc a                   ; step number 1..32
+.mod10:
+    cp 10
+    jr c, .modDone
+    sub 10
+    jr .mod10
+.modDone:
+    add '0' - 32
+    ld [hl+], a
+    inc c
+    dec b
+    jr nz, .hcell
+    xor a
+    ld [hl+], a
+    ld a, [wSongCur]
+    rrca
+    rrca
+    rrca
+    and 3
+    inc a
+    add '0' - 32
+    ld [hl], a
     ret
 .mem:                       ; MEM nnn%: how much of the pattern memory is used (a row of its own: one row a frame fits VBlank)
     ld hl, _SCRN0 + 32 + 4
@@ -568,49 +612,61 @@ SongInput:
     jr StepValue
 .move:
     ld a, [wSongCur]
-    ld b, a                 ; b = old cursor
+    ld b, a                 ; b = old step
+    ld a, [wSongCh]
+    ld c, a                 ; c = old channel
     bit PADB_LEFT, d
     jr z, .notL
+    ld a, b
     and a
     ret z
     dec a
-    jr .setCur
+    jr .setStep
 .notL:
     bit PADB_RIGHT, d
     jr z, .notR
+    ld a, b
     cp CHAIN_LEN - 1
     ret nc
     inc a
-    jr .setCur
+.setStep:
+    ld [wSongCur], a
+    xor b                   ; another page: every row of the grid changes
+    and -PAGE_STEPS
+    jr nz, .allRows
+    jr .twoRows
 .notR:
     bit PADB_UP, d
     jr z, .notU
-    cp CHAIN_COLS
-    ret c
-    sub CHAIN_COLS
-    jr .setCur
+    ld a, c
+    and a
+    ret z
+    dec a
+    jr .setCh
 .notU:
     bit PADB_DOWN, d
     ret z
-    add CHAIN_COLS
-    cp CHAIN_LEN
+    ld a, c
+    cp NUM_CH - 1
     ret nc
-.setCur:
-    ld [wSongCur], a
-    ld a, b                 ; redraw the row of the old and of the new cursor
-    call MarkChainRow
-    ld a, [wSongCur]
-; a = step -> flag its row for redraw
-MarkChainRow:
-    ld b, 0
-.row:
-    cp CHAIN_COLS
-    jr c, .got
-    sub CHAIN_COLS
-    inc b
-    jr .row
-.got:
-    ld a, 2                 ; bit 0 is the info rows: chain row r is bit r + 1
+    inc a
+.setCh:
+    ld [wSongCh], a
+.twoRows:                   ; redraw the rows of the old and of the new cursor
+    ld a, c
+    call MarkChRow
+    ld a, [wSongCh]
+    jr MarkChRow
+.allRows:
+    ld a, [wDirtySong]
+    or %00111110            ; the header and the four channel rows
+    ld [wDirtySong], a
+    ret
+
+; a = channel -> flag its row of the grid for redraw (bit 0 = info rows, 1 = header, channel c = bit c + 2)
+MarkChRow:
+    ld b, a
+    ld a, 4
 .shift:
     inc b
     dec b
@@ -624,14 +680,24 @@ MarkChainRow:
     ld [hl], a
     ret
 
-; c = +1 / $FF: the pattern number of the step under the cursor. The valid values are
-; 0..NUM_PATS-1 and (not on step 0, a song needs one step) CHAIN_END; they go round.
+; c = +1 / $FF: the pattern number of the cell under the cursor (channel wSongCh, step wSongCur). The valid values are
+; 0..NUM_PATS-1 and CHAIN_END (not on CH1's step 0: a song needs one step); they go round.
 StepValue:
+    ld a, [wSongCh]
+    swap a
+    add a                   ; channel * 32
+    ld e, a
     ld a, [wSongCur]
+    add e
     ld e, a
     ld d, 0
     ld hl, wChain
     add hl, de
+    ld a, [wSongCh]
+    ld b, a
+    ld a, [wSongCur]
+    or b
+    ld b, a                 ; b = 0 only on CH1's step 0
     ld a, [hl]
     bit 7, c
     jr nz, .back
@@ -640,9 +706,9 @@ StepValue:
     inc a
     cp NUM_PATS
     jr c, .store            ; still a pattern
-    ld a, [wSongCur]
+    ld a, b
     and a
-    ld a, 0                 ; step 0 cannot be the end
+    ld a, 0                 ; CH1's step 0 cannot be the end
     jr z, .store
     ld a, CHAIN_END
     jr .store
@@ -657,7 +723,7 @@ StepValue:
     dec a
     jr .store
 .wrap:
-    ld a, [wSongCur]
+    ld a, b
     and a
     ld a, NUM_PATS - 1
     jr z, .store
@@ -666,16 +732,9 @@ StepValue:
 .toLast:
     ld a, NUM_PATS - 1
 .store:
-    ld [hl], a              ; (the pad edits all four channels of the step alike: the song screen shows CH1)
-    ld de, CHAIN_LEN
-    add hl, de
     ld [hl], a
-    add hl, de
-    ld [hl], a
-    add hl, de
-    ld [hl], a
-    ld a, [wSongCur]
-    jr MarkChainRow
+    ld a, [wSongCh]
+    jr MarkChRow
 
 sSongTitle:  db "SONG CHAIN", 0
 sSongMem:    db "MEM", 0
@@ -687,7 +746,7 @@ sSongChain:  db "ORDER STEP:PATTERN", 0
 sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0
 sSong:       db "SONG", 0
-sSongHelp1:  db "PAD:MOVE  A/B:STEP", 0
+sSongHelp1:  db "PAD:MOVE A/B:PATTERN", 0
 sSongHelp2:  db "SEL+LR:EDIT PATTERN", 0
 sSongHelp3:  db "SEL+UD:LOOP/SONG", 0
 sSongHelp4:  db "ST+DOWN:BACK", 0
