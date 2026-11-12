@@ -359,18 +359,32 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "up")          # song mode (restarts the song, silences)
     check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0 and v("wPlayBank") == HI, (v("wChainPos"), v("wPlayBank")))
     pb.tick(10)
-    hdr = lambda: bytes(mem[0x9800 + 6 * 32 + i] for i in range(20))
-    check("step 1 is marked in the header: '*1'", hdr()[2:4] == tiles("*1") and hdr()[4:6] == tiles(" 2"), hdr())
+    mark = lambda: bytes(mem[0x9800 + 11 * 32 + i] for i in range(20))
+    for ch in "^<>":
+        tile = [mem[0x8000 + (ord(ch) - 32) * 16 + i] for i in range(16)]
+        check(f"the font has a glyph for '{ch}' (the marks must be visible, not just in the map)", any(tile), tile)
+    caret = ord("^") - 32
+    check("step 1 is marked under the grid: '^' under its pattern", mark()[3] == caret and mark()[5] == 0, mark())
     pb.tick(80)                        # the second pattern now (a bar is 120 frames at 120 BPM: wait for it)
     for _ in range(60):
         pb.tick(4)
         if v("wChainPos") == 1:
             break
     pb.tick(15)
-    check("step 2 is marked '*2' and step 1 lost its mark", hdr()[2:6] == tiles(" 1*2"), hdr())
+    check("step 2 is marked and step 1 lost its mark", mark()[3] == 0 and mark()[5] == caret, mark())
+    check("... no side arrow while the playing page is the shown one", mark()[18] == 0, mark())
+    tap(pb, "up")  # (nothing: the cursor is on CH1)
+    for _ in range(8):
+        tap(pb, "right")
+    pb.tick(20)
+    check("the cursor on page 2 while step 2 plays: '<' at the right end, no '^'", mark()[18] == ord("<") - 32 and caret not in mark()[2:18], mark())
+    for _ in range(8):
+        tap(pb, "left")
+    pb.tick(20)
+    check("back on page 1: the '^' is back, the arrow gone", mark()[5] == caret and mark()[18] == 0, mark())
     combo(pb, "select", "start")
     pb.tick(15)
-    check("stopped: the mark is gone", hdr()[2:6] == tiles(" 1 2"), hdr())
+    check("stopped: the mark is gone", caret not in mark(), mark())
     pb.stop(save=False)
 
 
