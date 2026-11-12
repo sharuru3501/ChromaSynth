@@ -345,9 +345,6 @@ BuildSong:
     ld hl, ROW_SONG_INFO + 32 + 9
     ld de, sSongEditNote
     call DrawString
-    ld hl, _SCRN0 + 5 * 32
-    ld de, sSongChain
-    call DrawString
     ld hl, _SCRN0 + 13 * 32
     ld de, sSongHelp1
     call DrawString
@@ -458,9 +455,8 @@ UpdateSong:
     and -PAGE_STEPS
     ld c, a                 ; c = the page's first step
     ld hl, ROW_SONG_HDR
-    xor a
-    ld [hl+], a
-    ld [hl+], a
+    ld de, sSongStepLbl     ; "ST" over the channel names: the numbers on this row are the steps
+    call DrawString
     ld b, PAGE_STEPS
 .hcell:
     xor a
@@ -788,7 +784,7 @@ sSongPlay:   db "PLAY", 0
 sSongNext:   db "NEXT", 0
 sSongPlayAt: db "PAGE  STEP", 0
 sSongPage:   db "PAGE  /4", 0
-sSongChain:  db "ORDER STEP:PATTERN", 0
+sSongStepLbl: db "ST", 0
 sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0
 sSong:       db "SONG", 0
