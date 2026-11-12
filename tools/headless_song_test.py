@@ -449,5 +449,34 @@ with tempfile.TemporaryDirectory() as tmp:
     check("reboot: the chain comes from the slot", got == [list(r) + [0xFF] * (CHAIN_LEN - len(r)) for r in rows], got)
     pb.stop(save=False)
 
+# --- the sequencer clock is steady while the play and edit screens are shown: the piano roll is not drawn for a screen that does not show it
+# (a pass of the main loop that takes more than one frame makes the ticks late; the roll used to cost 2-3 frames a pass there)
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    pool = Pool(mem, sym)
+    for p_ in range(16):
+        pool.clear_pattern(p_)
+    for t in range(0, 384, 6):
+        pool.put(0, 0, t // 192, t % 192, 60 + 2 * ((t // 6) % 2))
+    mem[sym["wSeqBars"]] = 8
+    mem[sym["wPatBars"]] = 8
+    mem[sym["wBpm"]] = 120
+    frames = []
+    pb.hook_register(0, sym["SeqTick"], lambda ctx: frames.append(mem[sym["wFrames"]]), None)
+    for screen_name, presses in (("play", 0), ("edit", 1)):
+        for _ in range(presses):
+            combo(pb, "start", "right", settle=30)
+        combo(pb, "select", "start", hold=8)
+        check(f"{screen_name} screen: the sequencer runs", v("wSeqPlay") == 1)
+        frames.clear()
+        pb.tick(700)                      # about 8 bars: the playhead crosses several pages
+        check(f"{screen_name} screen: every main-loop pass takes one frame while playing (%d passes)" % len(frames), len(frames) > 600 and max(frames) == 1, (len(frames), sorted(set(frames))))
+        combo(pb, "select", "start", hold=8)
+    pb.stop(save=False)
+
 print("\nALL PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)
