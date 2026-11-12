@@ -373,19 +373,27 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(15)
     check("step 2 is marked and step 1 lost its mark", mark()[3] == 0 and mark()[5] == caret, mark())
     play = lambda: bytes(mem[0x9800 + 4 * 32 + i] for i in range(20))
-    check("the PLAY row names the step: 'STEP 02'", play()[9:16] == tiles("STEP 02"), play())
+    check("the PLAY row names the playing step: PAGE1 STEP2", play()[9:20] == tiles("PAGE1 STEP2"), play())
     tap(pb, "up")  # (nothing: the cursor is on CH1)
     for _ in range(8):
         tap(pb, "right")
     pb.tick(20)
-    check("the cursor on page 2 while step 2 plays: no '^' (it is on page 1), the PLAY row still says step 2", caret not in mark()[2:18] and play()[9:16] == tiles("STEP 02"), (mark(), play()))
+    check("the cursor on page 2 while step 2 plays: no '^' (it is on page 1), the PLAY row still says step 2", caret not in mark()[2:18] and play()[9:20] == tiles("PAGE1 STEP2"), (mark(), play()))
     for _ in range(8):
         tap(pb, "left")
     pb.tick(20)
     check("back on page 1: the '^' is back", mark()[5] == caret, mark())
+    saved = (mem[sym["wChainPos"]], mem[sym["wDirtySong"]])
+    mem[sym["wChainPos"]] = 11         # (the redraw reads the chain position: step 12 = page 2, place 4)
+    mem[sym["wDirtySong"]] |= 1
+    pb.tick(3)
+    check("the PLAY row says PAGE2 STEP4 for chain step 12", play()[9:20] == tiles("PAGE2 STEP4"), play())
+    mem[sym["wChainPos"]] = saved[0]
+    mem[sym["wDirtySong"]] |= 1
+    pb.tick(3)
     combo(pb, "select", "start")
     pb.tick(15)
-    check("stopped: the mark and the STEP text are gone", caret not in mark() and play()[9:13] != tiles("STEP"), (mark(), play()))
+    check("stopped: the mark and the STEP text are gone", caret not in mark() and play()[9:13] != tiles("PAGE"), (mark(), play()))
     pb.stop(save=False)
 
 

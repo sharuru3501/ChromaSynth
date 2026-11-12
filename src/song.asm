@@ -8,7 +8,7 @@
 ;
 ; Song screen (START+UP opens it, START+DOWN goes back):
 ;   row 6: the places 1-8 of the page's steps; row 11: '^' under the step that plays (song mode, when it is on the shown page);
-;   row 12: PAGE n/4; the PLAY row says "STEP nn" for the step that plays (P = pattern, STEP = place in the chain, PAGE = screen page); rows 7-10: CH1..CH4, each "[cursor][pattern]"
+;   row 12: PAGE n/4; the PLAY row says "PAGEn STEPn" (the page and the place of the step that plays; P = pattern); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
@@ -556,13 +556,25 @@ UpdateSong:
     ld a, [wSeqPlay]
     and a
     jr z, .queued
-    ld hl, ROW_SONG_INFO + 64 + 9   ; song mode, playing: "STEP nn" (the chain decides what is next)
-    ld de, sSongStep
+    ld hl, ROW_SONG_INFO + 64 + 9   ; song mode, playing: "PAGEn STEPn" (the place of the playing step, as the grid shows it)
+    ld de, sSongPlayAt
     call DrawString
-    ld hl, ROW_SONG_INFO + 64 + 13
     ld a, [wChainPos]
+    rrca
+    rrca
+    rrca
+    and 3
     inc a
-    jp DrawDec3
+    add '0' - 32
+    ld hl, ROW_SONG_INFO + 64 + 13
+    ld [hl], a
+    ld a, [wChainPos]
+    and PAGE_STEPS - 1
+    inc a
+    add '0' - 32
+    ld hl, ROW_SONG_INFO + 64 + 19
+    ld [hl], a
+    ret
 .queued:
     ld a, [wQueuedBank]
     and a
@@ -774,7 +786,7 @@ sSongMode:   db "MODE", 0
 sSongEdit:   db "EDIT", 0
 sSongPlay:   db "PLAY", 0
 sSongNext:   db "NEXT", 0
-sSongStep:   db "STEP", 0
+sSongPlayAt: db "PAGE  STEP", 0
 sSongPage:   db "PAGE  /4", 0
 sSongChain:  db "ORDER STEP:PATTERN", 0
 sSongEditNote: db "IN SEQ", 0
