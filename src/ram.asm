@@ -182,6 +182,12 @@ wChainPos:      db          ; chain step being played
 wSongWrap:      db          ; 1 = the chain just moved on: release the notes before the next pattern's first tick
 wChain:         ds CHAIN_BYTES ; per channel CHAIN_LEN pattern numbers (wChain + channel * CHAIN_LEN + step), CHAIN_END after the last step of CH1
 wPlayPat:       ds NUM_CH   ; song mode: the pattern (0-based) each channel plays in the chain step that is playing (>= NUM_PATS: silent)
+wChPos:         ds 2 * NUM_CH ; song mode: the tick each channel plays next, inside its own pattern (16 bits each)
+wChLen:         ds 2 * NUM_CH ; song mode: the length in ticks of each channel's pattern in the playing step (16 bits, 0 = silent)
+wStepLen:       ds 2        ; song mode: the playing step's length in ticks (the longest pattern in it, at most 384)
+wStepBarTicks:  db          ; song mode: ticks in a bar of the playing step (its first pattern's time signature)
+wChSeg:         db          ; SeqStep scratch: the segment / tick the channel being played reads
+wChTick:        db
 wSongCur:       db          ; song screen: the cursor's chain step
 wSongCh:        db          ; song screen: the cursor's channel
 wSongCurDraw:   db          ; song screen: the chain offset (channel * CHAIN_LEN + step) of the cursor while its row is drawn, $FF elsewhere
