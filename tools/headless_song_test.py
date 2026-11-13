@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     check("the CH1 row shows 'C1', the cursor on step 1 and the end mark after it", row_text(7)[:4] == tiles("C1>1") and cell(0, 1) == (0, ord("-") - 32), row_text(7))
     check("CH2 shows 'C2' and its own pattern 1 without the cursor", row_text(8)[:4] == tiles("C2 1"), row_text(8))
-    check("the header numbers the steps 1-8 and shows page 1", row_text(6, 20)[2:18] == b"".join(bytes([0, ord(str(n)) - 32]) for n in range(1, 9)) and row_text(12, 20)[12:20] == tiles("PAGE 1/4"), row_text(12, 20))
+    check("the header numbers the steps 1-8 and shows page 1", row_text(6, 20)[2:18] == b"".join(bytes([0, ord(str(n)) - 32]) for n in range(1, 9)) and row_text(11, 20)[12:20] == tiles("PAGE 1/4"), row_text(11, 20))
     check("the mode row shows LOOP, the edit row P1", row_text(2)[6:10] == tiles("LOOP") and row_text(3)[6:8] == tiles("P1"), (row_text(2), row_text(3)))
 
     # --- steps: A / B edit the cell of the cursor's channel only
@@ -164,18 +164,18 @@ with tempfile.TemporaryDirectory() as tmp:
         tap(pb, "right")
     check("the cursor reaches step 8 (the end of page 1)", v("wSongCur") == 7, v("wSongCur"))
     pb.tick(20)
-    check("... still page 1", row_text(12, 20)[12:20] == tiles("PAGE 1/4"), row_text(12, 20))
+    check("... still page 1", row_text(11, 20)[12:20] == tiles("PAGE 1/4"), row_text(11, 20))
     tap(pb, "right")
     pb.tick(30)
     hdr = row_text(6, 20)
-    check("RIGHT onto step 9: page 2, the header starts over at 1 and shows page 2", v("wSongCur") == 8 and row_text(12, 20)[12:20] == tiles("PAGE 2/4") and bytes(hdr[3 + 2 * i] for i in range(8)) == tiles("12345678"), hdr)
+    check("RIGHT onto step 9: page 2, the header starts over at 1 and shows page 2", v("wSongCur") == 8 and row_text(11, 20)[12:20] == tiles("PAGE 2/4") and bytes(hdr[3 + 2 * i] for i in range(8)) == tiles("12345678"), hdr)
     check("... and the cursor shows in the first cell of the CH1 row", cell(0, 0)[0] == ord(">") - 32, row_text(7, 20))
     for _ in range(40):
         tap(pb, "right")
-    check("RIGHT stops at step 32 (page 4)", v("wSongCur") == 31 and row_text(12, 20)[12:20] == tiles("PAGE 4/4"), (v("wSongCur"), row_text(12, 20)))
+    check("RIGHT stops at step 32 (page 4)", v("wSongCur") == 31 and row_text(11, 20)[12:20] == tiles("PAGE 4/4"), (v("wSongCur"), row_text(11, 20)))
     for _ in range(40):
         tap(pb, "left", 3)
-    check("LEFT stops at step 1 (page 1)", v("wSongCur") == 0 and row_text(12, 20)[12:20] == tiles("PAGE 1/4"), (v("wSongCur"), row_text(12, 20)))
+    check("LEFT stops at step 1 (page 1)", v("wSongCur") == 0 and row_text(11, 20)[12:20] == tiles("PAGE 1/4"), (v("wSongCur"), row_text(11, 20)))
     mem[CHAIN + CHAIN_LEN] = 0
     tap(pb, "right")
     mem[CHAIN + 1] = 0xFF
@@ -359,19 +359,19 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "up")          # song mode (restarts the song, silences)
     check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0 and v("wPlayBank") == HI, (v("wChainPos"), v("wPlayBank")))
     pb.tick(10)
-    mark = lambda: bytes(mem[0x9800 + 11 * 32 + i] for i in range(20))
+    mark = lambda: bytes(mem[0x9800 + 6 * 32 + i] for i in range(20))
     for ch in "^<>":
         tile = [mem[0x8000 + (ord(ch) - 32) * 16 + i] for i in range(16)]
         check(f"the font has a glyph for '{ch}' (the marks must be visible, not just in the map)", any(tile), tile)
     caret = ord("^") - 32
-    check("step 1 is marked under the grid: '^' under its pattern", mark()[3] == caret and mark()[5] == 0, mark())
+    check("step 1 is marked in the header: the triangle before its number", mark()[2] == caret and mark()[4] == 0 and mark()[3] == ord("1") - 32, mark())
     pb.tick(80)                        # the second pattern now (a bar is 120 frames at 120 BPM: wait for it)
     for _ in range(60):
         pb.tick(4)
         if v("wChainPos") == 1:
             break
     pb.tick(15)
-    check("step 2 is marked and step 1 lost its mark", mark()[3] == 0 and mark()[5] == caret, mark())
+    check("step 2 is marked and step 1 lost its mark", mark()[2] == 0 and mark()[4] == caret, mark())
     play = lambda: bytes(mem[0x9800 + 4 * 32 + i] for i in range(20))
     check("the PLAY row names the playing step: PAGE1 STEP2", play()[9:20] == tiles("PAGE1 STEP2"), play())
     tap(pb, "up")  # (nothing: the cursor is on CH1)
@@ -382,7 +382,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(8):
         tap(pb, "left")
     pb.tick(20)
-    check("back on page 1: the '^' is back", mark()[5] == caret, mark())
+    check("back on page 1: the triangle is back", mark()[4] == caret, mark())
     saved = (mem[sym["wChainPos"]], mem[sym["wDirtySong"]])
     mem[sym["wChainPos"]] = 11         # (the redraw reads the chain position: step 12 = page 2, place 4)
     mem[sym["wDirtySong"]] |= 1

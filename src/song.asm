@@ -7,8 +7,8 @@
 ; The code lives in ROM bank 1 (nothing switches it; the MBC5 boots with bank 1 at $4000).
 ;
 ; Song screen (START+UP opens it, START+DOWN goes back):
-;   row 6: the places 1-8 of the page's steps; row 11: '^' under the step that plays (song mode, when it is on the shown page);
-;   row 12: PAGE n/4; the PLAY row says "PAGEn STEPn" (the page and the place of the step that plays; P = pattern); rows 7-10: CH1..CH4, each "[cursor][pattern]"
+;   row 6: the places 1-8 of the page's steps, with a triangle before the one that plays (song mode, when it is on the shown page);
+;   row 11: PAGE n/4 (right end, right under the grid); the PLAY row says "PAGEn STEPn" (the page and the place of the step that plays; P = pattern); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
@@ -18,8 +18,7 @@ INCLUDE "synth.inc"
 DEF ROW_SONG_INFO  EQU _SCRN0 + 2 * 32
 DEF ROW_SONG_HDR   EQU _SCRN0 + 6 * 32
 DEF ROW_SONG_GRID  EQU _SCRN0 + 7 * 32
-DEF ROW_SONG_MARK  EQU _SCRN0 + 11 * 32
-DEF ROW_SONG_PAGE  EQU _SCRN0 + 12 * 32
+DEF ROW_SONG_PAGE  EQU _SCRN0 + 11 * 32
 DEF PAGE_STEPS     EQU 8        ; steps on a screen page (a page = one row of the grid per channel)
 
 SECTION "Song", ROMX, BANK[1]
@@ -99,7 +98,7 @@ SongRestart:
 ; Redraw the marker row of the song screen (the '^' under the step that is playing).
 SongMarkPos:
     ld a, [wDirtySong]
-    or %01000001            ; the marker row and the PLAY row (it names the step)
+    or %00000011            ; the header (the triangle before the playing step) and the PLAY row (it names the step)
     ld [wDirtySong], a
     ret
 
@@ -395,7 +394,7 @@ UpdateSong:
     cp 1
     jr z, .header
     cp 6
-    jp z, .marker
+    ret z                   ; (bit 6 is unused)
     sub 2                   ; channel row 0..3
     ld b, a
     swap a
@@ -453,7 +452,7 @@ UpdateSong:
     dec b
     jr nz, .cell
     ret
-.header:                    ; "  " then per step " n" (n = place in the page, 1-8); the page text goes to row 12
+.header:                    ; "  " then per step "[^]n" (n = place in the page, 1-8); the page text goes to row 11
     ld a, [wSongCur]
     and -PAGE_STEPS
     ld c, a                 ; c = the page's first step
@@ -463,7 +462,11 @@ UpdateSong:
     ld [hl+], a
     ld b, PAGE_STEPS
 .hcell:
-    xor a
+    call StepPlaying
+    ld a, 0
+    jr nc, .hsep
+    ld a, '^' - 32          ; (drawn as a small triangle pointing down at the step)
+.hsep:
     ld [hl+], a
     ld a, c
     and PAGE_STEPS - 1
@@ -485,28 +488,6 @@ UpdateSong:
     add '0' - 32
     ld hl, ROW_SONG_PAGE + 17
     ld [hl], a
-    ret
-.marker:                    ; blank, then per step " ^" under the one that plays (nothing when it is on another page)
-    ld a, [wSongCur]
-    and -PAGE_STEPS
-    ld c, a                 ; c = the page's first step
-    ld hl, ROW_SONG_MARK
-    xor a
-    ld [hl+], a
-    ld [hl+], a
-    ld b, PAGE_STEPS
-.mcell:
-    xor a
-    ld [hl+], a
-    call StepPlaying
-    ld a, 0
-    jr nc, .mdraw
-    ld a, '^' - 32
-.mdraw:
-    ld [hl+], a
-    inc c
-    dec b
-    jr nz, .mcell
     ret
 .mem:                       ; MEM nnn%: how much of the pattern memory is used (a row of its own: one row a frame fits VBlank)
     ld hl, _SCRN0 + 32 + 4
@@ -703,11 +684,11 @@ SongInput:
     jr MarkChRow
 .allRows:
     ld a, [wDirtySong]
-    or %01111110            ; the header, the four channel rows and the marker row
+    or %00111110            ; the header and the four channel rows
     ld [wDirtySong], a
     ret
 
-; a = channel -> flag its row of the grid for redraw (bit 0 = info rows, 1 = header, channel c = bit c + 2, 6 = marker row)
+; a = channel -> flag its row of the grid for redraw (bit 0 = info rows, 1 = header, channel c = bit c + 2)
 MarkChRow:
     ld b, a
     ld a, 4
