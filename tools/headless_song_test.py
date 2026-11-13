@@ -106,20 +106,27 @@ with tempfile.TemporaryDirectory() as tmp:
         return bytes(mem[0x9800 + r * 32 + i] for i in range(n))
 
     tiles = lambda s: bytes(ord(c) - 32 for c in s)
-    check("the first chain row shows '>1' and '--' for the end", row_text(6)[:6] == tiles(">1 ") + tiles(" - ")[:3] or row_text(6)[:2] == tiles(">1"), row_text(6))
+    def cell(c, i):
+        """(cursor mark, pattern tile) of CH(c+1) in the page's cell i."""
+        r = row_text(7 + c, 20)
+        return r[2 + 2 * i], r[3 + 2 * i]
+
+    check("the CH1 row shows 'C1', the cursor on step 1 and the end mark after it", row_text(7)[:4] == tiles("C1>1") and cell(0, 1) == (0, ord("-") - 32), row_text(7))
+    check("CH2 shows 'C2' and its own pattern 1 without the cursor", row_text(8)[:4] == tiles("C2 1"), row_text(8))
+    check("the header numbers the steps 1-8 and shows page 1", row_text(6, 20)[2:18] == b"".join(bytes([0, ord(str(n)) - 32]) for n in range(1, 9)) and row_text(12, 20)[12:20] == tiles("PAGE 1/4"), row_text(12, 20))
     check("the mode row shows LOOP, the edit row P1", row_text(2)[6:10] == tiles("LOOP") and row_text(3)[6:8] == tiles("P1"), (row_text(2), row_text(3)))
 
-    # --- steps: A / B on the chain
-    check("the cursor starts on step 1", v("wSongCur") == 0)
+    # --- steps: A / B edit the cell of the cursor's channel only
+    check("the cursor starts on step 1, channel 1", v("wSongCur") == 0 and v("wSongCh") == 0)
     tap(pb, "b")
-    check("B on step 1: wraps to the last pattern (a song needs one step)", mem[CHAIN] == 15, mem[CHAIN])
+    check("B on CH1 step 1: wraps to the last pattern (a song needs one step)", mem[CHAIN] == 15, mem[CHAIN])
+    check("... and the other channels did not change", all(mem[CHAIN + c * CHAIN_LEN] == 0 for c in range(1, 4)), [mem[CHAIN + c * CHAIN_LEN] for c in range(4)])
     tap(pb, "a")
     check("A on the last pattern of step 1: back to pattern 1", mem[CHAIN] == 0, mem[CHAIN])
     tap(pb, "right")
     check("RIGHT moves the cursor", v("wSongCur") == 1)
     tap(pb, "a")
-    check("A on the end: pattern 1", mem[CHAIN + 1] == 0, mem[CHAIN + 1])
-    check("... all four channels of the step got it", all(mem[CHAIN + c * CHAIN_LEN + 1] == 0 for c in range(4)), [mem[CHAIN + c * CHAIN_LEN + 1] for c in range(4)])
+    check("A on the end: pattern 1 (CH1 only)", mem[CHAIN + 1] == 0 and all(mem[CHAIN + c * CHAIN_LEN + 1] == 0xFF for c in range(1, 4)), [mem[CHAIN + c * CHAIN_LEN + 1] for c in range(4)])
     for want in list(range(1, 16)) + [0xFF, 0]:
         tap(pb, "a")
         check(f"A steps the pattern to {want}", mem[CHAIN + 1] == want, mem[CHAIN + 1])
@@ -129,27 +136,75 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "b")
     check("B on the end gives the last pattern", mem[CHAIN + 1] == 15, mem[CHAIN + 1])
     pb.tick(20)
-    check("the chain row shows step 2 as pattern 16, written G (and the cursor)", row_text(6)[3:6] == tiles(">G "), row_text(6))
+    check("the CH1 row shows step 2 as pattern 16, written G", cell(0, 1)[1] == ord("G") - 32, row_text(7, 20))
     tap(pb, "left")
     pb.tick(20)
-    check("the cursor mark moved back to step 1", row_text(6)[:3] == tiles(">1 ") and row_text(6)[3:6] == tiles(" G "), row_text(6))
-    tap(pb, "right")
-    for _ in range(8):
-        tap(pb, "right")
-    check("the cursor reaches step 10 (row 2 of the chain)", v("wSongCur") == 9, v("wSongCur"))
-    tap(pb, "up")
-    check("UP moves a whole row (6 steps)", v("wSongCur") == 3, v("wSongCur"))
-    for _ in range(20):
+    check("the cursor mark moved back to step 1", cell(0, 0) == (ord(">") - 32, ord("1") - 32) and cell(0, 1) == (0, ord("G") - 32), row_text(7, 20))
+
+    # --- the other channels: DOWN / UP, and they may be the end (silence) on any step, even step 1
+    tap(pb, "down")
+    check("DOWN moves to CH2", v("wSongCh") == 1 and v("wSongCur") == 0, (v("wSongCh"), v("wSongCur")))
+    pb.tick(20)
+    check("the cursor mark is on the CH2 row now and left the CH1 row", cell(1, 0)[0] == ord(">") - 32 and cell(0, 0)[0] == 0, (row_text(7, 20), row_text(8, 20)))
+    tap(pb, "b")
+    check("B on CH2 step 1 gives the end (only CH1 needs a step 1)", mem[CHAIN + CHAIN_LEN] == 0xFF, mem[CHAIN + CHAIN_LEN])
+    tap(pb, "b")
+    check("B on the end gives the last pattern", mem[CHAIN + CHAIN_LEN] == 15, mem[CHAIN + CHAIN_LEN])
+    tap(pb, "a")
+    tap(pb, "a")
+    check("A wraps the last pattern -> end -> pattern 1 (CH2 may be the end on step 1)", mem[CHAIN + CHAIN_LEN] == 0, mem[CHAIN + CHAIN_LEN])
+    check("... CH1 step 1 is untouched", mem[CHAIN] == 0)
+    for _ in range(5):
         tap(pb, "down")
-    check("DOWN stops inside the 32 steps", v("wSongCur") <= 31 and v("wSongCur") >= 25, v("wSongCur"))
+    check("DOWN stops at CH4", v("wSongCh") == 3, v("wSongCh"))
+    for _ in range(5):
+        tap(pb, "up")
+    check("UP stops at CH1", v("wSongCh") == 0, v("wSongCh"))
+    for _ in range(7):
+        tap(pb, "right")
+    check("the cursor reaches step 8 (the end of page 1)", v("wSongCur") == 7, v("wSongCur"))
+    pb.tick(20)
+    check("... still page 1", row_text(12, 20)[12:20] == tiles("PAGE 1/4"), row_text(12, 20))
+    tap(pb, "right")
+    pb.tick(30)
+    hdr = row_text(6, 20)
+    check("RIGHT onto step 9: page 2, the header starts over at 1 and shows page 2", v("wSongCur") == 8 and row_text(12, 20)[12:20] == tiles("PAGE 2/4") and bytes(hdr[3 + 2 * i] for i in range(8)) == tiles("12345678"), hdr)
+    check("... and the cursor shows in the first cell of the CH1 row", cell(0, 0)[0] == ord(">") - 32, row_text(7, 20))
     for _ in range(40):
         tap(pb, "right")
-    check("RIGHT stops at step 32", v("wSongCur") == 31, v("wSongCur"))
+    check("RIGHT stops at step 32 (page 4)", v("wSongCur") == 31 and row_text(12, 20)[12:20] == tiles("PAGE 4/4"), (v("wSongCur"), row_text(12, 20)))
     for _ in range(40):
         tap(pb, "left", 3)
-    check("LEFT stops at step 1", v("wSongCur") == 0, v("wSongCur"))
+    check("LEFT stops at step 1 (page 1)", v("wSongCur") == 0 and row_text(12, 20)[12:20] == tiles("PAGE 1/4"), (v("wSongCur"), row_text(12, 20)))
+    mem[CHAIN + CHAIN_LEN] = 0
     tap(pb, "right")
     mem[CHAIN + 1] = 0xFF
+
+    # --- a held A / B repeats (the d-pad does already); with SELECT held it does not
+    tap(pb, "left")
+    check("the cursor is on CH1 step 1, pattern 1", v("wSongCur") == 0 and v("wSongCh") == 0 and mem[CHAIN] == 0)
+    pb.button_press("a")
+    pb.tick(40)
+    held = mem[CHAIN]
+    check("holding A steps the pattern on (more than the one press)", 4 <= held <= 9, held)
+    pb.tick(30)
+    check("... and goes on while it stays held", mem[CHAIN] != held, (held, mem[CHAIN]))
+    pb.button_release("a")
+    pb.tick(10)
+    stopped = mem[CHAIN]
+    pb.tick(30)
+    check("... and stops when A is released", mem[CHAIN] == stopped, (stopped, mem[CHAIN]))
+    mem[CHAIN] = 0
+    pb.button_press("select")
+    pb.tick(3)
+    pb.button_press("b")
+    pb.tick(40)
+    pb.button_release("b")
+    pb.tick(2)
+    pb.button_release("select")
+    pb.tick(6)
+    check("SELECT+B held on the song screen does not change the pattern (and the save runs once, not repeatedly)", mem[CHAIN] == 0, mem[CHAIN])
+    tap(pb, "right")
 
     # --- edit pattern and mode
     combo(pb, "select", "right")
@@ -304,22 +359,41 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "up")          # song mode (restarts the song, silences)
     check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0 and v("wPlayBank") == HI, (v("wChainPos"), v("wPlayBank")))
     pb.tick(10)
-    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
-    pb.tick(10)
-    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
-    check("step 1 shows the cursor and the end mark of the playing step: '>1]'", row[:3] == tiles(">1]"), row)
+    mark = lambda: bytes(mem[0x9800 + 11 * 32 + i] for i in range(20))
+    for ch in "^>":
+        tile = [mem[0x8000 + (ord(ch) - 32) * 16 + i] for i in range(16)]
+        check(f"the font has a glyph for '{ch}' (the marks must be visible, not just in the map)", any(tile), tile)
+    caret = ord("^") - 32
+    check("step 1 is marked under the grid: '^' under its pattern", mark()[3] == caret and mark()[5] == 0, mark())
     pb.tick(80)                        # the second pattern now (a bar is 120 frames at 120 BPM: wait for it)
     for _ in range(60):
         pb.tick(4)
         if v("wChainPos") == 1:
             break
     pb.tick(15)
-    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
-    check("step 2 is marked '[2]' and step 1 lost its marks", row[:6] == tiles(">1 ") + tiles("[2]"), row)
+    check("step 2 is marked and step 1 lost its mark", mark()[3] == 0 and mark()[5] == caret, mark())
+    play = lambda: bytes(mem[0x9800 + 4 * 32 + i] for i in range(20))
+    check("the PLAY row names the playing step: PAGE1 STEP2", play()[9:20] == tiles("PAGE1 STEP2"), play())
+    tap(pb, "up")  # (nothing: the cursor is on CH1)
+    for _ in range(8):
+        tap(pb, "right")
+    pb.tick(20)
+    check("the cursor on page 2 while step 2 plays: no '^' (it is on page 1), the PLAY row still says step 2", caret not in mark()[2:18] and play()[9:20] == tiles("PAGE1 STEP2"), (mark(), play()))
+    for _ in range(8):
+        tap(pb, "left")
+    pb.tick(20)
+    check("back on page 1: the '^' is back", mark()[5] == caret, mark())
+    saved = (mem[sym["wChainPos"]], mem[sym["wDirtySong"]])
+    mem[sym["wChainPos"]] = 11         # (the redraw reads the chain position: step 12 = page 2, place 4)
+    mem[sym["wDirtySong"]] |= 1
+    pb.tick(3)
+    check("the PLAY row says PAGE2 STEP4 for chain step 12", play()[9:20] == tiles("PAGE2 STEP4"), play())
+    mem[sym["wChainPos"]] = saved[0]
+    mem[sym["wDirtySong"]] |= 1
+    pb.tick(3)
     combo(pb, "select", "start")
     pb.tick(15)
-    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(9))
-    check("stopped: the marks are gone", row[3:6] == tiles(" 2 "), row)
+    check("stopped: the mark and the STEP text are gone", caret not in mark() and play()[9:13] != tiles("PAGE"), (mark(), play()))
     pb.stop(save=False)
 
 
