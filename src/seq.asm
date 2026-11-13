@@ -196,21 +196,28 @@ SeqStep:
     ld a, [hl]
     cp NUM_PATS
     jr nc, .next            ; a channel with no pattern in this step: silent
+    push af
+    call ChSegTick          ; this channel's own place in its pattern -> wChSeg / wChTick
+    pop af
     jr .pat
 .loopPat:
+    ld a, [wSeqCurSeg]
+    ld [wChSeg], a
+    ld a, [wSeqCur]
+    ld [wChTick], a
     ld a, [wPlayBank]
     dec a
 .pat:
     push bc                 ; the page of this channel in the pattern's half (PageLoc sets SVBK to its bank)
     ld b, c
     ld e, a
-    ld a, [wSeqCurSeg]
+    ld a, [wChSeg]
     ld c, a
     ld a, e
     call PageLoc
     pop bc
     ld h, a
-    ld a, [wSeqCur]
+    ld a, [wChTick]
     ld l, a
     ld a, [hl]
     and a
@@ -234,6 +241,9 @@ SeqStep:
     ld a, c
     cp NUM_CH
     jr c, .ch
+    ld a, [wSongMode]
+    and a
+    call nz, ChAdvance      ; song mode: every channel goes on inside its own pattern (a short one starts over)
     ld hl, wLoopSeg         ; where the loop ends (PlayInfo): (last segment, ticks in it)
     ld a, [wSeqTick]
     inc a
@@ -402,10 +412,138 @@ EditIndex:
     ld d, 0
     ret
 
+; c = channel -> wChSeg / wChTick: the segment and tick of that channel's own position (wChPos) in its pattern. Keeps bc.
+ChSegTick:
+    push bc
+    ld hl, wChPos
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl]
+    ld d, a                 ; de = the position, 0..383
+    xor a
+    ld [wChSeg], a
+    ld a, d
+    and a
+    jr nz, .second          ; 256 or more
+    ld a, e
+    cp SEQ_TICKS
+    jr c, .store            ; the first segment
+.second:
+    ld hl, -SEQ_TICKS
+    add hl, de
+    ld e, l
+    ld a, 1
+    ld [wChSeg], a
+.store:
+    ld a, e
+    ld [wChTick], a
+    pop bc
+    ret
+
+; Song mode, after the channels played a tick: every channel with a pattern moves on one tick inside its own pattern. At the
+; end of its pattern a channel starts over (a note that is still sounding is released first). Clobbers a, bc, de, hl.
+ChAdvance:
+    ld c, 0
+.each:
+    ld hl, wChLen
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl]
+    ld d, a                 ; de = the length (0: silent channel)
+    or e
+    jr z, .next
+    push de
+    ld hl, wChPos
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    ld a, [hl]
+    inc a
+    ld [hl+], a
+    ld e, a
+    jr nz, .noCarry
+    ld a, [hl]
+    inc a
+    ld [hl], a
+.noCarry:
+    ld a, [hl-]             ; hl = the low byte again; a = the high byte
+    ld d, a
+    ld a, [hl]
+    ld e, a                 ; de = the new position
+    pop hl                  ; hl = the length
+    ld a, d
+    cp h
+    jr c, .next             ; below the length
+    jr nz, .over
+    ld a, e
+    cp l
+    jr c, .next
+.over:
+    push bc                 ; the end of the pattern: back to the start, release the note
+    ld hl, wChPos
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    xor a
+    ld [hl+], a
+    ld [hl], a
+    call NoteOutOff
+    call NoteOff
+    pop bc
+.next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .each
+    ret
+
 ; Where the loop of the PLAYED pattern ends and its bar length -> wLoopSeg / wLoopTail, wPBarTicks.
 ; The played pattern is usually the edited one (its values are live: the MIDI block and wSeqBars);
 ; another one comes from its slot. Clobbers a, bc, de, hl.
 PlayInfo:
+    ld a, [wSongMode]
+    and a
+    jr z, .loopMode
+    ld a, [wStepBarTicks]   ; song mode: the step's own bar length and length (LoadStepPats)
+    ld [wPBarTicks], a
+    ld a, [wStepLen]
+    ld e, a
+    ld a, [wStepLen + 1]
+    ld d, a                 ; de = ticks, 1..384
+    and a
+    jr nz, .second
+    ld a, e
+    cp SEQ_TICKS + 1
+    jr c, .lastSeg          ; 192 or fewer: the first segment is the last
+.second:
+    ld hl, -SEQ_TICKS
+    add hl, de
+    ld e, l
+    ld d, 1
+    jr .set
+.lastSeg:
+    ld d, 0
+.set:
+    ld a, d
+    ld [wLoopSeg], a
+    ld a, e
+    ld [wLoopTail], a
+    ret
+.loopMode:
     ld a, [wPlayBank]
     ld hl, wEditBank
     cp [hl]

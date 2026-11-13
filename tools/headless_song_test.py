@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # --- steps: A / B edit the cell of the cursor's channel only
     check("the cursor starts on step 1, channel 1", v("wSongCur") == 0 and v("wSongCh") == 0)
     tap(pb, "b")
-    check("B on CH1 step 1: wraps to the last pattern (a song needs one step)", mem[CHAIN] == 15, mem[CHAIN])
+    check("B on CH1 step 1: the end (another channel still has a pattern on that step)", mem[CHAIN] == 0xFF, mem[CHAIN])
     check("... and the other channels did not change", all(mem[CHAIN + c * CHAIN_LEN] == 0 for c in range(1, 4)), [mem[CHAIN + c * CHAIN_LEN] for c in range(4)])
     tap(pb, "a")
     check("A on the last pattern of step 1: back to pattern 1", mem[CHAIN] == 0, mem[CHAIN])
@@ -396,6 +396,111 @@ with tempfile.TemporaryDirectory() as tmp:
     check("stopped: the mark and the STEP text are gone", caret not in mark() and play()[9:13] != tiles("PAGE"), (mark(), play()))
     pb.stop(save=False)
 
+
+# --- step length = the longest pattern in the step (a shorter one repeats), and the song ends where no channel has a pattern
+CELL_OFF = 0xFF
+
+
+def note_at(pool, p, ch, tick, note):
+    pool.put_abs(p, ch, tick, note)
+    pool.put_abs(p, ch, tick + 12, CELL_OFF)
+
+
+def start_song(rom_src, setup):
+    tmp = tempfile.TemporaryDirectory()
+    rom = pathlib.Path(tmp.name) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    pool = Pool(mem, sym)
+    for p_ in range(16):
+        pool.clear_pattern(p_)
+    mem[sym["wSeqBars"]] = 1                         # the edited pattern (1) has one bar ...
+    mem[sym["wPatBars"]] = 1
+    mem[sym["wPatBars"] + 1] = 2                     # ... pattern 2 has two
+    mem[sym["wBpm"]] = 240                           # a bar = 60 frames
+    setup(mem, pool)
+    mem[sym["wSongMode"]] = 1
+    combo(pb, "select", "start")
+    return tmp, pb, mem
+
+
+def sample(pb, mem, frames):
+    out = []
+    for _ in range(frames):
+        pb.tick(1)
+        out.append((mem[sym["wChainPos"]], mem[sym["wCurNote"]], mem[sym["wCurNote"] + 1]))
+    return out
+
+
+def edges(vals):
+    n, prev = 0, 0
+    for x in vals:
+        if x != 0 and prev == 0:
+            n += 1
+        prev = x
+    return n
+
+
+def setup_len(mem, pool):
+    note_at(pool, 0, 0, 0, 60)                        # pattern 1, CH1: C4 at the start of its one bar
+    note_at(pool, 1, 1, 0, 64)                        # pattern 2, CH2: E4 at the start of its two bars
+    set_chain(mem, [0, 0], [1], [], [])               # step 1: CH1 pattern 1 + CH2 pattern 2; step 2: CH1 pattern 1 alone
+
+
+tmp, pb, mem = start_song(rom_src, setup_len)
+smp = sample(pb, mem, 520)
+step0 = [s for s in smp[:200] if s[0] == 0]
+first1 = next(i for i, s in enumerate(smp) if s[0] == 1)
+dur0 = first1
+dur1 = next(i for i, s in enumerate(smp[first1:]) if s[0] != 1)
+check("step 1 lasts as long as its longest pattern (2 bars = about 120 frames)", 110 <= dur0 <= 130, dur0)
+check("step 2 lasts one bar (about 60 frames): CH2 has no pattern there", 50 <= dur1 <= 70, dur1)
+check("in step 1 the one-bar pattern of CH1 plays twice (it repeats), the two-bar one of CH2 once",
+      edges([s[1] for s in smp[:first1]]) == 2 and edges([s[2] for s in smp[:first1]]) == 1,
+      (edges([s[1] for s in smp[:first1]]), edges([s[2] for s in smp[:first1]])))
+runs = [smp[0][0]]
+for s_ in smp[1:]:
+    if s_[0] != runs[-1]:
+        runs.append(s_[0])
+check("the song ends after step 2 (no channel has a pattern on step 3): 1, 2, 1, 2 ...", runs[:5] == [0, 1, 0, 1, 0], runs)
+pb.stop(save=False)
+tmp.cleanup()
+
+
+def setup_end(mem, pool):
+    note_at(pool, 0, 0, 0, 60)                        # pattern 1, CH1
+    note_at(pool, 1, 1, 0, 64)                        # pattern 2, CH2
+    set_chain(mem, [0], [0xFF, 1], [], [])            # step 1: CH1 only; step 2: CH2 only (CH1 is the end there, the song goes on)
+
+
+tmp, pb, mem = start_song(rom_src, setup_end)
+smp = sample(pb, mem, 400)
+runs = [smp[0][0]]
+for s_ in smp[1:]:
+    if s_[0] != runs[-1]:
+        runs.append(s_[0])
+check("a step whose CH1 is the end plays on while another channel has a pattern: 1, 2, 1, 2", runs[:5] == [0, 1, 0, 1, 0], runs)
+in2 = [s for s in smp[:240] if s[0] == 1]
+check("... and in it CH2 sounds and CH1 is silent", any(s[2] == 64 for s in in2) and all(s[1] == 0 for s in in2[5:]), (len(in2), in2[:3]))
+pb.stop(save=False)
+tmp.cleanup()
+
+# --- the end is refused where it would leave step 1 with no pattern at all
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    set_chain(mem, [0], [], [], [])
+    combo(pb, "start", "up")                          # the song screen, the cursor on CH1 step 1
+    tap(pb, "b")
+    check("B on the only pattern of step 1: not the end (a song needs one step) but the last pattern", mem[CHAIN] == 15, mem[CHAIN])
+    mem[CHAIN] = 0
+    mem[CHAIN + CHAIN_LEN] = 0                       # CH2 has a pattern on step 1 too
+    tap(pb, "b")
+    check("... with another channel there, the end is offered", mem[CHAIN] == 0xFF, mem[CHAIN])
+    pb.stop(save=False)
 
 # --- a note that is still sounding at the end of a chain step does not carry into the next pattern
 with tempfile.TemporaryDirectory() as tmp:

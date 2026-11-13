@@ -47,8 +47,12 @@ ChainReset:
     ld [wEditPat], a
     jr LoadStepPats
 
-; a = chain step -> wPlayPat (the pattern of each channel in that step) and wPlayBank (CH1's pattern + 1: its length and
-; time signature are the step's; a step whose CH1 is not a pattern plays pattern 1). Clobbers a, bc, de, hl.
+; a = chain step -> wPlayPat (the pattern of each channel in that step), wPlayBank (the pattern + 1 of its first channel that
+; has one: it is "the" pattern of the step for the PLAY row and for the bar length), and the step's timing: wChLen (each
+; channel's pattern length in ticks, 0 = silent), wChPos (all back to the start), wStepLen (the longest of them: the step lasts
+; that long, a shorter pattern repeats inside it) and wStepBarTicks (the bar length of the first pattern: the time signature
+; of the step). Reads the patterns' lengths and time signatures from their slots (callers that play: TsStore first, so that the
+; edited pattern's live values are there). Clobbers a, bc, de, hl.
 LoadStepPats:
     ld e, a
     ld d, 0
@@ -66,13 +70,156 @@ LoadStepPats:
     pop de
     dec b
     jr nz, .ch
-    ld a, [wPlayPat]
-    cp NUM_PATS
-    jr c, .ok
     xor a
-.ok:
-    inc a                   ; pattern number -> its WRAM bank
+    ld [wStepLen], a
+    ld [wStepLen + 1], a
+    ld [wStepBarTicks], a
     ld [wPlayBank], a
+    ld c, 0                 ; c = channel
+.len:
+    ld hl, wChPos           ; every channel starts at the beginning of its pattern
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    xor a
+    ld [hl+], a
+    ld [hl], a
+    ld hl, wPlayPat
+    ld e, c
+    ld d, 0
+    add hl, de
+    ld a, [hl]
+    cp NUM_PATS
+    jr c, .has
+    ld de, 0                ; no pattern: silent
+    jr .setLen
+.has:
+    ld b, a
+    push bc
+    call PatLenTicks        ; de = ticks, c = bar ticks
+    ld a, [wPlayBank]
+    and a
+    jr nz, .notFirst
+    ld a, c                 ; the first channel with a pattern gives the step its time signature and its number
+    ld [wStepBarTicks], a
+    pop bc
+    ld a, b
+    inc a
+    ld [wPlayBank], a
+    push bc
+.notFirst:
+    pop bc
+    ld a, [wStepLen + 1]    ; the step is as long as its longest pattern
+    cp d
+    jr c, .longer
+    jr nz, .setLen
+    ld a, [wStepLen]
+    cp e
+    jr nc, .setLen
+.longer:
+    ld a, e
+    ld [wStepLen], a
+    ld a, d
+    ld [wStepLen + 1], a
+.setLen:
+    ld hl, wChLen
+    ld a, c
+    add a
+    ld b, 0
+    ld c, a
+    add hl, bc
+    ld [hl], e
+    inc hl
+    ld [hl], d
+    srl c                   ; (back to the channel number)
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .len
+    ld a, [wPlayBank]
+    and a
+    ret nz
+    inc a                   ; (a step with no pattern at all: pattern 1 as a stand-in)
+    ld [wPlayBank], a
+    ld a, 48
+    ld [wStepBarTicks], a
+    ld a, 192
+    ld [wStepLen], a
+    ret
+
+; a = pattern index (0..NUM_PATS-1) -> de = its length in ticks (bars x bar ticks, at most 384), c = its bar ticks.
+; Clobbers a, b, hl.
+PatLenTicks:
+    ld e, a
+    ld d, 0
+    ld hl, wPatTsd
+    add hl, de
+    ld a, [hl]
+    ld c, a
+    ld hl, wPatBars
+    add hl, de
+    ld a, [hl]
+    and a
+    jr nz, .bars
+    inc a
+.bars:
+    push af                 ; the bars
+    ld hl, wPatTsn
+    add hl, de
+    ld a, [hl]
+    call TsBarTicks         ; a = bar ticks
+    ld c, a
+    pop af
+    ld b, a
+    ld hl, 0
+    ld d, 0
+    ld e, c
+.mul:
+    add hl, de
+    dec b
+    jr nz, .mul
+    ld a, h
+    and a
+    jr z, .fits             ; under 256
+    cp 1
+    jr nz, .cap             ; 512 or more
+    ld a, l
+    cp $81
+    jr c, .fits             ; 384 ($0180) or less
+.cap:
+    ld hl, TOTAL_TICKS
+.fits:
+    ld d, h
+    ld e, l
+    ret
+
+; a = chain step -> carry set if any channel has a pattern there. Keeps bc, hl.
+StepHasPat:
+    push bc
+    push hl
+    ld e, a
+    ld d, 0
+    ld hl, wChain
+    add hl, de
+    ld b, NUM_CH
+    ld de, CHAIN_LEN
+.look:
+    ld a, [hl]
+    cp NUM_PATS
+    jr c, .yes
+    add hl, de
+    dec b
+    jr nz, .look
+    pop hl
+    pop bc
+    and a                   ; (carry clear)
+    ret
+.yes:
+    pop hl
+    pop bc
+    scf
     ret
 
 ; The sequencer starts: the first chain step (song mode) or the edited pattern (loop mode).
@@ -83,8 +230,9 @@ SongRestart:
     and a
     ld a, [wEditBank]
     jr z, .set
+    call TsStore
     xor a
-    call LoadStepPats       ; wPlayBank = step 0's CH1 pattern + 1
+    call LoadStepPats       ; wPlayBank = step 0's first pattern + 1
     jr .queue
 .set:
     ld [wPlayBank], a
@@ -113,18 +261,16 @@ SongNext:
     ld c, a                 ; c = the next step
     cp CHAIN_LEN
     jr nc, .first
-    ld e, c
-    ld d, 0
-    ld hl, wChain
-    add hl, de
-    ld a, [hl]              ; (CH1 decides where the song ends)
-    cp NUM_PATS
-    jr c, .ok               ; a valid pattern number
+    ld a, c
+    call StepHasPat         ; the song ends at the first step where no channel has a pattern
+    jr c, .ok
 .first:
     ld c, 0
 .ok:
     ld a, c
     ld [wChainPos], a
+    call TsStore            ; (the edited pattern's live length and time signature go to its slot)
+    ld a, [wChainPos]
     call LoadStepPats
     jr SongMarkPos          ; the new step gets them
 
@@ -262,11 +408,11 @@ SongLoaded:
     inc hl
     dec b
     jr nz, .fix
-    ld a, [wChain]
-    cp NUM_PATS
+    xor a
+    call StepHasPat
     jr c, .keep
     xor a
-    ld [wChain], a          ; a song has at least one step
+    ld [wChain], a          ; a song has at least one step (CH1 plays pattern 1 in it)
 .keep:
     xor a                   ; the per-pattern time signatures and lengths: bad values are blanked, and a
     ld [wBCBar], a          ; song saved before they existed (all 0) takes the one in the MIDI block
@@ -725,7 +871,8 @@ MarkChRow:
     ret
 
 ; c = +1 / $FF: the pattern number of the cell under the cursor (channel wSongCh, step wSongCur). The valid values are
-; 0..NUM_PATS-1 and CHAIN_END (not on CH1's step 0: a song needs one step); they go round.
+; 0..NUM_PATS-1 and CHAIN_END; they go round. The end is not offered when it would leave the first step with no pattern at
+; all (a song needs one step); anywhere else a cell may be the end (the song ends at the first step where all four are).
 StepValue:
     ld a, [wSongCh]
     swap a
@@ -737,11 +884,15 @@ StepValue:
     ld d, 0
     ld hl, wChain
     add hl, de
-    ld a, [wSongCh]
-    ld b, a
     ld a, [wSongCur]
-    or b
-    ld b, a                 ; b = 0 only on CH1's step 0
+    and a
+    ld b, 1                 ; b = 1: the end is allowed
+    jr nz, .endKnown
+    call OthersHavePat      ; step 1: only if another channel has a pattern there
+    ld b, 0
+    jr nc, .endKnown
+    ld b, 1
+.endKnown:
     ld a, [hl]
     bit 7, c
     jr nz, .back
@@ -752,7 +903,7 @@ StepValue:
     jr c, .store            ; still a pattern
     ld a, b
     and a
-    ld a, 0                 ; CH1's step 0 cannot be the end
+    ld a, 0                 ; (the end is not allowed: round to pattern 1)
     jr z, .store
     ld a, CHAIN_END
     jr .store
@@ -779,6 +930,42 @@ StepValue:
     ld [hl], a
     ld a, [wSongCh]
     jr MarkChRow
+
+; Carry set if a channel other than the cursor's has a pattern on the cursor's step. Keeps bc, hl.
+OthersHavePat:
+    push bc
+    push hl
+    ld hl, wChain
+    ld a, [wSongCur]
+    ld e, a
+    ld d, 0
+    add hl, de
+    ld de, CHAIN_LEN
+    ld a, [wSongCh]
+    ld c, a                 ; c = the cursor's channel
+    ld b, 0                 ; b = the channel being looked at
+.look:
+    ld a, b
+    cp c
+    jr z, .skip
+    ld a, [hl]
+    cp NUM_PATS
+    jr c, .yes
+.skip:
+    add hl, de
+    inc b
+    ld a, b
+    cp NUM_CH
+    jr c, .look
+    pop hl
+    pop bc
+    and a
+    ret
+.yes:
+    pop hl
+    pop bc
+    scf
+    ret
 
 sSongTitle:  db "SONG CHAIN", 0
 sSongMem:    db "MEM", 0
