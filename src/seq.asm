@@ -778,7 +778,7 @@ SeqInput:
     ld e, a                 ; e = held
     bit PADB_START, e
     jr z, .noStart
-    ld a, [wEditPat]        ; START+A / START+B: the next / previous pattern is edited (and played)
+    ld a, [wEditPat]        ; START+A / START+B: the cursor's cell gets the next / previous pattern (it is edited, and played)
     bit PADB_A, d
     jr z, .startB
     cp NUM_PATS - 1
@@ -796,7 +796,7 @@ SeqInput:
     ret z
     dec a
 .pattern:
-    call SongSetEdit
+    call SetCellPattern     ; the cursor's cell holds that pattern now
     jp RollRefreshAll       ; the roll shows the other pattern
 .noStart:
     bit PADB_SELECT, e
@@ -895,12 +895,9 @@ SeqCursor:
 .downOk:
     ld b, a
 .noDown:
-    ld a, 1
     bit PADB_B, e
-    jr z, .cells
-    ld a, 4
-.cells:
-    ld c, a                 ; c = cells to move horizontally
+    jr nz, .bars
+    ld c, 1                 ; c = cells to move horizontally
     bit PADB_RIGHT, d
     jr z, .noRight
     call CellRight
@@ -912,6 +909,140 @@ SeqCursor:
     ld a, b
     ld [wRollNote], a
     jp RollCursorMoved
+.bars:                      ; B held: a whole bar to the right / left
+    bit PADB_RIGHT, d
+    jr z, .noBarRight
+    push bc
+    push de
+    call BarRight
+    pop de
+    pop bc
+.noBarRight:
+    bit PADB_LEFT, d
+    jr z, .noLeft
+    push bc
+    push de
+    call BarLeft
+    pop de
+    pop bc
+    jr .noLeft
+
+; The cursor's absolute tick -> hl. Clobbers a.
+CursorTick:
+    ld a, [wRollSeg]
+    ld hl, 0
+    and a
+    jr z, .tick
+    ld hl, SEQ_TICKS
+.tick:
+    ld a, [wRollTick]
+    add l
+    ld l, a
+    ret nc
+    inc h
+    ret
+
+; The cursor moves to the first bar line after it (nothing happens at the end of the pattern). Clobbers a, bc, de, hl.
+BarRight:
+    call CursorTick
+    ld a, [wBarTicks]
+    ld e, a
+    ld bc, 0
+.next:
+    ld a, c                 ; bc = the next bar line
+    add e
+    ld c, a
+    jr nc, .compare
+    inc b
+.compare:
+    ld a, b
+    cp h
+    jr c, .next             ; still before the cursor
+    jr nz, .found
+    ld a, c
+    cp l
+    jr c, .next
+    jr z, .next             ; (on the cursor: the one after it)
+.found:
+    ld a, b
+    cp 1
+    jr c, .ok               ; under 256
+    jr nz, .stop            ; 512 or more
+    ld a, c
+    cp LOW(TOTAL_TICKS)
+    jr nc, .stop            ; 384 or more: past the pattern
+.ok:
+    ld h, b
+    ld l, c
+    jr SetCursorAbs
+.stop:
+    ret
+
+; The cursor moves to the bar line before it, or to the start of its own bar when it is inside one (the first bar line of
+; the pattern stays). Clobbers a, bc, de, hl.
+BarLeft:
+    call CursorTick
+    ld a, [wBarTicks]
+    ld e, a
+    ld bc, 0                ; bc = the last bar line that is before the cursor
+.next:
+    push bc
+    ld a, c
+    add e
+    ld c, a
+    jr nc, .compare
+    inc b
+.compare:
+    ld a, b
+    cp h
+    jr c, .accept
+    jr nz, .reject
+    ld a, c
+    cp l
+    jr nc, .reject
+.accept:
+    pop af                  ; (the new bar line is before the cursor: keep it, look for a later one)
+    jr .next
+.reject:
+    pop bc
+    ld h, b
+    ld l, c
+    ; falls into SetCursorAbs
+
+; hl = absolute tick (0..383) -> the cursor on the grid cell that holds it. Clobbers a, bc, de, hl.
+SetCursorAbs:
+    xor a
+    ld [wRollSeg], a
+    ld a, h
+    and a
+    jr nz, .second          ; 256 or more
+    ld a, l
+    cp SEQ_TICKS
+    jr c, .inSeg
+.second:
+    ld de, -SEQ_TICKS
+    add hl, de
+    ld a, 1
+    ld [wRollSeg], a
+.inSeg:                     ; l = the tick in the segment: cell = l / wDivTicks (a loop: it is a user action)
+    ld a, [wDivTicks]
+    ld c, a
+    ld b, 0                 ; b = the cell
+    ld a, l
+.div:
+    cp c
+    jr c, .divDone
+    sub c
+    inc b
+    jr .div
+.divDone:
+    ld d, a                 ; the part of the cell that is left
+    ld a, l
+    sub d
+    ld [wRollTick], a       ; (cell * wDivTicks)
+    ld a, b
+    ld [wRollCell], a
+    ret
 
 ; c = cells: move the cursor right (on into the next segment), stopping at the last cell. Keeps b, c, d, e.
 CellRight:
@@ -1129,6 +1260,7 @@ SeqPlace:
     call AbsHLW             ; (the OFF may be the first cell of the next segment)
     ld [hl], CELL_OFF
 .placed:
+    call CommitPending      ; a pattern that was only a candidate for an empty cell goes into the chain with its first note
     call RecalcEdited
     call RollRefresh
 .audition:

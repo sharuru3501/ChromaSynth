@@ -245,7 +245,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(20)
     for want in (2, 3, 4, 2):
         mem[sym["wRollTick"]] = 0
-        combo(pb, "select", "right" if want > v("wPlayBank") else "left")
+        tap(pb, "a" if want > v("wPlayBank") else "b")
         queued = v("wQueuedBank")
         at = None
         for _ in range(400):
@@ -321,13 +321,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("every pattern starts as 4/4, 2 bars", [mem[PATN + i] for i in range(4)] == [4] * 4 and [mem[PATB + i] for i in range(4)] == [2] * 4,
           ([mem[PATN + i] for i in range(4)], [mem[PATB + i] for i in range(4)]))
     # pattern 2: 3/4, 3 bars (set through the live values of the edited pattern: the MIDI block and wSeqBars)
-    combo(pb, "select", "right")
+    tap(pb, "a")
     check("editing pattern 2 loads its values (4/4, 2 bars)", (mem[TSN], mem[TSD], v("wSeqBars"), v("wBarTicks")) == (4, 0, 2, 48),
           (mem[TSN], mem[TSD], v("wSeqBars"), v("wBarTicks")))
     mem[TSN] = 3
     mem[sym["wSeqBars"]] = 3
     mem[sym["wBpm"]] = 240
-    combo(pb, "select", "left")          # back to pattern 1: pattern 2's values are stored
+    tap(pb, "b")          # back to pattern 1: pattern 2's values are stored
     check("pattern 2's 3/4, 3 bars are stored when another pattern is edited", (mem[PATN + 1], mem[PATB + 1]) == (3, 3), (mem[PATN + 1], mem[PATB + 1]))
     check("pattern 1 is 4/4 again (bar 48 ticks, loop 2 bars)", (mem[TSN], v("wSeqBars"), v("wBarTicks")) == (4, 2, 48), (mem[TSN], v("wSeqBars"), v("wBarTicks")))
     # the chain 1, 2: pattern 1 plays 96 ticks, pattern 2 plays 108 ticks (3 bars of 36)
@@ -365,7 +365,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(30)
     changes = []
     last = v("wPlayBank")
-    combo(pb, "select", "right")         # queue pattern 2
+    tap(pb, "a")         # queue pattern 2
     for _ in range(500):
         pb.tick(1)
         if v("wPlayBank") != last:
@@ -375,7 +375,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # the switch is on pattern 1's bar line; pattern 2 goes on at the same bar NUMBER, at its own bar length: a multiple of 36
     check("1 -> 2: pattern 2 starts on one of its own bar lines (a multiple of 36), at the bar number that was playing",
           len(changes) == 1 and (changes[0][2] - 1) % 36 in (0, 1, 2) and changes[0][2] > 36, changes)
-    combo(pb, "select", "left")          # queue pattern 1 while pattern 2 (3/4) plays
+    tap(pb, "b")          # queue pattern 1 while pattern 2 (3/4) plays
     for _ in range(500):
         pb.tick(1)
         if v("wPlayBank") != last:
@@ -396,16 +396,16 @@ with tempfile.TemporaryDirectory() as tmp:
     v = lambda n: mem[sym[n]]
     PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
     combo(pb, "start", "up")
-    combo(pb, "select", "right")         # edit pattern 2: 6/8, 5 bars
+    tap(pb, "a")         # edit pattern 2: 6/8, 5 bars
     mem[TSN] = 6
     mem[TSD] = 1
     mem[sym["wSeqBars"]] = 5
-    combo(pb, "select", "right")         # pattern 3: 7/8, 3 bars
+    tap(pb, "a")         # pattern 3: 7/8, 3 bars
     mem[TSN] = 7
     mem[TSD] = 1
     mem[sym["wSeqBars"]] = 3
-    combo(pb, "select", "left")
-    combo(pb, "select", "left")          # pattern 1: 3/4, 2 bars
+    tap(pb, "b")
+    tap(pb, "b")          # pattern 1: 3/4, 2 bars
     mem[TSN] = 3
     mem[TSD] = 0
     combo(pb, "select", "b", 60)

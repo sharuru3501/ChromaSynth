@@ -190,6 +190,10 @@ wChSeg:         db          ; SeqStep scratch: the segment / tick the channel be
 wChTick:        db
 wSongCur:       db          ; song screen: the cursor's chain step
 wSongCh:        db          ; song screen: the cursor's channel
+wPendActive:    db          ; 1 = the roll shows a pattern that is not in the chain yet (the cursor's cell is empty): it goes in with its first note
+wPendCh:        db          ; ... the cell it is for: channel and step
+wPendStep:      db
+wUsedMask:      ds 2        ; FindUnusedPat scratch: a bit for every pattern the chain uses
 wSongCurDraw:   db          ; song screen: the chain offset (channel * CHAIN_LEN + step) of the cursor while its row is drawn, $FF elsewhere
 wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, 1 = step header, 2-5 = CH1-CH4, 6 = playing-step marker, 7 = MEM)
 wSelUsed:       db          ; SELECT was used as a modifier while held

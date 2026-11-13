@@ -122,12 +122,12 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "right")
     check("RIGHT at the very last cell stays", (v("wRollSeg"), v("wRollCell")) == (1, 63), (v("wRollSeg"), v("wRollCell")))
 
-    # --- B + RIGHT moves 4 cells and crosses too
+    # --- B + RIGHT goes to the next bar line and crosses too
     mem[sym["wRollSeg"]] = 0
     mem[sym["wRollCell"]] = 62
     mem[sym["wRollTick"]] = 186
     combo(pb, "b", "right")
-    check("B+RIGHT over the edge: 4 cells on, segment 2 cell 2", (v("wRollSeg"), v("wRollCell"), v("wRollTick")) == (1, 2, 6),
+    check("B+RIGHT over the edge: the next bar line is the start of segment 2", (v("wRollSeg"), v("wRollCell"), v("wRollTick")) == (1, 0, 0),
           (v("wRollSeg"), v("wRollCell"), v("wRollTick")))
 
     # --- edit in segment 2: A places a note there

@@ -204,31 +204,64 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.button_release("select")
     pb.tick(6)
     check("SELECT+B held on the song screen does not change the pattern (and the save runs once, not repeatedly)", mem[CHAIN] == 0, mem[CHAIN])
-    tap(pb, "right")
 
-    # --- edit pattern and mode
-    combo(pb, "select", "right")
-    check("SELECT+RIGHT edits pattern 2", v("wEditPat") == 1 and v("wEditBank") == 2, (v("wEditPat"), v("wEditBank")))
+    # --- the edited pattern is the one in the cell under the cursor (CH1, step 1 here), and mode
+    tap(pb, "a")
+    check("A on the cell: pattern 2 is edited (the cell and the edit follow each other)", mem[CHAIN] == 1 and v("wEditPat") == 1 and v("wEditBank") == 2, (mem[CHAIN], v("wEditPat"), v("wEditBank")))
     check("... and in loop mode that is the pattern that plays", v("wPlayBank") == 2, v("wPlayBank"))
     check("... without changing channel", v("wSelCh") == 0)
-    for _ in range(20):
-        combo(pb, "select", "right")
-    check("the edit pattern stops at pattern 16", v("wEditPat") == 15 and v("wEditBank") == 16, (v("wEditPat"), v("wEditBank")))
-    for _ in range(20):
-        combo(pb, "select", "left")
-    check("... and at pattern 1", v("wEditPat") == 0 and v("wEditBank") == HI)
+    for _ in range(14):
+        tap(pb, "a")
+    check("A on to pattern 16", v("wEditPat") == 15 and v("wEditBank") == 16, (v("wEditPat"), v("wEditBank")))
+    for _ in range(15):
+        tap(pb, "b")
+    check("... and B back to pattern 1", v("wEditPat") == 0 and v("wEditBank") == HI and mem[CHAIN] == 0, (v("wEditPat"), mem[CHAIN]))
     combo(pb, "select", "up")
     check("SELECT+UP: song mode", v("wSongMode") == 1, v("wSongMode"))
-    combo(pb, "select", "right")
+    tap(pb, "a")
     check("in song mode editing another pattern does not change what plays", v("wEditPat") == 1 and v("wPlayBank") == HI, (v("wEditPat"), v("wPlayBank")))
     pb.tick(20)
     check("the mode row shows SONG, the edit row P2", row_text(2)[6:10] == tiles("SONG") and row_text(3)[6:8] == tiles("P2"), (row_text(2), row_text(3)))
-    combo(pb, "select", "left")
+    tap(pb, "b")
     combo(pb, "select", "down")
     check("SELECT+DOWN: back to loop mode", v("wSongMode") == 0)
+    # SELECT+LEFT / RIGHT do not edit a pattern any more
+    combo(pb, "select", "right")
+    check("SELECT+RIGHT does nothing on the song screen now", v("wEditPat") == 0 and mem[CHAIN] == 0, (v("wEditPat"), mem[CHAIN]))
+
+    # --- the cursor decides the edited pattern: another channel / step has another pattern
+    mem[CHAIN + CHAIN_LEN] = 3                         # CH2, step 1: pattern 4
+    mem[CHAIN + 1] = 5                                 # CH1, step 2: pattern 6
+    tap(pb, "down")
+    check("DOWN to CH2: pattern 4 is edited, and CH2 is the selected channel", v("wEditPat") == 3 and v("wSelCh") == 1, (v("wEditPat"), v("wSelCh")))
+    tap(pb, "up")
+    tap(pb, "right")
+    check("RIGHT to step 2 on CH1: pattern 6 is edited", v("wEditPat") == 5 and v("wSelCh") == 0, (v("wEditPat"), v("wSelCh")))
+    tap(pb, "left")
+    check("LEFT back: pattern 1", v("wEditPat") == 0, v("wEditPat"))
+    # an empty cell: a pattern nobody uses is the candidate; it goes in the chain with its first note only
+    tap(pb, "down")
+    tap(pb, "down")
+    tap(pb, "down")                                    # CH4, step 1
+    mem[CHAIN + 3 * CHAIN_LEN] = 0xFF
+    tap(pb, "up")
+    tap(pb, "down")                                    # (the cell is empty now: look at it again)
+    check("an empty cell: the edited pattern is one that no chain cell uses (not 1, 4, 6)", v("wEditPat") not in (0, 3, 5), v("wEditPat"))
+    cand = v("wEditPat")
+    check("... and it is not in the chain yet", mem[CHAIN + 3 * CHAIN_LEN] == 0xFF, mem[CHAIN + 3 * CHAIN_LEN])
+    tap(pb, "up")
+    tap(pb, "down")
+    check("looking at an empty cell again leaves the chain as it was", mem[CHAIN + 3 * CHAIN_LEN] == 0xFF, mem[CHAIN + 3 * CHAIN_LEN])
+    tap(pb, "b")                                       # the empty cell: B gives the last pattern, that is no way to keep it empty: go on
+    mem[CHAIN + 3 * CHAIN_LEN] = 0xFF
+    for _ in range(3):
+        tap(pb, "up")
+    tap(pb, "right")
+    tap(pb, "left")                                    # back on CH1, step 1
+    check("back on CH1 step 1: pattern 1", v("wEditPat") == 0, v("wEditPat"))
 
     # --- patterns are separate: the roll writes into the edited pattern
-    combo(pb, "select", "right")                       # edit pattern 2
+    tap(pb, "a")                                       # the cell holds pattern 2: it is edited
     combo(pb, "start", "down")
     combo(pb, "start", "right")
     combo(pb, "start", "right")                        # the piano roll
@@ -312,7 +345,7 @@ with tempfile.TemporaryDirectory() as tmp:
     pb.tick(60)
     check("pattern 1 plays and its note sounds", v("wSeqPlay") == 1 and mem[sym["wCurNote"]] == 60, (v("wSeqPlay"), mem[sym["wCurNote"]]))
     mem[sym["wBpm"]] = 90              # a bar (48 ticks) = 2 s at 90 BPM, so a switch has time to wait
-    combo(pb, "select", "right")       # edit pattern 2 while pattern 1 plays (loop mode)
+    tap(pb, "a")                       # edit pattern 2 while pattern 1 plays (loop mode)
     check("the edited pattern is queued: it takes over at the next bar line, not now", v("wPlayBank") == 1 and v("wQueuedBank") == 2,
           (v("wPlayBank"), v("wQueuedBank")))
     check("... the old note keeps sounding until then", mem[sym["wCurNote"]] == 60, mem[sym["wCurNote"]])
@@ -332,13 +365,13 @@ with tempfile.TemporaryDirectory() as tmp:
           [mem[sym["wCurNote"] + c] for c in range(4)])
     check("... and nothing waits any more", v("wQueuedBank") == 0, v("wQueuedBank"))
     # choosing a pattern and then going back to the playing one before the bar line cancels the switch
-    combo(pb, "select", "left")        # pattern 1 is queued (pattern 2 plays)
+    tap(pb, "b")                       # pattern 1 is queued (pattern 2 plays)
     check("pattern 1 queued while 2 plays", v("wQueuedBank") == 1 and v("wPlayBank") == 2, (v("wQueuedBank"), v("wPlayBank")))
-    combo(pb, "select", "right")       # back to 2, the playing one: nothing waits
+    tap(pb, "a")                       # back to 2, the playing one: nothing waits
     check("going back to the playing pattern cancels the queue", v("wQueuedBank") == 0 and v("wPlayBank") == 2, (v("wQueuedBank"), v("wPlayBank")))
-    combo(pb, "select", "left")
-    combo(pb, "select", "right")
-    combo(pb, "select", "left")        # the last choice wins
+    tap(pb, "b")
+    tap(pb, "a")
+    tap(pb, "b")                       # the last choice wins
     for _ in range(200):
         pb.tick(1)
         if v("wPlayBank") == 1:
@@ -349,9 +382,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # stopped: the edited pattern is the played one at once
     combo(pb, "select", "start")
     check("stopped", v("wSeqPlay") == 0)
-    combo(pb, "select", "right")
+    tap(pb, "a")
     check("stopped: the edited pattern plays at once, nothing is queued", v("wPlayBank") == 2 and v("wQueuedBank") == 0, (v("wPlayBank"), v("wQueuedBank")))
-    combo(pb, "select", "left")
+    tap(pb, "b")
     combo(pb, "select", "start")       # play again from pattern 1
     pb.tick(10)
     # song mode: the playing step is shown as [n]
@@ -502,6 +535,52 @@ with tempfile.TemporaryDirectory() as tmp:
     check("... with another channel there, the end is offered", mem[CHAIN] == 0xFF, mem[CHAIN])
     pb.stop(save=False)
 
+# --- an empty cell: the roll opens a candidate pattern; its first note puts it in the chain
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    pool = Pool(mem, sym)
+    for p_ in range(16):
+        pool.clear_pattern(p_)
+    set_chain(mem, [0, 3], [0], [0], [0])               # CH1: patterns 1 and 4; CH2-4: pattern 1 only
+    pool.put(1, 0, 0, 0, 55)                            # pattern 2 holds a note (so a clean candidate is preferred)
+    combo(pb, "start", "up")                            # the song screen
+    tap(pb, "down")                                     # CH2, step 1 (pattern 1)
+    tap(pb, "right")                                    # step 2: CH2 is empty there
+    check("CH2 step 2 is empty", mem[CHAIN + CHAIN_LEN + 1] == 0xFF, mem[CHAIN + CHAIN_LEN + 1])
+    cand = v("wEditPat")
+    check("the edited pattern is a candidate nobody uses: not 1 and 4 (in the chain) and not 2 (it holds a note)", cand not in (0, 3, 1), cand)
+    check("... it is not in the chain yet", mem[CHAIN + CHAIN_LEN + 1] == 0xFF)
+    combo(pb, "start", "down")                          # back to the screen the song screen was opened from
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")                         # the piano roll
+    pb.tick(30)
+    check("on the roll: channel 2, the candidate pattern", v("wScreen") == 2 and v("wSelCh") == 1 and v("wEditPat") == cand, (v("wScreen"), v("wSelCh"), v("wEditPat")))
+    check("... and still nothing in the chain", mem[CHAIN + CHAIN_LEN + 1] == 0xFF)
+    mem[sym["wRollNote"]] = 62
+    mem[sym["wRollTick"]] = 0
+    mem[sym["wRollCell"]] = 0
+    mem[sym["wRollSeg"]] = 0
+    tap(pb, "a")
+    pb.button_release("a")
+    pb.tick(10)
+    check("the first note went into the candidate pattern, channel 2", pool.get(cand, 1, 0, 0) == 62, pool.get(cand, 1, 0, 0))
+    check("... and the candidate is in the chain now: CH2, step 2", mem[CHAIN + CHAIN_LEN + 1] == cand, mem[CHAIN + CHAIN_LEN + 1])
+    check("... the other channels of that step are untouched", all(mem[CHAIN + c * CHAIN_LEN + 1] == (3 if c == 0 else 0xFF) for c in range(4) if c != 1), [mem[CHAIN + c * CHAIN_LEN + 1] for c in range(4)])
+    # START+A on the roll gives that cell the next pattern (not the other channels)
+    combo(pb, "start", "a")
+    check("START+A: CH2 step 2 gets the next pattern; CH1 step 2 keeps pattern 4", mem[CHAIN + CHAIN_LEN + 1] == cand + 1 and mem[CHAIN + 1] == 3, (mem[CHAIN + CHAIN_LEN + 1], mem[CHAIN + 1]))
+    check("... and the edited pattern is the new one", v("wEditPat") == cand + 1, v("wEditPat"))
+    # back to channel 1: its cell at this step (pattern 4) is edited
+    tap(pb, "select")
+    tap(pb, "select")
+    tap(pb, "select")
+    check("three channel taps from CH2 round to CH1: its cell (pattern 4) is edited", v("wSelCh") == 0 and v("wEditPat") == 3, (v("wSelCh"), v("wEditPat")))
+    pb.stop(save=False)
+
 # --- a note that is still sounding at the end of a chain step does not carry into the next pattern
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
@@ -562,8 +641,8 @@ with tempfile.TemporaryDirectory() as tmp:
               for p_ in range(4) for c in range(4) for g in range(2)))
     check("the chain is restored", bytes(mem[CHAIN:CHAIN + 5]) == bytes([3, 0, 2, 2, 1]) and mem[CHAIN + 5] == 0xFF)
     check("a damaged chain step becomes the end", mem[CHAIN + 6] == 0xFF, mem[CHAIN + 6])
-    check("BPM and loop length are restored", v("wBpm") == 141 and v("wSeqBars") == 6)
-    check("loading edits pattern 1 in loop mode", v("wEditPat") == 0 and v("wSongMode") == 0 and v("wEditBank") == HI and v("wPlayBank") == HI)
+    check("BPM and the first pattern's loop length are restored", v("wBpm") == 141 and mem[sym["wPatBars"]] == 6, (v("wBpm"), mem[sym["wPatBars"]]))
+    check("loading edits the pattern in the cursor's cell (CH1, step 1: pattern 4) in loop mode", v("wEditPat") == 3 and v("wSongMode") == 0 and v("wEditBank") == 4 and v("wPlayBank") == 4, (v("wEditPat"), v("wEditBank"), v("wPlayBank")))
     pb.stop(save=True)
     pb = boot(rom)
     mem = pb.memory

@@ -11,7 +11,7 @@
 ;   row 12: PAGE n/4; the PLAY row says "PAGEn STEPn" (the page and the place of the step that plays; P = pattern); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
-;   SELECT+LEFT/RIGHT = the edited pattern, SELECT+UP/DOWN = loop / song mode
+;   SELECT+UP/DOWN = loop / song mode (the piano roll edits the pattern of the cursor's cell)
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -45,6 +45,8 @@ ChainReset:
     ld [wChainPos], a
     ld [wSongMode], a
     ld [wEditPat], a
+    ld [wPendActive], a
+    ld [wSongCur], a
     jr LoadStepPats
 
 ; a = chain step -> wPlayPat (the pattern of each channel in that step), wPlayBank (the pattern + 1 of its first channel that
@@ -471,10 +473,227 @@ SongLoaded:
     xor a
     ld [wSongMode], a
     ld [wChainPos], a
-    ld a, 1                 ; the first pattern is edited; its values were not stored over the arrays
+    ld [wPendActive], a
+    ld a, 1                 ; the pattern of the cursor's cell (the first step) is edited; its values were not stored over the arrays
     ld [wEditBank], a
     xor a
+    ld [wSongCur], a
+    ld a, [wSelCh]
+    cp NUM_CH
+    jr nc, .firstPat
+    call CellPtr
+    ld a, [hl]
+    cp NUM_PATS
+    jr c, .editIt
+.firstPat:
+    xor a
+.editIt:
     jp SongEditTo
+
+; ---------------------------------------------------------------- the roll edits the pattern of the cursor's cell
+; The cell is (channel wSelCh, step wSongCur): the pattern in it is the edited one (wEditPat), so what the piano roll shows
+; and writes is what the chain plays there. An empty cell ("-") gets a pattern nobody uses as a candidate: it is only put in
+; the chain (CommitPending) when it gets its first note, so looking at an empty cell leaves the song as it was.
+
+; The edited pattern becomes the one in the cursor's cell. Call it when the channel or the step of the cursor changed.
+; Clobbers a, bc, de, hl.
+SyncEdit:
+    call CommitPending
+    ld a, [wSelCh]
+    cp NUM_CH
+    ret nc                  ; (the edit screen's settings page is no channel)
+    call CellPtr            ; hl = the cell
+    ld a, [hl]
+    cp NUM_PATS
+    jp c, SongSetEdit
+    call FindUnusedPat      ; an empty cell: a pattern nobody uses ...
+    cp NUM_PATS
+    ret nc                  ; (all of them are in use: the edited one stays)
+    ld b, a
+    ld a, [wSelCh]
+    ld [wPendCh], a
+    ld a, [wSongCur]
+    ld [wPendStep], a
+    ld a, 1
+    ld [wPendActive], a     ; ... that goes into the chain with its first note
+    ld a, b
+    jp SongSetEdit
+
+; -> hl = the chain cell of channel wSelCh at step wSongCur. Clobbers a, de.
+CellPtr:
+    ld a, [wSelCh]
+    swap a
+    add a                   ; channel * 32
+    ld e, a
+    ld a, [wSongCur]
+    add e
+    ld e, a
+    ld d, 0
+    ld hl, wChain
+    add hl, de
+    ret
+
+; A pattern that was only a candidate for an empty cell goes into the chain once its channel holds a note; otherwise it is
+; dropped. Clobbers a, bc, de, hl.
+CommitPending:
+    ld a, [wPendActive]
+    and a
+    ret z
+    xor a
+    ld [wPendActive], a
+    ld a, [wEditPat]
+    ld b, a                 ; (the pattern)
+    ld a, [wPendCh]
+    ld c, a
+    ld a, b
+    ld b, c                 ; b = channel
+    ld c, 0                 ; first half
+    push af
+    call PageEntry
+    ld a, [hl]
+    cp NO_PAGE
+    jr nz, .has
+    pop af
+    push af
+    ld c, 1
+    call PageEntry
+    ld a, [hl]
+    cp NO_PAGE
+    jr nz, .has
+    pop af
+    ret                     ; nothing was written: not in the chain
+.has:
+    pop af
+    ld c, a                 ; c = the pattern
+    ld a, [wPendCh]
+    swap a
+    add a
+    ld e, a
+    ld a, [wPendStep]
+    add e
+    ld e, a
+    ld d, 0
+    ld hl, wChain
+    add hl, de
+    ld [hl], c
+    ret
+
+; a = pattern: it goes into the cursor's cell and is the edited one. Clobbers a, bc, de, hl.
+SetCellPattern:
+    ld c, a
+    call CellPtr
+    ld [hl], c
+    xor a
+    ld [wPendActive], a
+    ld a, c
+    jp SongSetEdit
+
+; -> a = a pattern number that no chain cell uses, preferably one that holds no notes at all; $FF if every pattern is in use.
+; Clobbers bc, de, hl.
+FindUnusedPat:
+    xor a
+    ld [wUsedMask], a
+    ld [wUsedMask + 1], a
+    ld hl, wChain
+    ld b, CHAIN_BYTES
+.scan:
+    ld a, [hl+]
+    cp NUM_PATS
+    jr nc, .skip
+    push hl
+    push bc
+    call UsedBit            ; (sets the bit)
+    pop bc
+    pop hl
+.skip:
+    dec b
+    jr nz, .scan
+    xor a
+    ld c, a                 ; pass 1: unused and empty
+.p1:
+    ld a, c
+    call TestUsed
+    jr nz, .p1next
+    ld a, c
+    call PatIsEmpty
+    jr nc, .p1next
+    ld a, c
+    ret
+.p1next:
+    inc c
+    ld a, c
+    cp NUM_PATS
+    jr c, .p1
+    xor a
+    ld c, a                 ; pass 2: unused
+.p2:
+    ld a, c
+    call TestUsed
+    jr nz, .p2next
+    ld a, c
+    ret
+.p2next:
+    inc c
+    ld a, c
+    cp NUM_PATS
+    jr c, .p2
+    ld a, $FF
+    ret
+
+; a = pattern -> sets its bit in wUsedMask. Clobbers a, b, hl.
+UsedBit:
+    call UsedMaskBit
+    or [hl]
+    ld [hl], a
+    ret
+
+; a = pattern -> nz if its bit in wUsedMask is set. Keeps c. Clobbers a, b, hl.
+TestUsed:
+    call UsedMaskBit
+    and [hl]
+    ret
+
+; a = pattern 0..15 -> hl = the byte of wUsedMask that holds it, a = the bit's mask. Clobbers b.
+UsedMaskBit:
+    ld hl, wUsedMask
+    cp 8
+    jr c, .lo
+    inc hl
+    sub 8
+.lo:
+    ld b, a
+    ld a, 1
+.shift:
+    inc b
+    dec b
+    ret z
+    dec b
+    add a
+    jr .shift
+
+; a = pattern -> carry set if it holds no notes at all (no page of any channel). Keeps c. Clobbers a, b, hl.
+PatIsEmpty:
+    push bc
+    add a
+    add a
+    add a                   ; pattern * 8
+    add LOW(wPatPage)
+    ld l, a
+    ld h, HIGH(wPatPage)
+    ld b, 8
+.look:
+    ld a, [hl+]
+    cp NO_PAGE
+    jr nz, .notEmpty
+    dec b
+    jr nz, .look
+    pop bc
+    scf
+    ret
+.notEmpty:
+    pop bc
+    and a                   ; (carry clear)
+    ret
 
 ; ---------------------------------------------------------------- the song screen
 ; Called with the LCD off after the screen was cleared.
@@ -763,20 +982,10 @@ SongInput:
     ret z
     ld a, 1
     ld [wSelUsed], a
-    ld a, [wEditPat]
-    bit PADB_LEFT, d
-    jr z, .notLeft
-    and a
-    ret z
-    dec a
-    jp SongSetEdit
-.notLeft:
+    bit PADB_LEFT, d        ; (the edited pattern is the one in the cursor's cell now: SELECT+LEFT / RIGHT are free)
+    ret nz
     bit PADB_RIGHT, d
-    jr z, .mode
-    cp NUM_PATS - 1
-    ret nc
-    inc a
-    jp SongSetEdit
+    ret nz
 .mode:
     ld a, [wSongMode]      ; SELECT+UP / DOWN
     xor 1
@@ -843,11 +1052,15 @@ SongInput:
 .setCh:
     ld [wSongCh], a
 .twoRows:                   ; redraw the rows of the old and of the new cursor
+    push bc
+    call EditCursorCell     ; the roll edits the pattern in the cell under the cursor
+    pop bc
     ld a, c
     call MarkChRow
     ld a, [wSongCh]
     jr MarkChRow
 .allRows:
+    call EditCursorCell
     ld a, [wDirtySong]
     or %01111110            ; the header, the four channel rows and the marker row
     ld [wDirtySong], a
@@ -928,8 +1141,15 @@ StepValue:
     ld a, NUM_PATS - 1
 .store:
     ld [hl], a
+    call EditCursorCell     ; (the cell changed: the edited pattern follows)
     ld a, [wSongCh]
     jr MarkChRow
+
+; The channel of the song screen's cursor is the selected one, and the edited pattern is the one in its cell. Clobbers a, bc, de, hl.
+EditCursorCell:
+    ld a, [wSongCh]
+    ld [wSelCh], a
+    jp SyncEdit
 
 ; Carry set if a channel other than the cursor's has a pattern on the cursor's step. Keeps bc, hl.
 OthersHavePat:
