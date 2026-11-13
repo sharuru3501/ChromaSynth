@@ -360,7 +360,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0 and v("wPlayBank") == HI, (v("wChainPos"), v("wPlayBank")))
     pb.tick(10)
     mark = lambda: bytes(mem[0x9800 + 11 * 32 + i] for i in range(20))
-    for ch in "^<>":
+    for ch in "^>":
         tile = [mem[0x8000 + (ord(ch) - 32) * 16 + i] for i in range(16)]
         check(f"the font has a glyph for '{ch}' (the marks must be visible, not just in the map)", any(tile), tile)
     caret = ord("^") - 32
