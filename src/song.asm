@@ -588,14 +588,21 @@ SetCellPattern:
     ld a, c
     jp SongSetEdit
 
-; -> a = a pattern number that no chain cell uses, preferably one that holds no notes at all; $FF if every pattern is in use.
-; Clobbers bc, de, hl.
+; -> a = a pattern number that no chain cell of the channel wSelCh uses (the channels do not share numbers: each has its own
+; row of the chain and its own part of every pattern), preferably one whose part of this channel holds no notes;
+; $FF if all 16 are in the channel's row. Clobbers bc, de, hl.
 FindUnusedPat:
     xor a
     ld [wUsedMask], a
     ld [wUsedMask + 1], a
+    ld a, [wSelCh]
+    swap a
+    add a
+    ld e, a
+    ld d, 0
     ld hl, wChain
-    ld b, CHAIN_BYTES
+    add hl, de              ; the channel's row
+    ld b, CHAIN_LEN
 .scan:
     ld a, [hl+]
     cp NUM_PATS
@@ -671,22 +678,25 @@ UsedMaskBit:
     add a
     jr .shift
 
-; a = pattern -> carry set if it holds no notes at all (no page of any channel). Keeps c. Clobbers a, b, hl.
+; a = pattern -> carry set if its part of the channel wSelCh holds no notes (neither half has a page). Keeps c. Clobbers a, b, hl.
 PatIsEmpty:
     push bc
     add a
     add a
     add a                   ; pattern * 8
+    ld b, a
+    ld a, [wSelCh]
+    add a                   ; channel * 2
+    add b
     add LOW(wPatPage)
     ld l, a
     ld h, HIGH(wPatPage)
-    ld b, 8
-.look:
     ld a, [hl+]
     cp NO_PAGE
     jr nz, .notEmpty
-    dec b
-    jr nz, .look
+    ld a, [hl]
+    cp NO_PAGE
+    jr nz, .notEmpty
     pop bc
     scf
     ret

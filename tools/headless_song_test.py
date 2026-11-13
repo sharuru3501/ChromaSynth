@@ -546,13 +546,13 @@ with tempfile.TemporaryDirectory() as tmp:
     for p_ in range(16):
         pool.clear_pattern(p_)
     set_chain(mem, [0, 3], [0], [0], [0])               # CH1: patterns 1 and 4; CH2-4: pattern 1 only
-    pool.put(1, 0, 0, 0, 55)                            # pattern 2 holds a note (so a clean candidate is preferred)
+    pool.put(1, 0, 0, 0, 55)                            # pattern 2 holds a note on CH1 only: that must not matter to CH2
     combo(pb, "start", "up")                            # the song screen
     tap(pb, "down")                                     # CH2, step 1 (pattern 1)
     tap(pb, "right")                                    # step 2: CH2 is empty there
     check("CH2 step 2 is empty", mem[CHAIN + CHAIN_LEN + 1] == 0xFF, mem[CHAIN + CHAIN_LEN + 1])
     cand = v("wEditPat")
-    check("the edited pattern is a candidate nobody uses: not 1 and 4 (in the chain) and not 2 (it holds a note)", cand not in (0, 3, 1), cand)
+    check("CH2's row has only pattern 1: the candidate is pattern 2 for CH2 (whatever CH1 uses: patterns 1 and 4; pattern 2's CH1 part holds a note: that is CH1's)", cand == 1, cand)
     check("... it is not in the chain yet", mem[CHAIN + CHAIN_LEN + 1] == 0xFF)
     combo(pb, "start", "down")                          # back to the screen the song screen was opened from
     combo(pb, "start", "right")
@@ -579,6 +579,13 @@ with tempfile.TemporaryDirectory() as tmp:
     tap(pb, "select")
     tap(pb, "select")
     check("three channel taps from CH2 round to CH1: its cell (pattern 4) is edited", v("wSelCh") == 0 and v("wEditPat") == 3, (v("wSelCh"), v("wEditPat")))
+    # a part of this channel that already holds notes is passed over, a clean one is preferred
+    pool.put(cand + 2, 1, 0, 0, 56)                     # a leftover note in CH2's part of the number after the next
+    tap(pb, "select")                                   # CH2
+    combo(pb, "start", "up")                            # the song screen
+    tap(pb, "right")                                    # CH2 step 3 (empty): its row has 1 and cand + 1
+    check("CH2 step 3: the first number that is free in CH2's row and clean in CH2's part: 0 and 2 are in the row, 1 and 3 hold notes on CH2, so pattern 5",
+          v("wEditPat") == 4, (v("wEditPat"), cand))
     pb.stop(save=False)
 
 # --- a note that is still sounding at the end of a chain step does not carry into the next pattern
