@@ -345,7 +345,7 @@ BuildSong:
     ld hl, ROW_SONG_INFO + 32 + 9
     ld de, sSongEditNote
     call DrawString
-    ld hl, _SCRN0 + 5 * 32 + 2
+    ld hl, _SCRN0 + 5 * 32
     ld de, sSongStepLbl     ; over the numbers 1-8 below it
     call DrawString
     ld hl, _SCRN0 + 13 * 32
@@ -473,7 +473,7 @@ UpdateSong:
     inc c
     dec b
     jr nz, .hcell
-    ld hl, ROW_SONG_PAGE + 2
+    ld hl, ROW_SONG_PAGE + 12
     ld de, sSongPage
     call DrawString
     ld a, [wSongCur]
@@ -483,7 +483,7 @@ UpdateSong:
     and 3
     inc a
     add '0' - 32
-    ld hl, ROW_SONG_PAGE + 7
+    ld hl, ROW_SONG_PAGE + 17
     ld [hl], a
     ret
 .marker:                    ; blank, then per step " ^" under the one that plays (nothing when it is on another page)
