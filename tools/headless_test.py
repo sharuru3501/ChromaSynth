@@ -588,27 +588,40 @@ release("left")
 check("auto-repeat to the left stops at cell 0", (v("wRollCell"), v("wRollTick")) == (0, 0), (v("wRollCell"), v("wRollTick")))
 pb.tick(10)
 
-# B + d-pad jumps and must not delete anything
+# B + d-pad jumps and must not delete anything: B+RIGHT / B+LEFT go to the next / previous bar line
 hold("b")
 press("right")
-press("right")
 release("b", frames=4)
-check("B+RIGHT jumps 4 cells", v("wRollCell") == 8 and v("wRollTick") == 24, (v("wRollCell"), v("wRollTick")))
+check("B+RIGHT: the next bar line (tick 48 = cell 16)", (v("wRollCell"), v("wRollTick")) == (16, 48), (v("wRollCell"), v("wRollTick")))
 check("B+d-pad did not delete the note", cell(0, 0) == 60 and cell(0, 12) == 64)
-hold("b")
-press("right")
-press("right")
-release("b", frames=4)
-check("page scroll: cell 16 -> page 2 (starts at tick 48)",
+check("page scroll: the bar line is on page 2 (starts at tick 48)",
       (v("wRollCell"), v("wPageAbs"), v("wPageTick")) == (16, 48, 48), (v("wRollCell"), v("wPageAbs"), v("wPageTick")))
 settle()
 check("page 2: A3 head at column 0 (row 15), cursor empty at C4",
       grid(15, 0) == T_NOTE_HEAD and grid(12, 0) == T_CUR_EMP, (grid(15, 0), grid(12, 0)))
 hold("b")
 press("left")
+release("b", frames=4)
+check("B+LEFT from a bar line: the one before (the start of the pattern)", (v("wRollCell"), v("wPageAbs"), v("wPageTick")) == (0, 0, 0), (v("wRollCell"), v("wPageAbs"), v("wPageTick")))
+for _ in range(5):
+    press("right")
+hold("b")
 press("left")
 release("b", frames=4)
-check("page scroll back", (v("wRollCell"), v("wPageAbs"), v("wPageTick")) == (8, 0, 0))
+check("B+LEFT inside a bar: the start of that bar", v("wRollCell") == 0, v("wRollCell"))
+for _ in range(5):
+    press("right")
+hold("b")
+press("right")
+press("right")
+release("b", frames=4)
+check("B+RIGHT twice from inside bar 1: bar 3 (tick 96)", (v("wRollCell"), v("wRollTick")) == (32, 96), (v("wRollCell"), v("wRollTick")))
+hold("b")
+press("left")
+press("left")
+press("left")
+release("b", frames=4)
+check("B+LEFT stops at the start", (v("wRollCell"), v("wRollTick")) == (0, 0), (v("wRollCell"), v("wRollTick")))
 for _ in range(8):
     press("left")
 check("cursor at cell 0", v("wRollCell") == 0 and v("wRollTick") == 0)
@@ -769,10 +782,8 @@ tap_while("select", "start")
 mem[sym["wBpm"]] = 120
 
 # ---- the bars never move when the grid division changes
-for _ in range(5):          # cursor to cell 20 = tick 60 (bar 2, beat 2) at 1/16
-    hold("b")
+for _ in range(20):         # cursor to cell 20 = tick 60 (bar 2, beat 2) at 1/16
     press("right")
-    release("b", frames=4)
 check("cursor at tick 60 (bar 2, beat 2)", (v("wRollCell"), v("wRollTick"), v("wDiv")) == (20, 60, 4),
       (v("wRollCell"), v("wRollTick"), v("wDiv")))
 DIV_TICKS = [12, 8, 6, 4, 3, 2, 1]

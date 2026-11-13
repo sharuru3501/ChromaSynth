@@ -125,7 +125,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("B deletes the note and the page goes back to the pool", pool.page(1, 0, 0) == 255 and sorted(pool.lent()) == sorted(demo_pages), (pool.lent(), demo_pages))
     check("... the size is back to the demo's", rom_total(mem) == demo_total, (rom_total(mem), demo_total))
     check("... the zero page is still zero", pool.zero_segment_is_zero())
-    # channel 3 (select twice): a note there lends only channel 3's page
+    # channel 3 (select twice): a note there lends only channel 3's page (pattern 2 is the edited one on CH3 too: its cell says so)
+    mem[sym["wChain"] + 2 * 32] = 1
     tap(pb, "select")
     tap(pb, "select")
     check("channel 3 is selected", v("wSelCh") == 2, v("wSelCh"))

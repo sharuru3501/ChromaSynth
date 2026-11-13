@@ -282,6 +282,11 @@ HandleJoy:
     jr nz, .request         ; START+DOWN: the slot list
     bit PADB_UP, c
     jr z, .startHeld
+    ld a, [wSelCh]          ; the song screen's cursor starts on the channel that is selected
+    cp NUM_CH
+    jr nc, .songCursorSet
+    ld [wSongCh], a
+.songCursorSet:
     ld a, SCREEN_SONG       ; START+UP: the song screen
     jr .request
 .fromSlot:
@@ -292,6 +297,11 @@ HandleJoy:
 .fromSong:
     bit PADB_DOWN, c
     jr z, .startHeld
+    push de
+    ld a, [wSongCh]         ; back: the channel and step of the cursor are the ones that are edited now
+    ld [wSelCh], a
+    call SyncEdit
+    pop de
     ld a, [wScreenBack]
     jr .request
 .navLR:
@@ -363,6 +373,9 @@ HandleJoy:
     xor a
 .chOk:
     ld [wSelCh], a
+    push de                 ; (this frame's new presses)
+    call SyncEdit           ; the edited pattern is the one in the new channel's cell at the cursor's step
+    pop de
     xor a
     ld [wEditRow], a
     ld a, [wDirty]
