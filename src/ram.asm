@@ -185,7 +185,7 @@ wPlayPat:       ds NUM_CH   ; song mode: the pattern (0-based) each channel play
 wSongCur:       db          ; song screen: the cursor's chain step
 wSongCh:        db          ; song screen: the cursor's channel
 wSongCurDraw:   db          ; song screen: the chain offset (channel * CHAIN_LEN + step) of the cursor while its row is drawn, $FF elsewhere
-wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, 1 = step header, 2-5 = CH1-CH4, 7 = MEM)
+wDirtySong:     db          ; song-screen rows needing redraw (bit 0 = mode / edit rows, 1 = step header, 2-5 = CH1-CH4, 6 = playing-step marker, 7 = MEM)
 wSelUsed:       db          ; SELECT was used as a modifier while held
 wBUsed:         db          ; B was used as a modifier while held (sequencer screen)
 wDiv:           db          ; grid division index (src/divs.inc)
