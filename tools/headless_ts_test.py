@@ -220,7 +220,7 @@ with tempfile.TemporaryDirectory() as tmp:
           (max(t for s, t in seen if s == 1), max(t for s, t in seen if s == 0)))
     pb.stop(save=False)
 
-# --- a pattern chosen while playing takes over at the next bar line of the time signature (3/4: every 36 ticks)
+# --- a step chosen while playing (LOOP mode: the cursor moved) takes over at the next bar line of the time signature (3/4: every 36 ticks)
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
     shutil.copy(rom_src, rom)
@@ -241,20 +241,25 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "left")
     combo(pb, "start", "left")
     combo(pb, "start", "up")             # the song screen
+    CH = sym["wChain"]
+    for c in range(4):                   # step 1..4: patterns 1..4 on every channel
+        for i in range(4):
+            mem[CH + c * 32 + i] = i
     combo(pb, "select", "start")
     pb.tick(20)
-    for want in (2, 3, 4, 2):
+    for target in (1, 2, 3, 1):
         mem[sym["wRollTick"]] = 0
-        tap(pb, "a" if want > v("wPlayBank") else "b")
-        queued = v("wQueuedBank")
+        while v("wSongCur") != target:
+            tap(pb, "right" if v("wSongCur") < target else "left")
+        queued = v("wQueuedStep")
         at = None
         for _ in range(400):
             pb.tick(1)
-            if v("wPlayBank") != 0 and v("wPlayBank") == queued:
+            if v("wChainPos") == target and queued != 0:
                 at = v("wSeqCur")
                 break
         # wSeqCur is the tick of the bar line (a multiple of 36) or the one before it, depending on the frame
-        check(f"3/4: pattern {queued} takes over on a bar line", at is not None and at % 36 in (0, 35), at)
+        check(f"3/4: step {target + 1} takes over on a bar line", at is not None and at % 36 in (0, 35), at)
     combo(pb, "select", "start")
     pb.stop(save=False)
 
@@ -346,7 +351,7 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "up")            # loop mode again
     pb.stop(save=False)
 
-# --- a queued pattern takes over at the bar line of the pattern that plays; its own bar length goes on from there
+# --- a queued step takes over at the bar line of the step that plays; its own bar length goes on from there
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
     shutil.copy(rom_src, rom)
@@ -360,29 +365,33 @@ with tempfile.TemporaryDirectory() as tmp:
         mem[PATB + i] = 4
     mem[sym["wSeqBars"]] = 4
     mem[sym["wBpm"]] = 100
+    CH = sym["wChain"]
+    for c in range(4):                   # step 1: pattern 1, step 2: pattern 2 (every channel)
+        mem[CH + c * 32 + 1] = 1
     combo(pb, "start", "up")
     combo(pb, "select", "start")
     pb.tick(30)
     changes = []
-    last = v("wPlayBank")
-    tap(pb, "a")         # queue pattern 2
+    last = v("wChainPos")
+    tap(pb, "right")     # queue step 2 (pattern 2)
     for _ in range(500):
         pb.tick(1)
-        if v("wPlayBank") != last:
-            changes.append((last, v("wPlayBank"), v("wSeqTick")))   # (the next tick to play: the new position + 1 or 2)
-            last = v("wPlayBank")
-            break
-    # the switch is on pattern 1's bar line; pattern 2 goes on at the same bar NUMBER, at its own bar length: a multiple of 36
-    check("1 -> 2: pattern 2 starts on one of its own bar lines (a multiple of 36), at the bar number that was playing",
-          len(changes) == 1 and (changes[0][2] - 1) % 36 in (0, 1, 2) and changes[0][2] > 36, changes)
-    tap(pb, "b")          # queue pattern 1 while pattern 2 (3/4) plays
-    for _ in range(500):
-        pb.tick(1)
-        if v("wPlayBank") != last:
+        if v("wChainPos") != last:
             pb.tick(2)                   # (SeqStep may straddle the frame: let it finish before reading the position)
-            changes.append((last, v("wPlayBank"), v("wSeqTick")))   # (the next tick to play: the new position + 1..2)
+            changes.append((last, v("wChainPos"), v("wSeqTick")))   # (the next tick to play: the new position + 1 or 2)
+            last = v("wChainPos")
             break
-    check("2 -> 1: pattern 1 starts on one of its own bar lines (a multiple of 48)", len(changes) == 2 and (changes[1][2] - 1) % 48 in (0, 1, 2), changes)
+    # the switch is on step 1's bar line; step 2 goes on at the same bar NUMBER, at its own bar length: a multiple of 36
+    check("1 -> 2: step 2 starts on one of its own bar lines (a multiple of 36), at the bar number that was playing",
+          len(changes) == 1 and (changes[0][2] - 1) % 36 in (0, 1, 2) and changes[0][2] > 36, changes)
+    tap(pb, "left")       # queue step 1 while step 2 (3/4) plays
+    for _ in range(500):
+        pb.tick(1)
+        if v("wChainPos") != last:
+            pb.tick(2)                   # (SeqStep may straddle the frame: let it finish before reading the position)
+            changes.append((last, v("wChainPos"), v("wSeqTick")))   # (the next tick to play: the new position + 1..2)
+            break
+    check("2 -> 1: step 1 starts on one of its own bar lines (a multiple of 48)", len(changes) == 2 and (changes[1][2] - 1) % 48 in (0, 1, 2), changes)
     combo(pb, "select", "start")
     pb.stop(save=False)
 

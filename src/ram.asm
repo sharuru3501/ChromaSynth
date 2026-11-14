@@ -159,7 +159,7 @@ wEdLoopSeg:     db          ; where the loop of the EDITED pattern ends (the rul
 wEdLoopTail:    db          ; ... and ticks in it
 wBarIdx:        db          ; index of the bar that is playing (0-based; $FF just before the first)
 wBarPos:        db          ; ticks since the bar began (0 = a bar begins with the next tick played)
-wQueuedBank:    db          ; the pattern (1-based) that takes over at the next bar line (0 = none)
+wQueuedStep:    db          ; LOOP mode, playing: the chain step (+ 1) that takes over at the next bar line (0 = none)
 wBarTicks:      db          ; ticks in a bar of the time signature (numerator * ticks of the beat unit)
 wBeatTicks:     db          ; ticks in the beat unit: 12 (/4), 6 (/8), 3 (/16)
 wMaxBars:       db          ; the longest loop in bars: 384 ticks / wBarTicks, at most MAX_BARS
@@ -186,6 +186,7 @@ wChPos:         ds 2 * NUM_CH ; song mode: the tick each channel plays next, ins
 wChLen:         ds 2 * NUM_CH ; song mode: the length in ticks of each channel's pattern in the playing step (16 bits, 0 = silent)
 wStepLen:       ds 2        ; song mode: the playing step's length in ticks (the longest pattern in it, at most 384)
 wStepBarTicks:  db          ; song mode: ticks in a bar of the playing step (its first pattern's time signature)
+wChPosSave:     ds 2 * NUM_CH ; RefreshStepLen scratch: the channel positions while the step is measured again
 wChSeg:         db          ; SeqStep scratch: the segment / tick the channel being played reads
 wChTick:        db
 wSongCur:       db          ; song screen: the cursor's chain step
