@@ -153,10 +153,10 @@ check("... written once (no more palette writes away from the keyboard screen)",
 press("a")  # a normal screen: A plays a note (the symbols below are only read on the keyboard screen)
 pb.tick(20)
 screens = [v("wScreen")]
-for _ in range(4):
+for _ in range(3):
     nav("right")
     screens.append(v("wScreen"))
-check("START+RIGHT goes play -> edit -> sequencer -> keyboard, and stops at the keyboard screen", screens == [0, 1, 2, 3, 3], screens)
+check("START+RIGHT goes play -> edit -> keyboard (the sequencer is below: START+DOWN), and stops at the keyboard screen", screens == [0, 1, 3, 3], screens)
 enter_kbd()
 check("on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 
@@ -376,7 +376,7 @@ tap()
 check("SELECT+START again stops it", v("wSeqPlay") == 0, v("wSeqPlay"))
 nav("left")
 pb.tick(6)
-check("START+LEFT on the keyboard screen: back to the sequencer", v("wScreen") == 2, v("wScreen"))
+check("START+LEFT on the keyboard screen: back to the edit screen", v("wScreen") == 1, v("wScreen"))
 check("leaving did not start the sequencer or save", v("wSeqPlay") == 0)
 enter_kbd()
 check("re-entered the keyboard screen", v("wScreen") == 3)
@@ -392,7 +392,7 @@ for ph, data in cl.with_phases(cl.encode_play(1, 64, 100), next_phase()):
 check("a person's START+LEFT during a packet: no exit while every frame has UP/DOWN", v("wScreen") == 3, v("wScreen"))
 hold({"start", "left"}, 4)                     # the packet ends: frames without UP/DOWN
 release_all(4)
-check("... the first frames without UP/DOWN leave for the sequencer", v("wScreen") == 2 and v("wClLinked") == 0,
+check("... the first frames without UP/DOWN leave for the edit screen", v("wScreen") == 1 and v("wClLinked") == 0,
       (v("wScreen"), v("wClLinked")))
 check("... and the d-pad LEFT did not move the roll cursor or start anything", v("wSeqPlay") == 0)
 pb.tick(30)
@@ -428,7 +428,7 @@ pb.tick(4)
 pb.button_release("left")
 pb.button_release("start")
 pb.tick(2)
-check("leaving the keyboard screen (START+LEFT) unlinks", v("wScreen") == 2 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
+check("leaving the keyboard screen (START+LEFT) unlinks", v("wScreen") == 1 and v("wClLinked") == 0, (v("wScreen"), v("wClLinked")))
 check("... and leaves the end beacon {$F5, len 3} in the slot", cl.classify(cl.decode_slot(*slot())) == "left" and slot()[3] == 0x60, slot())
 writes_before = len(up_write_ly)
 pb.tick(60)

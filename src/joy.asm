@@ -24,7 +24,7 @@ SECTION "Joypad", ROM0
 ;   data bits 3..0 = LEFT, START, B, A.
 ; The ESP32 never presses SELECT or RIGHT, and it presses LEFT only together with UP or DOWN
 ; (src/clink chl_buttons), in the same d-pad group of P1. So a frame with neither UP nor DOWN
-; is a person: there, START+LEFT (SELECT not held) leaves for the sequencer, and SELECT+START
+; is a person: there, START+LEFT (SELECT not held) leaves for the edit screen (the screen before it in the row), and SELECT+START
 ; reaches the UI (play/stop). Frames with UP or DOWN neither start nor reset the combo.
 ; SELECT alone still reaches the UI (tap = next channel).
 
@@ -80,12 +80,12 @@ ReadJoy:
     ld a, e
     and a
     jr nz, .hide            ; still held from before: one step per press
-    xor a                   ; leave: back to the sequencer
+    xor a                   ; leave: back to the edit screen (the sequencer is not in the row any more)
     ld [wClN], a
     ld [wClHave], a
     inc a
     ld [wNavHide], a
-    ld a, SCREEN_SEQ + 1
+    ld a, SCREEN_EDIT + 1
     ld [wScreenReq], a
     jr .hide
 .person:
@@ -279,14 +279,17 @@ HandleJoy:
     ld [wScreenBack], a     ; (the screen the slot list returns to)
     bit PADB_DOWN, c
     jr z, .notDown
-    cp SCREEN_SEQ           ; START+DOWN: the sequencer from anywhere (from play / edit / keyboard), the slot list from the sequencer
+    cp SCREEN_SEQ           ; START+DOWN: the sequencer from play / edit / keyboard, the slot list from the sequencer
+    jr z, .toSlot
+    ld [wScreenHome], a     ; (START+LEFT / RIGHT on the sequencer come back to this screen)
     ld a, SCREEN_SEQ
-    jr nz, .request
+    jp .request
+.toSlot:
     ld a, SCREEN_SLOT
-    jr .request
+    jp .request
 .notDown:
     bit PADB_UP, c
-    jr z, .startHeld
+    jp z, .startHeld
     ld a, [wSelCh]          ; the song screen's cursor starts on the channel that is selected
     cp NUM_CH
     jr nc, .songCursorSet
@@ -342,15 +345,26 @@ HandleJoy:
     pop de
     jr .startHeld
 .notSongMode:
+    cp SCREEN_SEQ
+    jr nz, .ring
+    ld a, [wScreenHome]     ; the sequencer is not in the row: START+LEFT / RIGHT go back to the screen it was reached from
+    jr .request
+.ring:                      ; the row: play - edit - keyboard (the sequencer is skipped: it is below, START+DOWN)
     bit PADB_LEFT, c
     jr z, .next
     and a
     jr z, .startHeld        ; the first screen: stay
     dec a
+    cp SCREEN_SEQ
+    jr nz, .request
+    dec a
     jr .request
 .next:
     cp SCREEN_KBD
     jr z, .startHeld        ; the last screen: stay
+    inc a
+    cp SCREEN_SEQ
+    jr nz, .request
     inc a
 .request:
     inc a                   ; request: target screen + 1

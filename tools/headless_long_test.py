@@ -89,8 +89,7 @@ with tempfile.TemporaryDirectory() as tmp:
     tiles = lambda s_: bytes(ord(c) - 32 for c in s_)
 
     check("the demo is in pattern 1, segment 1", cell(mem, 0, 0, 0) == 60 and cell(mem, 0, 1, 0) == 0)
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(30)
     check("on the piano roll", v("wScreen") == 2, v("wScreen"))
 
@@ -176,8 +175,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
 
     def picture():
@@ -212,8 +210,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
 
     def picture():
@@ -314,8 +311,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
 
     def picture():
@@ -360,8 +356,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     mem[sym["wBpm"]] = 200                       # a tick every 1.5 frames: a turn that lags shows
     mem[sym["wSeqBars"]] = 3
@@ -397,8 +392,7 @@ with tempfile.TemporaryDirectory() as tmp:
     passes = [0]
     pb.hook_register(0, sym["SeqStep"], lambda ctx: steps.__setitem__(0, steps[0] + 1), None)
     pb.hook_register(0, sym["SeqTick"], lambda ctx: passes.__setitem__(0, passes[0] + 1), None)
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(60)
     mem[sym["wSeqBars"]] = 8
     mem[sym["wBpm"]] = 150
@@ -444,8 +438,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     POOL[:] = [Pool(mem, sym)]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
 
     def shown_row(r):
@@ -526,8 +519,7 @@ with tempfile.TemporaryDirectory() as tmp:
     setcell(mem, 0, 1, 48, 67)         # bar 6: G4 (after the 5-bar loop's end)
     mem[sym["wBpm"]] = 240             # a bar = 60 frames
     mem[sym["wSeqBars"]] = 8
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     combo(pb, "select", "start")
     seen = []
     notes = []

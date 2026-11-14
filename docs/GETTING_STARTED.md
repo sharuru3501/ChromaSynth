@@ -79,7 +79,7 @@ An app you build yourself does not carry the quarantine mark, so macOS opens it 
 
 ### B3. Chromatic side
 1. Open the Chromatic's menu: **System > MIDI MODE**, choose **BLE** or **USB**. The choice is remembered. (OFF lets the ESP32 sleep to save battery.)
-2. In ChromaSynth, go to the **Keyboard screen** (START+→ from the Sequencer). Notes from the DAW only arrive while this screen is shown.
+2. In ChromaSynth, go to the **Keyboard screen** (START+→ from the PATCH screen). Notes from the DAW only arrive while this screen is shown.
 3. For USB: connect the USB-C cable to the Mac; the app switches to USB by itself.
 
 ### B4. Play it from a DAW (example: Ableton Live)
