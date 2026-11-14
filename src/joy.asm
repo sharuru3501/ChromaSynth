@@ -260,7 +260,7 @@ HandleJoy:
     pop de
     jp .startHeld
 .nav:
-    ; START+DOWN opens the slot list (from play / edit / sequencer), START+UP goes back
+    ; START+DOWN: the sequencer from any screen (the slot list when already on the sequencer); START+UP: the song screen, and back from the slot list
     ld a, [wJoyPrev]
     cpl
     ld c, a
@@ -276,10 +276,15 @@ HandleJoy:
     jr z, .fromSong
     cp SCREEN_WAVE
     jp z, .startHeld        ; the wave editor is left with START+B only
-    ld [wScreenBack], a
+    ld [wScreenBack], a     ; (the screen the slot list returns to)
     bit PADB_DOWN, c
+    jr z, .notDown
+    cp SCREEN_SEQ           ; START+DOWN: the sequencer from anywhere (from play / edit / keyboard), the slot list from the sequencer
+    ld a, SCREEN_SEQ
+    jr nz, .request
     ld a, SCREEN_SLOT
-    jr nz, .request         ; START+DOWN: the slot list
+    jr .request
+.notDown:
     bit PADB_UP, c
     jr z, .startHeld
     ld a, [wSelCh]          ; the song screen's cursor starts on the channel that is selected
@@ -302,7 +307,7 @@ HandleJoy:
     ld [wSelCh], a
     call SyncEdit
     pop de
-    ld a, [wScreenBack]
+    ld a, SCREEN_SEQ        ; (the song screen is opened from the sequencer most of the time: back there)
     jr .request
 .navLR:
     ld a, [wScreen]

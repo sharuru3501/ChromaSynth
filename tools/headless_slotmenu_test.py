@@ -118,7 +118,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("boot: no slot holds a song (slot 4 is foreign)", used(mem) == 0, used(mem))
 
     # ---- NEW on an empty slot: it becomes a song
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # (the sequencer ...)
+    combo(pb, "start", "down")           # ... and from there the slot list
     pb.tick(20)
     to_slot(pb, mem, 1)
     item(pb, NEW)
@@ -155,7 +156,8 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wBpm"]] = 99
     combo(pb, "select", "b")
     check("slot 1 saved (SELECT+B)", v("wMsg") == 1 and used(mem) == 3, (v("wMsg"), used(mem)))
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # (the sequencer ...)
+    combo(pb, "start", "down")           # ... and from there the slot list
     pb.tick(20)
     to_slot(pb, mem, 0)
     item(pb, RENAME)
@@ -225,7 +227,8 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     MEM[:] = [mem]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # (the sequencer ...)
+    combo(pb, "start", "down")           # ... and from there the slot list
     pb.tick(20)
     to_slot(pb, mem, 2)
     item(pb, DELETE)
@@ -264,7 +267,8 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     MEM[:] = [mem]
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # (the sequencer ...)
+    combo(pb, "start", "down")           # ... and from there the slot list
     pb.tick(20)
     check("one slot: the list has one slot", v("wNumSlots") == 1, v("wNumSlots"))
     item(pb, SAVE)

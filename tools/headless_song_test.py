@@ -93,11 +93,11 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "up")
     check("START+UP does nothing there either", v("wScreen") == 5)
     combo(pb, "start", "down")
-    check("START+DOWN goes back to the play screen", v("wScreen") == 0, v("wScreen"))
-    combo(pb, "start", "right")                      # edit screen
+    check("START+DOWN goes to the sequencer screen (from anywhere)", v("wScreen") == 2, v("wScreen"))
+    combo(pb, "start", "left")                       # edit screen
     combo(pb, "start", "up")
     combo(pb, "start", "down")
-    check("... and back to the edit screen when it came from there", v("wScreen") == 1, v("wScreen"))
+    check("... also when the song screen was opened from the edit screen", v("wScreen") == 2, v("wScreen"))
     combo(pb, "start", "left")
     combo(pb, "start", "up")
     pb.tick(30)
@@ -262,9 +262,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # --- patterns are separate: the roll writes into the edited pattern
     tap(pb, "a")                                       # the cell holds pattern 2: it is edited
-    combo(pb, "start", "down")
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")                        # the piano roll
+    combo(pb, "start", "down")                         # the piano roll
     pb.tick(30)
     check("on the piano roll", v("wScreen") == 2, v("wScreen"))
     mem[sym["wRollNote"]] = 70
@@ -573,9 +571,7 @@ with tempfile.TemporaryDirectory() as tmp:
     cand = v("wEditPat")
     check("CH2's row has only pattern 1: the candidate is pattern 2 for CH2 (whatever CH1 uses: patterns 1 and 4; pattern 2's CH1 part holds a note: that is CH1's)", cand == 1, cand)
     check("... it is not in the chain yet", mem[CHAIN + CHAIN_LEN + 1] == 0xFF)
-    combo(pb, "start", "down")                          # back to the screen the song screen was opened from
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")                         # the piano roll
+    combo(pb, "start", "down")                          # the piano roll
     pb.tick(30)
     check("on the roll: channel 2, the candidate pattern", v("wScreen") == 2 and v("wSelCh") == 1 and v("wEditPat") == cand, (v("wScreen"), v("wSelCh"), v("wEditPat")))
     check("... and still nothing in the chain", mem[CHAIN + CHAIN_LEN + 1] == 0xFF)
