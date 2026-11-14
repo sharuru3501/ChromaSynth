@@ -260,7 +260,8 @@ HandleJoy:
     pop de
     jp .startHeld
 .nav:
-    ; START+DOWN: the sequencer from any screen (the slot list when already on the sequencer); START+UP: the song screen, and back from the slot list
+    ; The screens: a row (play - song - patch - keyboard, START+LEFT / RIGHT) and the sequencer below it (START+DOWN from any of them),
+    ; the slot list below the sequencer (START+DOWN there); START+UP goes back up (docs/NAVIGATION.md)
     ld a, [wJoyPrev]
     cpl
     ld c, a
@@ -272,16 +273,14 @@ HandleJoy:
     ld a, [wScreen]
     cp SCREEN_SLOT
     jr z, .fromSlot
-    cp SCREEN_SONG
-    jr z, .fromSong
     cp SCREEN_WAVE
     jp z, .startHeld        ; the wave editor is left with START+B only
     ld [wScreenBack], a     ; (the screen the slot list returns to)
     bit PADB_DOWN, c
     jr z, .notDown
-    cp SCREEN_SEQ           ; START+DOWN: the sequencer from play / edit / keyboard, the slot list from the sequencer
+    cp SCREEN_SEQ           ; START+DOWN: the sequencer from the row, the slot list from the sequencer
     jr z, .toSlot
-    ld [wScreenHome], a     ; (START+LEFT / RIGHT on the sequencer come back to this screen)
+    ld [wScreenHome], a     ; (START+UP on the sequencer comes back to this screen)
     ld a, SCREEN_SEQ
     jp .request
 .toSlot:
@@ -291,40 +290,24 @@ HandleJoy:
     bit PADB_UP, c
     jp z, .startHeld
     cp SCREEN_SEQ
-    jr nz, .toSong
-    ld a, [wScreenHome]     ; the sequencer: START+UP goes back to the screen (play / patch / keyboard) it was reached from
+    jp nz, .startHeld       ; (the row screens have nothing above them)
+    ld a, [wScreenHome]     ; the sequencer: START+UP goes back to the screen of the row it was reached from
     jp .request
-.toSong:
-    ld [wScreenHome], a     ; (the screen the sequencer returns to, when it is reached from the song screen)
-    ld a, [wSelCh]          ; the song screen's cursor starts on the channel that is selected
-    cp NUM_CH
-    jr nc, .songCursorSet
-    ld [wSongCh], a
-.songCursorSet:
-    ld a, SCREEN_SONG       ; START+UP: the song screen
-    jr .request
 .fromSlot:
     bit PADB_UP, c
-    jr z, .startHeld
+    jp z, .startHeld
     ld a, [wScreenBack]
-    jr .request
-.fromSong:
-    bit PADB_DOWN, c
-    jr z, .startHeld
-    push de
-    ld a, [wSongCh]         ; back: the channel and step of the cursor are the ones that are edited now
-    ld [wSelCh], a
-    call SyncEdit
-    pop de
-    ld a, SCREEN_SEQ        ; (the song screen is opened from the sequencer most of the time: back there)
-    jr .request
+    jp .request
 .navLR:
     ld a, [wScreen]
     cp SCREEN_SLOT
     jr z, .startHeld        ; the slot list is left with START+UP only
     cp SCREEN_WAVE
     jr z, .startHeld
+    cp SCREEN_SEQ
+    jr z, .startHeld        ; the sequencer is not in the row: START+LEFT / RIGHT do nothing there (START+UP goes back)
     ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
+    ld b, a                 ; b = this screen
     ld a, [wJoyPrev]
     bit PADB_START, a
     jr nz, .prevStart
@@ -338,38 +321,39 @@ HandleJoy:
     and c
     jr z, .startHeld
     ld c, a
-    ld a, [wScreen]
-    cp SCREEN_SONG
-    jr nz, .notSongMode
-    bit PADB_LEFT, c        ; the song screen is left with START+DOWN only; START+LEFT / RIGHT = LOOP / SONG mode
-    ld a, 0
-    jr nz, .songMode
-    inc a
-.songMode:
-    push de
-    call SongSetMode
-    pop de
-    jr .startHeld
-.notSongMode:
-    cp SCREEN_SEQ
-    jr z, .startHeld        ; the sequencer is not in the row: START+LEFT / RIGHT do nothing there (START+UP goes back)
-.ring:                      ; the row: play - edit - keyboard (the sequencer is skipped: it is below, START+DOWN)
+    ld a, b
+    ld hl, ScreenRow        ; find this screen in the row (e = its place)
+    ld e, 0
+.find:
+    cp [hl]
+    jr z, .found
+    inc hl
+    inc e
+    jr .find
+.found:
     bit PADB_LEFT, c
-    jr z, .next
+    jr z, .toRight
+    ld a, e
     and a
     jr z, .startHeld        ; the first screen: stay
-    dec a
-    cp SCREEN_SEQ
-    jr nz, .request
-    dec a
-    jr .request
-.next:
-    cp SCREEN_KBD
+    dec hl                  ; the screen before it
+    ld a, [hl]
+    jr .arrive
+.toRight:
+    inc hl
+    ld a, [hl]
+    cp $FF
     jr z, .startHeld        ; the last screen: stay
-    inc a
-    cp SCREEN_SEQ
+.arrive:
+    cp SCREEN_SONG
     jr nz, .request
-    inc a
+    ld b, a                 ; the song screen's cursor starts on the channel that is selected
+    ld a, [wSelCh]
+    cp NUM_CH
+    jr nc, .songCursorSet
+    ld [wSongCh], a
+.songCursorSet:
+    ld a, b
 .request:
     inc a                   ; request: target screen + 1
     ld [wScreenReq], a
@@ -640,3 +624,7 @@ MarkEditRow:
     ld [hl], a
     pop bc
     ret
+
+; The row of screens START+LEFT / RIGHT walk along ($FF ends it).
+ScreenRow:
+    db SCREEN_PLAY, SCREEN_SONG, SCREEN_EDIT, SCREEN_KBD, $FF

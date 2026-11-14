@@ -12,7 +12,7 @@
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
 ;   SELECT+LEFT / RIGHT = the loop range starts / ends here, SELECT+DOWN = this step alone, SELECT+UP = no range;
-;   START+LEFT / RIGHT = LOOP / SONG mode (the piano roll edits the pattern of the cursor's cell)
+;   START+A / START+B = SONG / LOOP mode (the piano roll edits the pattern of the cursor's cell)
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -1280,6 +1280,19 @@ RangeMark:
 ; d = buttons newly pressed.
 SongInput:
     ld a, [wJoy]
+    bit PADB_START, a
+    jr z, .noStart
+    bit PADB_A, d           ; START+A = SONG mode, START+B = LOOP mode (START+LEFT / RIGHT walk along the row of screens)
+    jr z, .startNotA
+    ld a, 1
+    jp SongSetMode
+.startNotA:
+    bit PADB_B, d
+    ret z
+    xor a
+    jp SongSetMode
+.noStart:
+    ld a, [wJoy]
     bit PADB_SELECT, a
     jr z, .plain
     ld a, d
@@ -1505,5 +1518,5 @@ sSong:       db "SONG", 0
 sSongHelp1:  db "PAD:MOVE A/B:PATTERN", 0
 sSongHelp2:  db "SEL+LR:RANGE ST/END", 0
 sSongHelp3:  db "SEL+D:1STEP U:CLEAR", 0
-sSongHelp4:  db "ST+LR:LOOP/SONG", 0
-sSongHelp5:  db "ST+DOWN:BACK", 0
+sSongHelp4:  db "ST+A:SONG ST+B:LOOP", 0
+sSongHelp5:  db "ST+DOWN:SEQUENCER", 0

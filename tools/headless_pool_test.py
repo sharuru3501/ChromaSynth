@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory() as tmp:
     demo_total = total(pool)
 
     # ---- the song screen shows the memory
-    combo(pb, "start", "up")
+    combo(pb, "start", "right")          # the song screen (next to play in the row)
     pb.tick(30)
     base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
     row = ((mem[0xFF42] // 8) + 1) & 31

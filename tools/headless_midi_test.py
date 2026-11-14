@@ -105,7 +105,8 @@ check("defaults: CH1-4 listen to MIDI 1-4, velocity on, mod wheel on",
       [mem[MB + i] for i in range(7)] == [1, 2, 3, 4, 2, 1, 1], [mem[MB + i] for i in range(7)])
 
 # ---- the settings page on the edit screen (UI)
-nav("right")                        # play -> edit
+nav("right")                        # play -> song
+nav("right")                        # song -> patch (the edit screen)
 for _ in range(4):
     press("select")                 # CH1 -> ... -> CH4 -> MIDI page
 check("edit screen: 5th page is the MIDI settings", (v("wScreen"), v("wSelCh")) == (1, 4), (v("wScreen"), v("wSelCh")))

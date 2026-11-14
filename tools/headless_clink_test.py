@@ -153,10 +153,10 @@ check("... written once (no more palette writes away from the keyboard screen)",
 press("a")  # a normal screen: A plays a note (the symbols below are only read on the keyboard screen)
 pb.tick(20)
 screens = [v("wScreen")]
-for _ in range(3):
+for _ in range(4):
     nav("right")
     screens.append(v("wScreen"))
-check("START+RIGHT goes play -> edit -> keyboard (the sequencer is below: START+DOWN), and stops at the keyboard screen", screens == [0, 1, 3, 3], screens)
+check("START+RIGHT goes play -> song -> edit -> keyboard (the sequencer is below: START+DOWN), and stops at the keyboard screen", screens == [0, 5, 1, 3, 3], screens)
 enter_kbd()
 check("on the keyboard screen", v("wScreen") == 3, v("wScreen"))
 

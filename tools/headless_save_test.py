@@ -252,7 +252,8 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "start", "up")
     check("START+UP goes back to the sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
     combo(pb, "start", "up")                          # the play screen again (the sequencer goes back to where it was reached from)
-    combo(pb, "start", "right")                       # edit screen
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")                       # edit screen (play - song - patch)
     combo(pb, "start", "down")
     check("... from the edit screen START+DOWN also goes to the sequencer", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
     combo(pb, "start", "down")           # (from the sequencer: the slot list)
