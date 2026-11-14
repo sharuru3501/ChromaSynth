@@ -178,17 +178,11 @@ SeqStep:
     xor a
 .barStore:
     ld [wBarPos], a
-    ld a, [wSeqTick]
-    ld [wSeqCur], a
-    ld a, [wSeqSeg]
-    ld [wSeqCurSeg], a
+    call SetPlayhead        ; (wSeqCur / wSeqCurSeg: where the roll shows the playhead)
     ld a, $F8               ; one MIDI clock per tick (only sent when SYNC_OUT)
     call MidiOutSync
     ld c, 0
-.ch:
-    ld a, [wSongMode]       ; loop mode: every channel plays the played pattern; song mode: the pattern of its chain step
-    and a
-    jr z, .loopPat
+.ch:                        ; every channel plays the pattern of its chain step (the step's own, in both modes)
     ld hl, wPlayPat
     ld e, c
     ld d, 0
@@ -200,13 +194,6 @@ SeqStep:
     call ChSegTick          ; this channel's own place in its pattern -> wChSeg / wChTick
     pop af
     jr .pat
-.loopPat:
-    ld a, [wSeqCurSeg]
-    ld [wChSeg], a
-    ld a, [wSeqCur]
-    ld [wChTick], a
-    ld a, [wPlayBank]
-    dec a
 .pat:
     push bc                 ; the page of this channel in the pattern's half (PageLoc sets SVBK to its bank)
     ld b, c
@@ -241,9 +228,7 @@ SeqStep:
     ld a, c
     cp NUM_CH
     jr c, .ch
-    ld a, [wSongMode]
-    and a
-    call nz, ChAdvance      ; song mode: every channel goes on inside its own pattern (a short one starts over)
+    call ChAdvance          ; every channel goes on inside its own pattern (a short one starts over)
     ld hl, wLoopSeg         ; where the loop ends (PlayInfo): (last segment, ticks in it)
     ld a, [wSeqTick]
     inc a
@@ -263,10 +248,14 @@ SeqStep:
     ld [wBarPos], a         ; (the first tick of the loop starts a bar)
     dec a
     ld [wBarIdx], a         ; $FF: the bar that starts now is index 0
-    xor a
     ld a, [wSongMode]
     and a
-    call nz, SongNext       ; the chain goes on with its next pattern
+    jr z, .again
+    call SongNext           ; SONG: the chain goes on with its next step
+    jr .nextDone
+.again:
+    call LoopAgain          ; LOOP: the same step again (or the step that was chosen meanwhile)
+.nextDone:
     ld a, [wSeqTick]
     jr .stored
 .midLoop:
@@ -511,14 +500,39 @@ ChAdvance:
     jr c, .each
     ret
 
-; Where the loop of the PLAYED pattern ends and its bar length -> wLoopSeg / wLoopTail, wPBarTicks.
-; The played pattern is usually the edited one (its values are live: the MIDI block and wSeqBars);
-; another one comes from its slot. Clobbers a, bc, de, hl.
+; wSeqCur / wSeqCurSeg = where the roll shows the playhead: the selected channel's own place in its pattern (a pattern that is shorter
+; than the step repeats), or the step's when that channel plays nothing. Clobbers a, de, hl. Keeps bc.
+SetPlayhead:
+    ld a, [wSeqTick]
+    ld [wSeqCur], a
+    ld a, [wSeqSeg]
+    ld [wSeqCurSeg], a
+    ld a, [wSelCh]
+    cp NUM_CH
+    ret nc
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, wChLen
+    add hl, de
+    ld a, [hl+]
+    or [hl]
+    ret z                   ; (this channel has no pattern in the step)
+    ld a, [wSelCh]
+    push bc
+    ld c, a
+    call ChSegTick
+    pop bc
+    ld a, [wChTick]
+    ld [wSeqCur], a
+    ld a, [wChSeg]
+    ld [wSeqCurSeg], a
+    ret
+
+; Where the loop of the PLAYING STEP ends and its bar length -> wLoopSeg / wLoopTail, wPBarTicks (both come from
+; LoadStepPats: the longest pattern of the step and the time signature of its first one). Clobbers a, de, hl.
 PlayInfo:
-    ld a, [wSongMode]
-    and a
-    jr z, .loopMode
-    ld a, [wStepBarTicks]   ; song mode: the step's own bar length and length (LoadStepPats)
+    ld a, [wStepBarTicks]   ; the step's own bar length and length (LoadStepPats)
     ld [wPBarTicks], a
     ld a, [wStepLen]
     ld e, a
@@ -538,48 +552,6 @@ PlayInfo:
 .lastSeg:
     ld d, 0
 .set:
-    ld a, d
-    ld [wLoopSeg], a
-    ld a, e
-    ld [wLoopTail], a
-    ret
-.loopMode:
-    ld a, [wPlayBank]
-    ld hl, wEditBank
-    cp [hl]
-    jr nz, .other
-    ld a, [wBarTicks]
-    ld c, a
-    ld a, [wSeqBars]
-    ld b, a
-    jr .have
-.other:
-    dec a
-    cp NUM_PATS
-    jr c, .idx
-    xor a
-.idx:
-    ld e, a
-    ld d, 0
-    ld hl, wPatTsd
-    add hl, de
-    ld a, [hl]
-    ld c, a
-    ld hl, wPatBars
-    add hl, de
-    ld a, [hl]
-    push af                 ; the bars
-    ld hl, wPatTsn
-    add hl, de
-    ld a, [hl]
-    call TsBarTicks         ; a = bar ticks
-    ld c, a
-    pop af
-    ld b, a
-.have:
-    ld a, c
-    ld [wPBarTicks], a
-    call LoopEndOf          ; b = bars, c = bar ticks -> d = segment, e = ticks in it
     ld a, d
     ld [wLoopSeg], a
     ld a, e
@@ -1221,6 +1193,7 @@ SeqSelectHeld:
     cp b
     ret z
     ld [wSeqBars], a
+    call RefreshStepLen     ; (a step that plays measures its patterns again)
     jp RollRefreshAll       ; the ruler shows where the loop ends
 
 ; A pressed: put a one-cell note at the cursor unless a note of that pitch is
@@ -1320,6 +1293,7 @@ LoopCoverHL:                ; hl = a tick counted from the start of the pattern
     ret z
     ld [hl], a
     push bc
+    call RefreshStepLen     ; (a step that plays measures its patterns again)
     call RollRefreshAll     ; the ruler and the status line show the new length
     pop bc
     ret

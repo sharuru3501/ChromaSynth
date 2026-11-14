@@ -224,23 +224,25 @@ StepHasPat:
     scf
     ret
 
-; The sequencer starts: the first chain step (song mode) or the edited pattern (loop mode).
+; The sequencer starts. LOOP: the step under the song screen's cursor, again and again. SONG: from the cursor's step when the song
+; screen is shown, from the first one otherwise.
 SongRestart:
-    xor a
-    ld [wChainPos], a
     ld a, [wSongMode]
     and a
-    ld a, [wEditBank]
-    jr z, .set
-    call TsStore
+    ld a, [wSongCur]
+    jr z, .have             ; LOOP: the cursor's step
+    ld a, [wScreen]
+    cp SCREEN_SONG
+    ld a, 0
+    jr nz, .have            ; SONG, another screen: the first step
+    ld a, [wSongCur]
+.have:
+    ld [wChainPos], a
     xor a
-    call LoadStepPats       ; wPlayBank = step 0's first pattern + 1
-    jr .queue
-.set:
-    ld [wPlayBank], a
-.queue:
-    xor a
-    ld [wQueuedBank], a     ; (a pattern that was waiting for a bar line is the played one now)
+    ld [wQueuedStep], a
+    call TsStore            ; (the edited pattern's live length and time signature go to its slot: they are read from there)
+    ld a, [wChainPos]
+    call LoadStepPats
     ld a, [wDirtySong]
     or 1                    ; the PLAY row
     ld [wDirtySong], a
@@ -288,50 +290,32 @@ SongEditTo:
     ld [wEditBank], a
     ld [$FF70], a           ; the piano roll reads this bank
     call TsLoadEdit         ; the new one's time signature and length become the live ones
-    ld a, [wSongMode]
-    and a
-    jr nz, .mark
-    ld a, [wSeqPlay]
-    and a
-    jr nz, .queue
-    ld a, [wEditBank]       ; stopped: it is the played pattern at once
-    ld [wPlayBank], a
-    xor a
-    ld [wQueuedBank], a
-    jr .mark
-.queue:
-    ld a, [wEditBank]       ; playing: it takes over at the next bar line (SongBarStart)
-    ld hl, wPlayBank
-    cp [hl]
-    jr nz, .set
-    xor a                   ; (back to the pattern that plays: nothing waits)
-.set:
-    ld [wQueuedBank], a
-.mark:
     ld a, [wDirtySong]
     or 1
     ld [wDirtySong], a
     jp MarkSeqStatus
 
-; A bar begins (SeqStep, before its first tick): a pattern that was chosen while playing takes
-; over now (loop mode). The notes of the old one stop. Clobbers a, b, c, hl.
+; A bar begins (SeqStep, before its first tick): in LOOP mode, a step that was chosen while playing (the cursor moved) takes over now.
+; Its patterns start at the same bar number (its own bar length), or from the start when that is past its end. The notes of the old
+; step stop. Clobbers a, b, c, d, e, hl.
 SongBarStart:
-    ld a, [wQueuedBank]
+    ld a, [wQueuedStep]
     and a
     ret z
     ld b, a
     xor a
-    ld [wQueuedBank], a
+    ld [wQueuedStep], a
     ld a, [wSongMode]
     and a
-    ret nz                  ; (song mode: the chain decides)
-    ld a, [wPlayBank]
-    cp b
-    ret z
+    ret nz                  ; (SONG: the chain decides)
     ld a, b
-    ld [wPlayBank], a
+    dec a
+    ld [wChainPos], a       ; the step that plays now
     call SeqSilence
-    call PlayInfo           ; the new pattern's bar length and loop end
+    call TsStore
+    ld a, [wChainPos]
+    call LoadStepPats
+    call PlayInfo           ; the new step's bar length and loop end
     ld a, [wBarIdx]         ; it goes on at the same bar number (its own bar length), or from the
     ld b, a                 ; start when that is past its end
     ld a, [wPBarTicks]
@@ -390,10 +374,147 @@ SongBarStart:
     ld a, l
     ld [wSeqTick], a
 .placed:
+    call ChPosFromGlobal    ; every channel goes on at its own place inside its pattern
+    call SongMarkPos
     ld a, [wDirtySong]
     or 1
     ld [wDirtySong], a
     jp MarkSeqStatus
+
+; Every channel with a pattern: its place = the step's position (wSeqSeg / wSeqTick) modulo its pattern length. Clobbers a, bc, de, hl.
+ChPosFromGlobal:
+    ld c, 0
+.each:
+    ld hl, wChLen
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    add hl, de
+    ld a, [hl+]
+    ld e, a
+    ld a, [hl]
+    ld d, a                 ; de = the length of this channel's pattern
+    or e
+    jr z, .next             ; (silent)
+    push de
+    ld a, [wSeqSeg]
+    ld hl, 0
+    and a
+    jr z, .tick
+    ld hl, SEQ_TICKS
+.tick:
+    ld a, [wSeqTick]
+    add l
+    ld l, a
+    jr nc, .mod
+    inc h                   ; hl = the position in the step
+.mod:
+    ld a, h
+    cp d
+    jr c, .done
+    jr nz, .sub
+    ld a, l
+    cp e
+    jr c, .done
+.sub:
+    ld a, l
+    sub e
+    ld l, a
+    ld a, h
+    sbc d
+    ld h, a
+    jr .mod
+.done:
+    push hl
+    ld a, c
+    add a
+    ld e, a
+    ld d, 0
+    ld hl, wChPos
+    add hl, de
+    pop de                  ; de = the place inside the pattern
+    ld [hl], e
+    inc hl
+    ld [hl], d
+    pop af                  ; (the length)
+.next:
+    inc c
+    ld a, c
+    cp NUM_CH
+    jr c, .each
+    ret
+
+; LOOP mode: the step reached its end: it plays again (its patterns are read from the chain anew), or the step that was chosen
+; meanwhile takes over. Clobbers a, bc, de, hl.
+LoopAgain:
+    ld a, [wQueuedStep]
+    and a
+    jr z, .same
+    dec a
+    ld [wChainPos], a
+    xor a
+    ld [wQueuedStep], a
+.same:
+    call SongMarkPos        ; (the PLAY row may name another step)
+    call TsStore
+    ld a, [wChainPos]
+    jp LoadStepPats
+
+; LOOP mode, playing: the cursor stands on another step than the one that plays: that one takes over at the next bar line.
+; (On the same step: nothing waits.) Clobbers a, b, hl.
+LoopFollow:
+    ld a, [wSongMode]
+    and a
+    ret nz                  ; (SONG: the chain decides)
+    ld a, [wSeqPlay]
+    and a
+    ret z                   ; (stopped: the start takes the cursor's step)
+    ld a, [wSongCur]
+    ld b, a
+    ld a, [wChainPos]
+    cp b
+    jr z, .cancel
+    ld a, b
+    inc a
+    jr .set
+.cancel:
+    xor a
+.set:
+    ld [wQueuedStep], a
+    ld a, [wDirtySong]
+    or 1
+    ld [wDirtySong], a
+    ret
+
+; A step that plays has to measure its patterns again (the loop length of the edited one changed): its lengths and its end are
+; recalculated, the places of the channels are kept. Clobbers a, bc, de, hl.
+RefreshStepLen:
+    ld a, [wSeqPlay]
+    and a
+    ret z
+    ld hl, wChPos
+    ld de, wChPosSave
+    ld b, 2 * NUM_CH
+.save:
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .save
+    call TsStore
+    ld a, [wChainPos]
+    call LoadStepPats
+    ld hl, wChPosSave
+    ld de, wChPos
+    ld b, 2 * NUM_CH
+.back:
+    ld a, [hl+]
+    ld [de], a
+    inc de
+    dec b
+    jr nz, .back
+    ret
 
 ; A song was loaded: a damaged chain is repaired (an unknown number ends it, step 0 plays), the
 ; first pattern is edited, loop mode. Clobbers a, b, hl.
@@ -902,6 +1023,38 @@ UpdateSong:
     ld de, sSong
 .drawMode:
     call DrawString
+    ld hl, ROW_SONG_INFO + 11       ; LOOP, playing, another step chosen: "NEXT p-s" until it takes over at the next bar line
+    ld b, 9
+    xor a
+.nextBlank:
+    ld [hl+], a
+    dec b
+    jr nz, .nextBlank
+    ld a, [wQueuedStep]
+    and a
+    jr z, .noNext
+    dec a
+    ld b, a                 ; b = the step
+    ld hl, ROW_SONG_INFO + 11
+    ld de, sSongNext
+    call DrawString
+    ld hl, ROW_SONG_INFO + 16
+    ld a, b
+    rrca
+    rrca
+    rrca
+    and 3
+    inc a
+    add '0' - 32
+    ld [hl+], a
+    ld a, '-' - 32
+    ld [hl+], a
+    ld a, b
+    and PAGE_STEPS - 1
+    inc a
+    add '0' - 32
+    ld [hl], a
+.noNext:
     ld hl, ROW_SONG_INFO + 32 + 6
     ld a, 'P' - 32
     ld [hl+], a
@@ -925,13 +1078,10 @@ UpdateSong:
     ld a, [wPlayBank]
     call PatTile            ; (the pattern number + 1)
     ld [hl+], a
-    ld a, [wSongMode]
-    and a
-    jr z, .queued
     ld a, [wSeqPlay]
     and a
-    jr z, .queued
-    ld hl, ROW_SONG_INFO + 64 + 9   ; song mode, playing: "PAGEn STEPn" (the place of the playing step, as the grid shows it)
+    ret z
+    ld hl, ROW_SONG_INFO + 64 + 9   ; playing: "PAGEn STEPn" (the place of the playing step, as the grid numbers it)
     ld de, sSongPlayAt
     call DrawString
     ld a, [wChainPos]
@@ -950,26 +1100,9 @@ UpdateSong:
     ld hl, ROW_SONG_INFO + 64 + 19
     ld [hl], a
     ret
-.queued:
-    ld a, [wQueuedBank]
-    and a
-    ret z
-    inc hl
-    ld de, sSongNext
-    call DrawString
-    inc hl
-    ld a, 'P' - 32
-    ld [hl+], a
-    ld a, [wQueuedBank]
-    call PatTile
-    ld [hl], a
-    ret
 
-; c = chain step -> carry set if the sequencer is playing the chain and this is the step. Keeps all but a.
+; c = chain step -> carry set if the sequencer is playing and this is the step it plays (LOOP: the one it repeats). Keeps all but a.
 StepPlaying:
-    ld a, [wSongMode]
-    and a
-    ret z                   ; (carry is clear)
     ld a, [wSeqPlay]
     and a
     ret z
@@ -1159,7 +1292,8 @@ StepValue:
 EditCursorCell:
     ld a, [wSongCh]
     ld [wSelCh], a
-    jp SyncEdit
+    call SyncEdit
+    jp LoopFollow           ; (LOOP, playing: the step under the cursor takes over at the next bar line)
 
 ; Carry set if a channel other than the cursor's has a pattern on the cursor's step. Keeps bc, hl.
 OthersHavePat:
