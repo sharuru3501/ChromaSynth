@@ -11,7 +11,8 @@
 ;   row 12: PAGE n/4; the PLAY row says "PAGEn STEPn" (the page and the place of the step that plays; P = pattern); rows 7-10: CH1..CH4, each "[cursor][pattern]"
 ;   pad LEFT/RIGHT = step (the page follows), UP/DOWN = channel; A / B = the pattern of that channel's step +1 / -1
 ;   (a "-" is the end of the song on CH1, and silence on the other channels)
-;   SELECT+UP/DOWN = loop / song mode (the piano roll edits the pattern of the cursor's cell)
+;   SELECT+LEFT / RIGHT = the loop range starts / ends here, SELECT+DOWN = this step alone, SELECT+UP = no range;
+;   START+LEFT / RIGHT = LOOP / SONG mode (the piano roll edits the pattern of the cursor's cell)
 INCLUDE "hardware.inc"
 INCLUDE "synth.inc"
 
@@ -47,6 +48,7 @@ ChainReset:
     ld [wEditPat], a
     ld [wPendActive], a
     ld [wSongCur], a
+    call RangeClear
     jr LoadStepPats
 
 ; a = chain step -> wPlayPat (the pattern of each channel in that step), wPlayBank (the pattern + 1 of its first channel that
@@ -234,8 +236,26 @@ SongRestart:
     ld a, [wScreen]
     cp SCREEN_SONG
     ld a, 0
-    jr nz, .have            ; SONG, another screen: the first step
+    jr nz, .fit             ; SONG, another screen: the first step
     ld a, [wSongCur]
+.fit:                       ; with a loop range: a step outside it starts on the range's first step
+    ld b, a
+    ld a, [wRangeEnd]
+    cp $FF
+    jr z, .fitDone
+    ld c, a                 ; c = the end
+    ld a, [wRangeStart]
+    ld d, a
+    ld a, b
+    cp d
+    jr c, .toStart          ; before the range
+    ld a, c
+    cp b
+    jr nc, .fitDone         ; inside
+.toStart:
+    ld b, d
+.fitDone:
+    ld a, b
 .have:
     ld [wChainPos], a
     xor a
@@ -260,6 +280,21 @@ SongNext:
     ld a, 1
     ld [wSongWrap], a       ; (SeqStep releases the old pattern's notes before tick 0 of the next)
     call SongMarkPos        ; the old step loses its marks
+    ld a, [wRangeEnd]
+    cp $FF
+    jr z, .noRange
+    ld b, a                 ; b = the end of the loop range
+    ld a, [wChainPos]
+    cp b
+    jr c, .insideRange
+    ld a, [wRangeStart]     ; at the end of the range: back to its start
+    ld c, a
+    jr .ok
+.insideRange:
+    inc a
+    ld c, a                 ; (inside the range every step plays, an empty one is silent)
+    jr .ok
+.noRange:
     ld a, [wChainPos]
     inc a
     ld c, a                 ; c = the next step
@@ -595,6 +630,7 @@ SongLoaded:
     ld [wSongMode], a
     ld [wChainPos], a
     ld [wPendActive], a
+    call RangeClear
     ld a, 1                 ; the pattern of the cursor's cell (the first step) is edited; its values were not stored over the arrays
     ld [wEditBank], a
     xor a
@@ -856,6 +892,9 @@ BuildSong:
     ld hl, _SCRN0 + 16 * 32
     ld de, sSongHelp4
     call DrawString
+    ld hl, _SCRN0 + 17 * 32
+    ld de, sSongHelp5
+    call DrawString
     ld a, %11111111         ; the info rows, the header, the four channel rows and the MEM row
     ld [wDirtySong], a
     ret
@@ -959,7 +998,7 @@ UpdateSong:
     ld [hl+], a
     ld b, PAGE_STEPS
 .hcell:
-    xor a
+    call RangeMark          ; the cell before the number: '[' where the range starts, ']' just after its last step
     ld [hl+], a
     ld a, c
     and PAGE_STEPS - 1
@@ -969,6 +1008,14 @@ UpdateSong:
     inc c
     dec b
     jr nz, .hcell
+    ld a, [wRangeEnd]       ; a range that ends on the last step of the page: its ']' goes after the last number
+    inc a
+    cp c
+    ld a, 0
+    jr nz, .noClose
+    ld a, ']' - 32
+.noClose:
+    ld [hl], a
     ld hl, ROW_SONG_PAGE + 12
     ld de, sSongPage
     call DrawString
@@ -1115,6 +1162,121 @@ StepPlaying:
     and a
     ret
 
+; The loop range (steps wRangeStart .. wRangeEnd, $FF = none): SONG mode plays only inside it and starts over at its end. It is not
+; saved (it is for the song being worked on right now). Setting one end of a missing range makes the other end the first / last step.
+
+; Flag the header row (it shows the range) for redraw. Clobbers a, hl.
+MarkHeader:
+    ld a, [wDirtySong]
+    or 2
+    ld [wDirtySong], a
+    ret
+
+RangeClear:
+    ld a, $FF
+    ld [wRangeStart], a
+    ld [wRangeEnd], a
+    ret
+
+; -> a = the last step of the song (before the first step where no channel has a pattern). Clobbers bc, de, hl.
+LastSongStep:
+    ld c, 1
+.look:
+    ld a, c
+    cp CHAIN_LEN
+    jr nc, .done
+    call StepHasPat
+    jr nc, .done
+    inc c
+    jr .look
+.done:
+    ld a, c
+    dec a
+    ret
+
+; SELECT+LEFT: the range starts at the cursor's step.
+RangeStartHere:
+    ld a, [wRangeEnd]
+    cp $FF
+    jr nz, .have
+    call LastSongStep
+    ld [wRangeEnd], a       ; (no range yet: it reaches to the last step of the song)
+.have:
+    ld a, [wSongCur]
+    ld [wRangeStart], a
+    ld b, a
+    ld a, [wRangeEnd]
+    cp b
+    jr nc, MarkHeader       ; (the end is not before the start)
+    ld a, b
+    ld [wRangeEnd], a
+    jr MarkHeader
+
+; SELECT+RIGHT: the range ends at the cursor's step.
+RangeEndHere:
+    ld a, [wRangeStart]
+    cp $FF
+    jr nz, .have
+    xor a
+    ld [wRangeStart], a     ; (no range yet: it starts at the first step)
+.have:
+    ld a, [wSongCur]
+    ld [wRangeEnd], a
+    ld b, a
+    ld a, [wRangeStart]
+    cp b
+    jr c, MarkHeader        ; (the start is before the end)
+    jr z, MarkHeader
+    ld a, b
+    ld [wRangeStart], a
+    jr MarkHeader
+
+; SELECT+DOWN: the range is the cursor's step alone.
+RangeOne:
+    ld a, [wSongCur]
+    ld [wRangeStart], a
+    ld [wRangeEnd], a
+    jr MarkHeader
+
+; a = 0 (LOOP) / 1 (SONG): the playing mode. A running sequencer starts over in the new mode. Clobbers a, bc, de, hl.
+SongSetMode:
+    ld b, a
+    ld a, [wSongMode]
+    cp b
+    ret z
+    ld a, b
+    ld [wSongMode], a
+    ld a, [wDirtySong]
+    or 1
+    ld [wDirtySong], a
+    ld a, [wSeqPlay]
+    and a
+    jp z, MarkSeqStatus
+    call SeqSilence         ; (a running sequencer: what plays changes)
+    call SongMarkPos
+    jp SongRestart
+
+; c = a step -> a = the tile for the cell before its number in the header: '[' if the loop range starts here, ']' if it ended at
+; the step before, blank otherwise. Keeps bc, hl.
+RangeMark:
+    ld a, [wRangeEnd]
+    cp $FF
+    jr z, .none
+    inc a
+    cp c
+    jr z, .close
+    ld a, [wRangeStart]
+    cp c
+    jr nz, .none
+    ld a, '[' - 32
+    ret
+.close:
+    ld a, ']' - 32
+    ret
+.none:
+    xor a
+    ret
+
 ; d = buttons newly pressed.
 SongInput:
     ld a, [wJoy]
@@ -1125,23 +1287,20 @@ SongInput:
     ret z
     ld a, 1
     ld [wSelUsed], a
-    bit PADB_LEFT, d        ; (the edited pattern is the one in the cursor's cell now: SELECT+LEFT / RIGHT are free)
-    ret nz
+    bit PADB_LEFT, d        ; SELECT + pad: the loop range (SONG mode plays only inside it)
+    jr z, .notRangeL
+    jp RangeStartHere
+.notRangeL:
     bit PADB_RIGHT, d
-    ret nz
-.mode:
-    ld a, [wSongMode]      ; SELECT+UP / DOWN
-    xor 1
-    ld [wSongMode], a
-    ld a, [wDirtySong]
-    or 1
-    ld [wDirtySong], a
-    ld a, [wSeqPlay]
-    and a
-    jp z, MarkSeqStatus
-    call SeqSilence         ; (a running sequencer: the pattern that plays changes)
-    call SongMarkPos
-    jp SongRestart          ; and the song starts from the top
+    jr z, .notRangeR
+    jp RangeEndHere
+.notRangeR:
+    bit PADB_DOWN, d
+    jr z, .rangeUp
+    jp RangeOne
+.rangeUp:
+    call RangeClear
+    jp MarkHeader
 .plain:
     bit PADB_A, d
     jr z, .notA
@@ -1344,6 +1503,7 @@ sSongEditNote: db "IN SEQ", 0
 sLoop:       db "LOOP", 0
 sSong:       db "SONG", 0
 sSongHelp1:  db "PAD:MOVE A/B:PATTERN", 0
-sSongHelp2:  db "SEL+LR:EDIT PATTERN", 0
-sSongHelp3:  db "SEL+UD:LOOP/SONG", 0
-sSongHelp4:  db "ST+DOWN:BACK", 0
+sSongHelp2:  db "SEL+LR:RANGE ST/END", 0
+sSongHelp3:  db "SEL+D:1STEP U:CLEAR", 0
+sSongHelp4:  db "ST+LR:LOOP/SONG", 0
+sSongHelp5:  db "ST+DOWN:BACK", 0

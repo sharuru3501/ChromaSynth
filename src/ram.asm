@@ -191,6 +191,8 @@ wChSeg:         db          ; SeqStep scratch: the segment / tick the channel be
 wChTick:        db
 wSongCur:       db          ; song screen: the cursor's chain step
 wSongCh:        db          ; song screen: the cursor's channel
+wRangeStart:    db          ; the loop range of the song (steps 0..31): where it starts and ends; $FF = no range (not saved)
+wRangeEnd:      db
 wPendActive:    db          ; 1 = the roll shows a pattern that is not in the chain yet (the cursor's cell is empty): it goes in with its first note
 wPendCh:        db          ; ... the cell it is for: channel and step
 wPendStep:      db

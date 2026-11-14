@@ -308,8 +308,6 @@ HandleJoy:
     ld a, [wScreen]
     cp SCREEN_SLOT
     jr z, .startHeld        ; the slot list is left with START+UP only
-    cp SCREEN_SONG
-    jr z, .startHeld        ; the song screen with START+DOWN only
     cp SCREEN_WAVE
     jr z, .startHeld
     ; START+LEFT / START+RIGHT becoming true (in either order; not the d-pad auto-repeat)
@@ -327,6 +325,18 @@ HandleJoy:
     jr z, .startHeld
     ld c, a
     ld a, [wScreen]
+    cp SCREEN_SONG
+    jr nz, .notSongMode
+    bit PADB_LEFT, c        ; the song screen is left with START+DOWN only; START+LEFT / RIGHT = LOOP / SONG mode
+    ld a, 0
+    jr nz, .songMode
+    inc a
+.songMode:
+    push de
+    call SongSetMode
+    pop de
+    jr .startHeld
+.notSongMode:
     bit PADB_LEFT, c
     jr z, .next
     and a
