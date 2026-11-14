@@ -89,7 +89,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("START+UP opens the song screen", v("wScreen") == 5, v("wScreen"))
     combo(pb, "start", "right")
     combo(pb, "start", "left")
-    check("START+LEFT/RIGHT do nothing there", v("wScreen") == 5)
+    check("START+LEFT/RIGHT stay on the song screen (they switch LOOP / SONG there)", v("wScreen") == 5)
     combo(pb, "start", "up")
     check("START+UP does nothing there either", v("wScreen") == 5)
     combo(pb, "start", "down")
@@ -216,18 +216,18 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(15):
         tap(pb, "b")
     check("... and B back to pattern 1", v("wEditPat") == 0 and v("wEditBank") == HI and mem[CHAIN] == 0, (v("wEditPat"), mem[CHAIN]))
-    combo(pb, "select", "up")
-    check("SELECT+UP: song mode", v("wSongMode") == 1, v("wSongMode"))
+    combo(pb, "start", "right")
+    check("START+RIGHT: song mode", v("wSongMode") == 1, v("wSongMode"))
     tap(pb, "a")
     check("in song mode editing another pattern does not start anything", v("wEditPat") == 1 and v("wSeqPlay") == 0, (v("wEditPat"), v("wSeqPlay")))
     pb.tick(20)
     check("the mode row shows SONG, the edit row P2", row_text(2)[6:10] == tiles("SONG") and row_text(3)[6:8] == tiles("P2"), (row_text(2), row_text(3)))
     tap(pb, "b")
-    combo(pb, "select", "down")
-    check("SELECT+DOWN: back to loop mode", v("wSongMode") == 0)
+    combo(pb, "start", "left")
+    check("START+LEFT: back to loop mode", v("wSongMode") == 0)
     # SELECT+LEFT / RIGHT do not edit a pattern any more
     combo(pb, "select", "right")
-    check("SELECT+RIGHT does nothing on the song screen now", v("wEditPat") == 0 and mem[CHAIN] == 0, (v("wEditPat"), mem[CHAIN]))
+    check("SELECT+RIGHT sets the loop range end, it does not edit a pattern", v("wEditPat") == 0 and mem[CHAIN] == 0, (v("wEditPat"), mem[CHAIN]))
 
     # --- the cursor decides the edited pattern: another channel / step has another pattern
     mem[CHAIN + CHAIN_LEN] = 3                         # CH2, step 1: pattern 4
@@ -293,7 +293,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wBpm"]] = 240             # a bar = 60 frames
     set_chain(mem, [0, 1, 0, 2])
     combo(pb, "start", "up")
-    combo(pb, "select", "up")
+    combo(pb, "start", "right")
     check("song mode is on", v("wSongMode") == 1)
     combo(pb, "start", "down")
     combo(pb, "select", "start")
@@ -320,7 +320,7 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "start", hold=8)
     check("SELECT+START stops", v("wSeqPlay") == 0)
     combo(pb, "start", "up")
-    combo(pb, "select", "down")
+    combo(pb, "start", "left")
     combo(pb, "start", "down")
     combo(pb, "select", "start")
     pb.tick(150)
@@ -408,7 +408,7 @@ with tempfile.TemporaryDirectory() as tmp:
     set_chain(mem, [0, 1])
     tap(pb, "left")
     tap(pb, "left")                    # the cursor on step 1
-    combo(pb, "select", "up")          # song mode (restarts the song, silences)
+    combo(pb, "start", "right")          # song mode (restarts the song, silences)
     check("switching to song mode silences the old note and restarts", v("wSongMode") == 1 and v("wChainPos") == 0, (v("wChainPos")))
     pb.tick(10)
     mark = lambda: bytes(mem[0x9800 + 11 * 32 + i] for i in range(20))
@@ -625,7 +625,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wBpm"]] = 240
     set_chain(mem, [0, 1, 2, 3])
     combo(pb, "start", "up")
-    combo(pb, "select", "up")                          # SONG mode
+    combo(pb, "start", "right")                          # SONG mode
     tap(pb, "right")
     tap(pb, "right")                                   # the cursor on step 3
     combo(pb, "select", "start")
@@ -645,6 +645,120 @@ with tempfile.TemporaryDirectory() as tmp:
     check("SONG mode, another screen: it starts on the first step", v("wSeqPlay") == 1 and v("wChainPos") == 0, (v("wSeqPlay"), v("wChainPos")))
     pb.stop(save=False)
 
+# --- the loop range: SELECT + pad on the song screen, SONG mode plays inside it, START+LEFT / RIGHT = LOOP / SONG
+with tempfile.TemporaryDirectory() as tmp:
+    rom = pathlib.Path(tmp) / "t.gb"
+    shutil.copy(rom_src, rom)
+    pb = boot(rom)
+    mem = pb.memory
+    v = lambda n: mem[sym[n]]
+    tiles = lambda s_: bytes(ord(c) - 32 for c in s_)
+    for p_ in range(16):
+        Pool(mem, sym).clear_pattern(p_)
+    for p_ in range(5):
+        Pool(mem, sym).put(p_, 0, 0, 0, 60 + p_)
+        mem[sym["wPatBars"] + p_] = 1
+    mem[sym["wSeqBars"]] = 1
+    mem[sym["wBpm"]] = 240                               # a bar = 60 frames
+    set_chain(mem, [0, 1, 2, 3, 4])                      # steps 1-5 (indices 0-4)
+    combo(pb, "start", "up")
+    check("no range at the start", v("wRangeStart") == 0xFF and v("wRangeEnd") == 0xFF, (v("wRangeStart"), v("wRangeEnd")))
+    # START+LEFT / RIGHT: the mode
+    combo(pb, "start", "right")
+    check("START+RIGHT: SONG mode", v("wSongMode") == 1, v("wSongMode"))
+    combo(pb, "start", "left")
+    check("START+LEFT: LOOP mode", v("wSongMode") == 0, v("wSongMode"))
+    combo(pb, "start", "left")
+    check("START+LEFT again: still LOOP", v("wSongMode") == 0)
+    check("... and the screen did not change", v("wScreen") == 5, v("wScreen"))
+    combo(pb, "select", "up")
+    check("SELECT+UP does not switch the mode any more (it clears the range)", v("wSongMode") == 0 and v("wRangeEnd") == 0xFF, (v("wSongMode"), v("wRangeEnd")))
+    # a range from the cursor: start on step 2, no end yet -> it reaches to the last step of the song (step 5)
+    tap(pb, "right")
+    combo(pb, "select", "left")
+    check("SELECT+LEFT on step 2 with no range: starts there and reaches to the last step (5)", (v("wRangeStart"), v("wRangeEnd")) == (1, 4), (v("wRangeStart"), v("wRangeEnd")))
+    tap(pb, "right")
+    tap(pb, "right")
+    combo(pb, "select", "right")
+    check("SELECT+RIGHT on step 4: the range ends there", (v("wRangeStart"), v("wRangeEnd")) == (1, 3), (v("wRangeStart"), v("wRangeEnd")))
+    pb.tick(20)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(20))
+    check("the header marks the range: '[' before step 2's number, ']' after step 4's", row[4] == ord("[") - 32 and row[10] == ord("]") - 32, row)
+    # the start cannot go after the end, the end cannot go before the start
+    tap(pb, "right")
+    combo(pb, "select", "left")
+    check("SELECT+LEFT past the end: the end comes along", (v("wRangeStart"), v("wRangeEnd")) == (4, 4), (v("wRangeStart"), v("wRangeEnd")))
+    tap(pb, "left")
+    tap(pb, "left")
+    tap(pb, "left")
+    combo(pb, "select", "right")
+    check("SELECT+RIGHT before the start: the start comes along", (v("wRangeStart"), v("wRangeEnd")) == (1, 1), (v("wRangeStart"), v("wRangeEnd")))
+    tap(pb, "right")
+    combo(pb, "select", "down")
+    check("SELECT+DOWN: the cursor's step alone (step 3)", (v("wRangeStart"), v("wRangeEnd")) == (2, 2), (v("wRangeStart"), v("wRangeEnd")))
+    # a range of steps 2-4, SONG mode: it plays inside it and starts over at its end
+    tap(pb, "left")
+    combo(pb, "select", "left")                            # start = step 2 (end 3 -> keeps >= start)
+    tap(pb, "right")
+    tap(pb, "right")
+    combo(pb, "select", "right")                           # end = step 4
+    check("range steps 2-4", (v("wRangeStart"), v("wRangeEnd")) == (1, 3), (v("wRangeStart"), v("wRangeEnd")))
+    tap(pb, "left")
+    tap(pb, "left")
+    tap(pb, "left")                                        # the cursor on step 1: outside the range
+    combo(pb, "start", "right")                            # SONG
+    combo(pb, "select", "start")
+    pb.tick(6)
+    check("SONG with the cursor outside the range: it starts on the range's first step (2)", v("wChainPos") == 1, v("wChainPos"))
+    seen = []
+    for _ in range(540):
+        pb.tick(1)
+        if not seen or seen[-1] != v("wChainPos"):
+            seen.append(v("wChainPos"))
+    check("it plays steps 2, 3, 4 and starts over on 2 (never 1 or 5)", seen[:5] == [1, 2, 3, 1, 2] and 0 not in seen and 4 not in seen, seen)
+    combo(pb, "select", "start", hold=8)
+    # the cursor inside the range: SONG starts there
+    tap(pb, "right")
+    tap(pb, "right")                                       # step 3
+    combo(pb, "select", "start")
+    pb.tick(6)
+    check("SONG with the cursor inside the range: it starts there (step 3)", v("wChainPos") == 2, v("wChainPos"))
+    combo(pb, "select", "start", hold=8)
+    # LOOP mode does not use the range
+    combo(pb, "start", "left")
+    tap(pb, "left")                                        # step 2
+    combo(pb, "select", "start")
+    pb.tick(200)
+    check("LOOP: the cursor's step only (the range is not used)", v("wChainPos") == 1 and v("wSongMode") == 0, (v("wChainPos"), v("wSongMode")))
+    combo(pb, "select", "start", hold=8)
+    # SONG from another screen with a range: the range's first step
+    combo(pb, "start", "right")
+    combo(pb, "start", "down")                             # the play screen
+    combo(pb, "select", "start")
+    pb.tick(6)
+    check("SONG from another screen with a range: its first step (2)", v("wChainPos") == 1, v("wChainPos"))
+    combo(pb, "select", "start", hold=8)
+    # SELECT+UP clears it
+    combo(pb, "start", "up")
+    combo(pb, "select", "up")
+    check("SELECT+UP: no range", v("wRangeStart") == 0xFF and v("wRangeEnd") == 0xFF, (v("wRangeStart"), v("wRangeEnd")))
+    pb.tick(20)
+    row = bytes(mem[0x9800 + 6 * 32 + i] for i in range(20))
+    check("... and the header has no '[' or ']'", all(row[i] not in (ord("[") - 32, ord("]") - 32) for i in range(2, 20)), row)
+    # no range: SONG plays the whole song (5 steps) and starts over
+    combo(pb, "start", "right")
+    tap(pb, "left")
+    tap(pb, "left")
+    tap(pb, "left")
+    combo(pb, "select", "start")
+    seen = []
+    for _ in range(540):
+        pb.tick(1)
+        if not seen or seen[-1] != v("wChainPos"):
+            seen.append(v("wChainPos"))
+    check("no range: the whole song, 1 to 5, then round", seen[:7] == [0, 1, 2, 3, 4, 0, 1], seen)
+    pb.stop(save=False)
+
 # --- a note that is still sounding at the end of a chain step does not carry into the next pattern
 with tempfile.TemporaryDirectory() as tmp:
     rom = pathlib.Path(tmp) / "t.gb"
@@ -660,7 +774,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[sym["wBpm"]] = 240             # a bar = 60 frames
     set_chain(mem, [0, 1])
     combo(pb, "start", "up")
-    combo(pb, "select", "up")
+    combo(pb, "start", "right")
     combo(pb, "start", "down")
     combo(pb, "select", "start")
     pb.tick(20)
@@ -734,7 +848,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # CH1: P1 P2   CH2: P2 P1   CH3: P1 P1   CH4: P2 none
     set_chain(mem, [0, 1], [1, 0], [0, 0], [1])
     combo(pb, "start", "up")
-    combo(pb, "select", "up")
+    combo(pb, "start", "right")
     combo(pb, "start", "down")
     combo(pb, "select", "start")
     pb.tick(20)

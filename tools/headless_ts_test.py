@@ -338,7 +338,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # the chain 1, 2: pattern 1 plays 96 ticks, pattern 2 plays 108 ticks (3 bars of 36)
     for c_ in range(4):                 # (the chain has a row per channel: all four alike)
         mem[sym["wChain"] + c_ * 32:sym["wChain"] + c_ * 32 + 3] = bytes([0, 1, 0xFF])
-    combo(pb, "select", "up")            # song mode
+    combo(pb, "start", "right")            # song mode
     combo(pb, "select", "start")
     longest = {}
     for _ in range(700):
@@ -348,7 +348,7 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "start")
     check("song mode: pattern 1 loops 96 ticks, pattern 2 loops 108 ticks (its own time signature and length)",
           longest.get(1) in (94, 95) and longest.get(2) in (106, 107), longest)   # (sampled once a frame: the last tick can fall between samples)
-    combo(pb, "select", "up")            # loop mode again
+    combo(pb, "start", "left")            # loop mode again
     pb.stop(save=False)
 
 # --- a queued step takes over at the bar line of the step that plays; its own bar length goes on from there
