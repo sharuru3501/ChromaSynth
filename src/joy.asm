@@ -290,6 +290,12 @@ HandleJoy:
 .notDown:
     bit PADB_UP, c
     jp z, .startHeld
+    cp SCREEN_SEQ
+    jr nz, .toSong
+    ld a, [wScreenHome]     ; the sequencer: START+UP goes back to the screen (play / patch / keyboard) it was reached from
+    jp .request
+.toSong:
+    ld [wScreenHome], a     ; (the screen the sequencer returns to, when it is reached from the song screen)
     ld a, [wSelCh]          ; the song screen's cursor starts on the channel that is selected
     cp NUM_CH
     jr nc, .songCursorSet
@@ -346,9 +352,7 @@ HandleJoy:
     jr .startHeld
 .notSongMode:
     cp SCREEN_SEQ
-    jr nz, .ring
-    ld a, [wScreenHome]     ; the sequencer is not in the row: START+LEFT / RIGHT go back to the screen it was reached from
-    jr .request
+    jr z, .startHeld        ; the sequencer is not in the row: START+LEFT / RIGHT do nothing there (START+UP goes back)
 .ring:                      ; the row: play - edit - keyboard (the sequencer is skipped: it is below, START+DOWN)
     bit PADB_LEFT, c
     jr z, .next

@@ -251,8 +251,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("START+LEFT/RIGHT do nothing on the slot list", mem[sym["wScreen"]] == 4)
     combo(pb, "start", "up")
     check("START+UP goes back to the sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
-    combo(pb, "start", "left")
-    combo(pb, "start", "left")                        # the play screen again
+    combo(pb, "start", "up")                          # the play screen again (the sequencer goes back to where it was reached from)
     combo(pb, "start", "right")                       # edit screen
     combo(pb, "start", "down")
     check("... from the edit screen START+DOWN also goes to the sequencer", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])

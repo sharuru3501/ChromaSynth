@@ -232,7 +232,7 @@ with tempfile.TemporaryDirectory() as tmp:
         mem[sym["wPatTsd"] + i] = 0
         mem[sym["wPatBars"] + i] = 4
     mem[sym["wBpm"]] = 100
-    combo(pb, "start", "left")           # back to the screen the sequencer was reached from (play)
+    combo(pb, "start", "up")             # back to the screen the sequencer was reached from (play)
     combo(pb, "start", "up")             # the song screen
     CH = sym["wChain"]
     for c in range(4):                   # step 1..4: patterns 1..4 on every channel
