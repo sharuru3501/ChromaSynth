@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the custom waves start as copies of the four presets", all(wv(k) == presets[k] for k in range(4)), [wv(k)[:3] for k in range(4)])
     PATCH_CH3 = sym["wPatch"] + 2 * 32
     mem[PATCH_CH3] = 6                       # WAVE = W3
-    combo(pb, "start", "right"); pb.tick(20)  # the edit screen
+    combo(pb, "start", "right"); combo(pb, "start", "right"); pb.tick(20)  # the edit screen (play - song - patch)
     tap(pb, "select"); tap(pb, "select")       # CH3
     check("on the edit screen, CH3", v("wScreen") == 1 and v("wSelCh") == 2, (v("wScreen"), v("wSelCh")))
     combo(pb, "start", "a"); pb.tick(30)

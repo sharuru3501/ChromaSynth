@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory() as tmp:
     demo_total = total(pool)
 
     # ---- the song screen shows the memory
-    combo(pb, "start", "up")
+    combo(pb, "start", "right")          # the song screen (next to play in the row)
     pb.tick(30)
     base = 0x9C00 if mem[0xFF40] & 8 else 0x9800
     row = ((mem[0xFF42] // 8) + 1) & 31
@@ -103,12 +103,10 @@ with tempfile.TemporaryDirectory() as tmp:
     pct = total(pool) // 78
     want = ("MEM " + (" " if pct < 100 else str(pct // 100)) + "%02d" % (pct % 100) + "%").encode()
     check("the song screen shows MEM and the percentage", text == bytes(c - 32 for c in want), (text, want))
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # back from the song screen: the sequencer
     pb.tick(20)
 
     # ---- placing a note lends a page (the selected channel's half), deleting it gives it back
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
     check("the sequencer screen", v("wScreen") == 2, v("wScreen"))
     combo(pb, "start", "a")              # edit pattern 2
     check("pattern 2 is edited and holds nothing", v("wEditPat") == 1 and not pool.half_lent(1, 0) and not pool.half_lent(1, 1), (v("wEditPat"), pool.lent()))

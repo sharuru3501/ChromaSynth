@@ -116,8 +116,8 @@ DEF SCREEN_PLAY EQU 0
 DEF SCREEN_EDIT EQU 1
 DEF SCREEN_SEQ  EQU 2
 DEF SCREEN_WAVE EQU 6       ; CH3 wave editor: START+A on the edit screen (CH3, WAVE = a custom wave) opens it, START+B goes back
-DEF SCREEN_SONG EQU 5       ; song screen: START+UP opens it, START+DOWN goes back
-DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN opens it from play/edit/sequencer, START+UP goes back
+DEF SCREEN_SONG EQU 5       ; song screen: in the row of screens (START+LEFT / RIGHT); START+DOWN goes to the sequencer
+DEF SCREEN_SLOT EQU 4       ; save slot list: START+DOWN on the sequencer opens it, START+UP goes back to the sequencer
 DEF SCREEN_KBD  EQU 3       ; keyboard link screen: the buttons are data (src/clink.asm)
 
 ; Time base: 12 ticks per beat (quarter note); see docs/ROLL_DESIGN.md.

@@ -79,7 +79,7 @@ open build/ChromaSynthLink.app
 
 ### B3. Chromatic 側
 1. Chromatic のメニューの **System > MIDI MODE** で、**BLE** か **USB** を選びます。選んだモードは覚えられます。(OFF にすると、ESP32 が眠って電池が持ちます。)
-2. ChromaSynth で、**キーボード画面**を開きます(シーケンサーから START+→)。DAW からの音符は、この画面にいる間だけ届きます。
+2. ChromaSynth で、**キーボード画面**を開きます(PATCH 画面から START+→)。DAW からの音符は、この画面にいる間だけ届きます。
 3. USB のときは、USB-C ケーブルを Mac につなぎます。アプリが自動で USB に切り替わります。
 
 ### B4. DAW から鳴らす(例: Ableton Live)

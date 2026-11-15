@@ -13,26 +13,32 @@
 | 5 | SONG(ソング) | チェーン(ステップ × チャンネル)、ループ範囲、LOOP / SONG |
 | 6 | WAVE(波形) | CH3 のサンプルの編集 |
 
-## いまの移動(2026-11-14、b4b-2 まで)
+## いまの移動(2026-11-15、M27 の最初の一歩まで)
 すべて START を押しながら。START 中は、十字キーは画面の移動に使われ、その画面の操作には届かない。
+
+```
+PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD      横の並び(START+←→。端で止まる)
+              ↓  START+↓ (PLAY / SONG / PATCH から。KEYBOARD からは効かない)
+             SEQ    ← START+↑ で、来る前にいた画面へ戻る
+              ↓  START+↓
+             SLOT   ← START+↑ で SEQ へ戻る
+```
 
 | 操作 | 動き |
 |---|---|
-| START+← / → | 0 → 1 → 2 → 3 の順に、前後の画面へ。**SLOT、SONG、WAVE からは効かない**(SONG の START+←→ は、LOOP / SONG の切り替え) |
-| START+↑ | PLAY・EDIT・SEQ・KBD から **SONG** を開く(開く前の画面を覚える) |
-| START+↓ | PLAY・EDIT・SEQ・KBD から **SLOT** を開く(開く前の画面を覚える) |
-| SONG で START+↓ | 開く前の画面へ戻る |
-| SLOT で START+↑ | 開く前の画面へ戻る |
-| EDIT で CH3 の WAVE を選んで START+A | **WAVE** を開く |
+| START+← / → | **PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD** の順に、前後の画面へ(`ScreenRow`、`joy.asm`)。端で止まる。**SEQ、SLOT、WAVE からは効かない** |
+| START+↓ | 横の並びの PLAY・SONG・PATCH から **SEQ** へ。**すでに SEQ にいるときは、SLOT を開く**。**KEYBOARD では効かない**(その画面は、パッドをデータとして読むため、START+↓ は、MCU の記号と区別できない。START+← で PATCH へ戻ってから使う) |
+| START+↑ | **SEQ では、来る前にいた、横の並びの画面へ戻る**(`wScreenHome`)。横の並びの画面では、何もしない(空き) |
+| SLOT で START+↑ | SEQ へ戻る(SLOT は SEQ からしか開けない) |
+| SONG で START+A / START+B | **SONG / LOOP** の切り替え(START+←→ が画面の移動になったため) |
+| PATCH で CH3 の WAVE を選んで START+A | **WAVE** を開く |
 | WAVE で START+B | 戻る |
 
-覚えている「戻り先」は `wScreenBack` の 1 つだけ。SONG と SLOT の間は、直接は行き来できない(いったん戻ってから開く)。
+`wScreenHome` は、横の並びの画面から START+↓(SEQ へ)を押したときの、その画面(KEYBOARD からは、押せない)。SLOT で START+↓ は、何もしない。KEYBOARD 画面は、パッドをデータとして読むので、START+← の処理が `ReadJoy`(`joy.asm`)の中にあり、PATCH へ戻る。ソング画面へ START+←→ で入るとき、カーソルのチャンネルを、選んでいるチャンネルにそろえる。
 
-## これからの変更(予定。2026-11-14 に合意)
-- **START+↓ = どの画面からでも SEQ(シーケンサー)へ**。いま SEQ にいるときの START+↓ は、**SLOT** を開く(スロット画面の置き場所は、暫定。あとで UX の面から決め直す)。
-- SONG で START+↓ は、「開く前の画面へ戻る」から「SEQ へ」に変わる(SONG は SEQ から開くことが多いので、実際はほとんど同じ)。
-- SLOT で START+↑ は、これまでどおり、開く前の画面へ戻る(SEQ から開いたなら SEQ)。
-- 画面の移動の全体の見直しは、別に行う(この文書の「いまの移動」を土台にする)。
+## 変更の記録
+- 2026-11-15(M27 の最初の一歩): START+↓ を、「PLAY・PATCH・SEQ・KBD から SLOT」から「どの画面からでも SEQ、SEQ からは SLOT」に変えた。**SEQ を、START+←→ の並びから外した**。SEQ の START+←→ は何もしない(「来る前の画面へ戻る」案を試したが、右でも左でも同じ画面へ行くので分かりにくかった)。SEQ の START+↑ は、来る前の画面へ戻る。KEYBOARD の START+← は、SEQ ではなく、1 つ前の画面(PATCH)へ戻る。スロット画面の置き場所は暫定。
+- 2026-11-15: **SONG を、横の並びに入れた**(PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD)。SONG から PLAY / PATCH へ、1 回で行ける。START+↑ で SONG を開くのは、やめた(横の並びの画面の START+↑ は、何もしない)。SONG の START+←→(LOOP / SONG の切り替え)は、画面の移動になったので、START+A(SONG)/ START+B(LOOP)に移した。SEQ の START+↑ が、SONG から来たときは SONG へ戻る(SONG ↔ SEQ が、↓ と ↑ で対称になった)。
 
 ## 見直しのときに考えること(メモ)
 - 4 つの主な画面(PLAY・EDIT・SEQ・KBD)を、START+←→ で順に回る形は、画面が増えるほど遠くなる。SEQ と SONG は、よく行き来するので、近くに置きたい。

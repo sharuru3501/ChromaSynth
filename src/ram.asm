@@ -243,7 +243,8 @@ wNumSlots:      db          ; save slots this cartridge has room for (InitSlots:
 wSlot:          db          ; selected save slot 0..NUM_SLOTS-1
 wSlotUsed:      db          ; bit n = slot n holds a valid save (cached; scanned at boot, kept up to date)
 wDirtySlot:     db          ; slot-screen rows needing redraw (bit n = row n)
-wScreenBack:    db          ; the screen START+UP returns to from the slot screen
+wScreenHome:    db          ; the screen of the row (play / edit / keyboard) the sequencer was reached from: START+UP there goes back to it
+wScreenBack:    db          ; the screen START+UP returns to from the slot screen (the sequencer: the slot list is opened from it)
 wName:          ds NAME_LEN ; the song's name (indices into NameChars), saved with it
 wNameCur:       db          ; name editing cursor 0..NAME_LEN-1
 wConfirm:       db          ; while "press again" is waiting: action * 16 + slot + 1 (SAVE = action 0), else 0

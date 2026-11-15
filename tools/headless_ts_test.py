@@ -86,8 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
           (mem[TSN], mem[TSD], v("wBeatTicks"), v("wBarTicks"), v("wMaxBars")))
 
     # --- the numbers for the usual signatures (set in memory, then the roll is redrawn: BuildCols recomputes them)
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     table = [  # (numerator, denominator index, beat ticks, bar ticks, longest loop in bars)
         (4, 0, 12, 48, 8), (3, 0, 12, 36, 8), (2, 0, 12, 24, 8), (5, 0, 12, 60, 6), (6, 1, 6, 36, 8),
@@ -122,8 +121,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem[TSN] = 3
     mem[TSD] = 0
     mem[sym["wSeqBars"]] = 4             # (beat marks are drawn inside the loop only)
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     ruler = screen_row(mem, 0)
     check("3/4, page 1 = bar 1: bar number at column 0, beat marks at ticks 12 and 24 (columns 4, 8), nothing after the bar",
@@ -147,8 +145,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     mem[TSN] = 6
     mem[TSD] = 1
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     ruler = screen_row(mem, 0)
     check("6/8: bar 1 at column 0, beat marks every 2 columns (6 ticks); the page is the bar (12 columns)",
@@ -165,8 +162,7 @@ with tempfile.TemporaryDirectory() as tmp:
     v = lambda n: mem[sym[n]]
     mem[TSN] = 3
     mem[TSD] = 0
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     mem[sym["wSeqBars"]] = 2             # 2 bars of 3/4 = 72 ticks
     mem[sym["wBpm"]] = 240
@@ -204,8 +200,7 @@ with tempfile.TemporaryDirectory() as tmp:
     v = lambda n: mem[sym[n]]
     mem[TSN] = 5
     mem[TSD] = 0
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     mem[sym["wSeqBars"]] = 4
     mem[sym["wBpm"]] = 240
@@ -229,8 +224,7 @@ with tempfile.TemporaryDirectory() as tmp:
     v = lambda n: mem[sym[n]]
     mem[TSN] = 3
     mem[TSD] = 0
-    combo(pb, "start", "right")
-    combo(pb, "start", "right")
+    combo(pb, "start", "down")
     pb.tick(40)
     mem[sym["wSeqBars"]] = 4             # 144 ticks
     for i in range(4):                   # every pattern is 3/4, 4 bars (the other patterns' own values)
@@ -238,9 +232,8 @@ with tempfile.TemporaryDirectory() as tmp:
         mem[sym["wPatTsd"] + i] = 0
         mem[sym["wPatBars"] + i] = 4
     mem[sym["wBpm"]] = 100
-    combo(pb, "start", "left")
-    combo(pb, "start", "left")
-    combo(pb, "start", "up")             # the song screen
+    combo(pb, "start", "up")             # back to the screen the sequencer was reached from (play)
+    combo(pb, "start", "right")          # the song screen (next in the row)
     CH = sym["wChain"]
     for c in range(4):                   # step 1..4: patterns 1..4 on every channel
         for i in range(4):
@@ -270,7 +263,8 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     v = lambda n: mem[sym[n]]
-    combo(pb, "start", "right")          # the edit screen
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")          # the edit screen (play - song - patch)
     for _ in range(4):
         tap(pb, "select")                # CH1 .. CH4, then the MIDI page
     check("on the MIDI page", v("wSelCh") == 4, v("wSelCh"))
@@ -321,7 +315,7 @@ with tempfile.TemporaryDirectory() as tmp:
         pool.clear_pattern(p)
     pool.put(0, 0, 0, 0, 60)             # pattern 1: C4
     pool.put(1, 0, 0, 0, 64)             # pattern 2: E4
-    combo(pb, "start", "up")             # the song screen
+    combo(pb, "start", "right")          # the song screen
     pb.tick(20)
     check("every pattern starts as 4/4, 2 bars", [mem[PATN + i] for i in range(4)] == [4] * 4 and [mem[PATB + i] for i in range(4)] == [2] * 4,
           ([mem[PATN + i] for i in range(4)], [mem[PATB + i] for i in range(4)]))
@@ -338,7 +332,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # the chain 1, 2: pattern 1 plays 96 ticks, pattern 2 plays 108 ticks (3 bars of 36)
     for c_ in range(4):                 # (the chain has a row per channel: all four alike)
         mem[sym["wChain"] + c_ * 32:sym["wChain"] + c_ * 32 + 3] = bytes([0, 1, 0xFF])
-    combo(pb, "start", "right")            # song mode
+    combo(pb, "start", "a")                # song mode
     combo(pb, "select", "start")
     longest = {}
     for _ in range(700):
@@ -348,7 +342,7 @@ with tempfile.TemporaryDirectory() as tmp:
     combo(pb, "select", "start")
     check("song mode: pattern 1 loops 96 ticks, pattern 2 loops 108 ticks (its own time signature and length)",
           longest.get(1) in (94, 95) and longest.get(2) in (106, 107), longest)   # (sampled once a frame: the last tick can fall between samples)
-    combo(pb, "start", "left")            # loop mode again
+    combo(pb, "start", "b")               # loop mode again
     pb.stop(save=False)
 
 # --- a queued step takes over at the bar line of the step that plays; its own bar length goes on from there
@@ -368,7 +362,7 @@ with tempfile.TemporaryDirectory() as tmp:
     CH = sym["wChain"]
     for c in range(4):                   # step 1: pattern 1, step 2: pattern 2 (every channel)
         mem[CH + c * 32 + 1] = 1
-    combo(pb, "start", "up")
+    combo(pb, "start", "right")          # the song screen
     combo(pb, "select", "start")
     pb.tick(30)
     changes = []
@@ -404,7 +398,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mem = pb.memory
     v = lambda n: mem[sym[n]]
     PATN, PATD, PATB = sym["wPatTsn"], sym["wPatTsd"], sym["wPatBars"]
-    combo(pb, "start", "up")
+    combo(pb, "start", "right")          # the song screen
     tap(pb, "a")         # edit pattern 2: 6/8, 5 bars
     mem[TSN] = 6
     mem[TSD] = 1

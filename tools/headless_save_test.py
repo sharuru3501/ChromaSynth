@@ -243,18 +243,20 @@ with tempfile.TemporaryDirectory() as tmp:
     pb = boot(rom)
     mem = pb.memory
     combo(pb, "start", "down")
-    check("START+DOWN opens the slot list", mem[sym["wScreen"]] == 4 and mem[sym["wScreenBack"]] == 0, (mem[sym["wScreen"]], mem[sym["wScreenBack"]]))
+    check("START+DOWN goes to the sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
+    combo(pb, "start", "down")
+    check("START+DOWN on the sequencer opens the slot list", mem[sym["wScreen"]] == 4 and mem[sym["wScreenBack"]] == 2, (mem[sym["wScreen"]], mem[sym["wScreenBack"]]))
     combo(pb, "start", "right")
     combo(pb, "start", "left")
     check("START+LEFT/RIGHT do nothing on the slot list", mem[sym["wScreen"]] == 4)
     combo(pb, "start", "up")
-    check("START+UP goes back to the play screen", mem[sym["wScreen"]] == 0, mem[sym["wScreen"]])
-    combo(pb, "start", "right")                       # edit screen
+    check("START+UP goes back to the sequencer screen", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
+    combo(pb, "start", "up")                          # the play screen again (the sequencer goes back to where it was reached from)
+    combo(pb, "start", "right")
+    combo(pb, "start", "right")                       # edit screen (play - song - patch)
     combo(pb, "start", "down")
-    combo(pb, "start", "up")
-    check("... and back to the edit screen when it came from there", mem[sym["wScreen"]] == 1, mem[sym["wScreen"]])
-    combo(pb, "start", "left")
-    combo(pb, "start", "down")
+    check("... from the edit screen START+DOWN also goes to the sequencer", mem[sym["wScreen"]] == 2, mem[sym["wScreen"]])
+    combo(pb, "start", "down")           # (from the sequencer: the slot list)
     pb.tick(20)
     Pool(mem, sym).put(0, 1, 0, 1, 33)
     mem[sym["wBpm"]] = 111
@@ -303,7 +305,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a new song has a blank name", bytes(mem[NAME:NAME + 8]) == bytes(8))
     combo(pb, "select", "b")                          # save it into slot 1 (the other screens keep SELECT+B)
     check("SELECT+B still saves on the play screen", mem[sym["wMsg"]] == 1, mem[sym["wMsg"]])
-    combo(pb, "start", "down")
+    combo(pb, "start", "down")           # (the sequencer ...)
+    combo(pb, "start", "down")           # ... and from there the slot list
     pb.tick(20)
     tap(pb, "a")
     for _ in range(RENAME):

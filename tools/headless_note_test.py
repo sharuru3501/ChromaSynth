@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory() as tmp:
     cell = lambda seg, t: pool.get(0, ch, seg, t)
     put = lambda seg, t, x: pool.put(0, ch, seg, t, x)
     pool.clear_channel(0, ch)
-    combo(pb, "start", "right"); combo(pb, "start", "right"); pb.tick(30)
+    combo(pb, "start", "down"); pb.tick(30)
     tap(pb, "select")                        # CH2
     for _ in range(8):                       # grid 1/16 (3 ticks per cell)
         if v("wDivTicks") == 3:
