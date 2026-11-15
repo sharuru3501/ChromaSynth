@@ -18,7 +18,7 @@
 
 ```
 PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD      横の並び(START+←→。端で止まる)
-              ↓  START+↓ (横の並びのどの画面からでも)
+              ↓  START+↓ (PLAY / SONG / PATCH から。KEYBOARD からは効かない)
              SEQ    ← START+↑ で、来る前にいた画面へ戻る
               ↓  START+↓
              SLOT   ← START+↑ で SEQ へ戻る
@@ -27,14 +27,14 @@ PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD      横の並び(START+←→。端で止�
 | 操作 | 動き |
 |---|---|
 | START+← / → | **PLAY ↔ SONG ↔ PATCH ↔ KEYBOARD** の順に、前後の画面へ(`ScreenRow`、`joy.asm`)。端で止まる。**SEQ、SLOT、WAVE からは効かない** |
-| START+↓ | 横の並びのどの画面からでも **SEQ** へ。**すでに SEQ にいるときは、SLOT を開く** |
+| START+↓ | 横の並びの PLAY・SONG・PATCH から **SEQ** へ。**すでに SEQ にいるときは、SLOT を開く**。**KEYBOARD では効かない**(その画面は、パッドをデータとして読むため、START+↓ は、MCU の記号と区別できない。START+← で PATCH へ戻ってから使う) |
 | START+↑ | **SEQ では、来る前にいた、横の並びの画面へ戻る**(`wScreenHome`)。横の並びの画面では、何もしない(空き) |
 | SLOT で START+↑ | SEQ へ戻る(SLOT は SEQ からしか開けない) |
 | SONG で START+A / START+B | **SONG / LOOP** の切り替え(START+←→ が画面の移動になったため) |
 | PATCH で CH3 の WAVE を選んで START+A | **WAVE** を開く |
 | WAVE で START+B | 戻る |
 
-`wScreenHome` は、横の並びの画面から START+↓(SEQ へ)を押したときの、その画面。SLOT で START+↓ は、何もしない。KEYBOARD 画面は、パッドをデータとして読むので、START+← の処理が `ReadJoy`(`joy.asm`)の中にあり、PATCH へ戻る。ソング画面へ START+←→ で入るとき、カーソルのチャンネルを、選んでいるチャンネルにそろえる。
+`wScreenHome` は、横の並びの画面から START+↓(SEQ へ)を押したときの、その画面(KEYBOARD からは、押せない)。SLOT で START+↓ は、何もしない。KEYBOARD 画面は、パッドをデータとして読むので、START+← の処理が `ReadJoy`(`joy.asm`)の中にあり、PATCH へ戻る。ソング画面へ START+←→ で入るとき、カーソルのチャンネルを、選んでいるチャンネルにそろえる。
 
 ## 変更の記録
 - 2026-11-15(M27 の最初の一歩): START+↓ を、「PLAY・PATCH・SEQ・KBD から SLOT」から「どの画面からでも SEQ、SEQ からは SLOT」に変えた。**SEQ を、START+←→ の並びから外した**。SEQ の START+←→ は何もしない(「来る前の画面へ戻る」案を試したが、右でも左でも同じ画面へ行くので分かりにくかった)。SEQ の START+↑ は、来る前の画面へ戻る。KEYBOARD の START+← は、SEQ ではなく、1 つ前の画面(PATCH)へ戻る。スロット画面の置き場所は暫定。
